@@ -59,7 +59,8 @@ Used to save your `TConfigJSON`.
 *)
 procedure TConfigJSON.SaveConfig();
 begin
-  TJSONParser(Self.Data).Save(Self.Path, [EJSONFormatOption.USE_TABS, EJSONFormatOption.SINGLE_LINE_ARR], 1);
+  if Assigned(Self.Data) then
+    TJSONParser(Self.Data).Save(Self.Path, [EJSONFormatOption.USE_TABS, EJSONFormatOption.SINGLE_LINE_ARR], 1);
 end;
 
 type

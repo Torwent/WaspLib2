@@ -1,30 +1,32 @@
 {$SCOPEDENUMS ON}
 
-{$IFNDEF WL_THREADING_INCLUDED}    {$INCLUDE_ONCE utils/threading.simba}
-{$IFNDEF WL_GEOMETRY_INCLUDED}     {$INCLUDE_ONCE utils/math/geometry.simba}
-{$IFNDEF WL_RANDOM_INCLUDED}       {$INCLUDE_ONCE utils/math/random.simba}
-{$IFNDEF WL_CONVERSIONS_INCLUDED}  {$INCLUDE_ONCE utils/math/conversions.simba}
-{$IFNDEF WL_VECTOR_INCLUDED}       {$INCLUDE_ONCE utils/math/vector.simba}
-{$IFNDEF WL_TIME_INCLUDED}         {$INCLUDE_ONCE utils/time.simba}
-{$IFNDEF WL_BASE_INCLUDED}         {$INCLUDE_ONCE utils/base.simba}
-{$IFNDEF WL_ASSETS_INCLUDED}       {$INCLUDE_ONCE utils/assets.simba}
-{$IFNDEF WL_MISC_INCLUDED}         {$INCLUDE_ONCE utils/misc.simba}
-{$IFNDEF WL_MOUSE_INCLUDED}        {$INCLUDE_ONCE utils/input/mouse.simba}
-{$IFNDEF WL_KEYBOARD_INCLUDED}     {$INCLUDE_ONCE utils/input/keyboard.simba}
-{$IFNDEF WL_OCR_INCLUDED}          {$INCLUDE_ONCE utils/ocr.simba}
-{$IFNDEF WL_ITEM_INCLUDED}         {$INCLUDE_ONCE utils/item.simba}
-{$IFNDEF WL_DATABASE_INCLUDED}     {$INCLUDE_ONCE utils/database.simba}
-{$IFNDEF WL_IMAGECOMPARE_INCLUDED} {$INCLUDE_ONCE utils/imagecompare.simba}
-{$IFNDEF WL_RSTRANSLATOR_INCLUDED} {$INCLUDE_ONCE utils/math/rstranslator.simba}
-{$IFNDEF WL_WEBGRAPH_INCLUDED}     {$INCLUDE_ONCE utils/webgraph.simba}
-{$IFNDEF WL_WEBGRAPHGEN_INCLUDED}  {$INCLUDE_ONCE utils/webgraphgen.simba}
-{$IFNDEF WL_RSCHUNKS_INCLUDED}     {$INCLUDE_ONCE utils/rschunks.simba}
-{$IFNDEF WL_CONFIG_INCLUDED}       {$INCLUDE_ONCE utils/config.simba}
-{$IFNDEF WL_STRINGS_INCLUDED}      {$INCLUDE_ONCE utils/strings.simba}
-{$IFNDEF WL_WASPCLIENT_INCLUDED}   {$INCLUDE_ONCE utils/waspclient.simba}
-{$IFNDEF WL_FORMUTILS_INCLUDED}    {$INCLUDE_ONCE utils/forms/formutils.simba}
-{$IFNDEF WL_SCRIPTFORM_INCLUDED}    {$INCLUDE_ONCE utils/forms/scriptform.simba}
+{$IFNDEF WL_ENV_PATHS_INCLUDED}       {$INCLUDE_ONCE utils/envpaths.simba}
+{$IFNDEF WL_THREADING_INCLUDED}       {$INCLUDE_ONCE utils/threading.simba}
+{$IFNDEF WL_GEOMETRY_INCLUDED}        {$INCLUDE_ONCE utils/math/geometry.simba}
+{$IFNDEF WL_RANDOM_INCLUDED}          {$INCLUDE_ONCE utils/math/random.simba}
+{$IFNDEF WL_CONVERSIONS_INCLUDED}     {$INCLUDE_ONCE utils/math/conversions.simba}
+{$IFNDEF WL_VECTOR_INCLUDED}          {$INCLUDE_ONCE utils/math/vector.simba}
+{$IFNDEF WL_TIME_INCLUDED}            {$INCLUDE_ONCE utils/time.simba}
+{$IFNDEF WL_LOGGER_INCLUDED}          {$INCLUDE_ONCE utils/logger.simba}
+{$IFNDEF WL_ASSETS_INCLUDED}          {$INCLUDE_ONCE utils/assets.simba}
+{$IFNDEF WL_MISC_INCLUDED}            {$INCLUDE_ONCE utils/misc.simba}
+{$IFNDEF WL_MOUSE_INCLUDED}           {$INCLUDE_ONCE utils/input/mouse.simba}
+{$IFNDEF WL_KEYBOARD_INCLUDED}        {$INCLUDE_ONCE utils/input/keyboard.simba}
+{$IFNDEF WL_OCR_INCLUDED}             {$INCLUDE_ONCE utils/ocr.simba}
+{$IFNDEF WL_ITEM_INCLUDED}            {$INCLUDE_ONCE utils/item.simba}
+{$IFNDEF WL_DATABASE_INCLUDED}        {$INCLUDE_ONCE utils/database.simba}
+{$IFNDEF WL_IMAGECOMPARE_INCLUDED}    {$INCLUDE_ONCE utils/imagecompare.simba}
+{$IFNDEF WL_RSTRANSLATOR_INCLUDED}    {$INCLUDE_ONCE utils/math/rstranslator.simba}
+{$IFNDEF WL_WEBGRAPH_INCLUDED}        {$INCLUDE_ONCE utils/webgraph.simba}
+{$IFNDEF WL_WEBGRAPHGEN_INCLUDED}     {$INCLUDE_ONCE utils/webgraphgen.simba}
+{$IFNDEF WL_RSCHUNKS_INCLUDED}        {$INCLUDE_ONCE utils/rschunks.simba}
+{$IFNDEF WL_CONFIG_INCLUDED}          {$INCLUDE_ONCE utils/config.simba}
+{$IFNDEF WL_STRINGS_INCLUDED}         {$INCLUDE_ONCE utils/strings.simba}
+{$IFNDEF WL_WASPCLIENT_INCLUDED}      {$INCLUDE_ONCE utils/waspclient.simba}
+{$IFNDEF WL_FORMUTILS_INCLUDED}       {$INCLUDE_ONCE utils/forms/formutils.simba}
+{$IFNDEF WL_SCRIPTFORM_INCLUDED}      {$INCLUDE_ONCE utils/forms/scriptform.simba}
+{$IFNDEF WL_PROGRESS_REPORT_INCLUDED} {$INCLUDE_ONCE utils/progressreport.simba}
 
-{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
 {$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
 {$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
