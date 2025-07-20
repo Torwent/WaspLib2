@@ -1,6 +1,8 @@
 (*
 # Discord
 A library for sending messages and files to Discord channels via webhooks.
+
+Credits: Developed by TazE
 *)
 
 {$DEFINE WL_DISCORD_INCLUDED}
