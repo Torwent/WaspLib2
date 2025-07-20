@@ -3,6 +3,51 @@
 A library for sending messages and files to Discord channels via webhooks.
 
 Credits: Developed by TazE
+
+## Getting Started
+
+Basic example for sending a message to Discord:
+
+```pascal
+var
+  Discord: TDiscordClient;
+begin
+  // Setup the Discord client
+  Discord.Setup();
+  
+  // Set your webhook URL
+  if Discord.SetWebhook('https://discord.com/api/webhooks/your_webhook_id/your_webhook_token') then
+  begin
+    // Send a simple message
+    Discord.Webhook.Content := 'Hello from Simba!';
+    if Discord.Send() then
+      WriteLn('Message sent successfully');
+  end;
+end;
+```
+
+Example with embeds:
+
+```pascal
+var
+  Discord: TDiscordClient;
+  EmbedIdx: Int32;
+begin
+  Discord.Setup();
+  Discord.SetWebhook('https://discord.com/api/webhooks/your_webhook_id/your_webhook_token');
+  
+  // Add an embed
+  EmbedIdx := Discord.Webhook.AddEmbed();
+  with Discord.Webhook.Embeds[EmbedIdx] do
+  begin
+    Title := 'Status Report';
+    Description := ':white_check_mark: Script completed successfully';
+    Color := $00FF00; // Green color
+  end;
+  
+  Discord.Send();
+end;
+```
 *)
 
 {$DEFINE WL_DISCORD_INCLUDED}
