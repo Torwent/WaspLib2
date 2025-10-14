@@ -4,13 +4,26 @@
 type
   TRSCombat = record
     AttackStyles: TBoxArray;
-    Category: TBox;
+
+    Boxes:record
+      TopLeft,BottomLeft,TopRight,BottomRight,Category,CombatLvl, AutoRetaliate:TBox;
+    end;
   end;
 
 procedure TRSCombat.SetupGameTab();
 begin
-  //TODO...
+  Self.Boxes.TopLeft:=[567,250,637,296]; 
+  Self.Boxes.TopRight:= [646,250,716,296];
+  Self.Boxes.BottomLeft:=[567,304,637,350];   
+  Self.Boxes.BottomRight:= [646,304,716,350];
+
+  Self.AttackStyles :=[Self.Boxes.TopLeft, Self.Boxes.TopRight, Self.Boxes.BottomLeft, Self.Boxes.BottomRight];
+
+  Self.Boxes.CombatLvl:= [595,230,686,245];
+  Self.Boxes.AutoRetaliate:= [567,358,716,401];
+  Self.Boxes.Category:=[600,441,685,457];
 end;
 
 var
   Combat: TRSCombat;
+                                                                                         
