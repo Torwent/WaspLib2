@@ -12,18 +12,30 @@ type
 
 procedure TRSCombat.SetupGameTab();
 begin
-  Self.Boxes.TopLeft:=[567,250,637,296]; 
-  Self.Boxes.TopRight:= [646,250,716,296];
-  Self.Boxes.BottomLeft:=[567,304,637,350];   
-  Self.Boxes.BottomRight:= [646,304,716,350];
+  with GameTab.TopLeft do
+   Self.Boxes.TopLeft:= [X+567, Y+250, X+637, Y+296];
 
-  Self.AttackStyles :=[Self.Boxes.TopLeft, Self.Boxes.TopRight, Self.Boxes.BottomLeft, Self.Boxes.BottomRight];
+  with Gametab.topleft do
+  Self.Boxes.TopRight:= [X+646,Y+250,X+716,Y+296];
 
-  Self.Boxes.CombatLvl:= [595,230,686,245];
-  Self.Boxes.AutoRetaliate:= [567,358,716,401];
-  Self.Boxes.Category:=[600,441,685,457];
+  with Gametab.topleft do
+  Self.Boxes.BottomLeft:=[X+567,Y+304,X+637,Y+350];
+
+  with Gametab.topleft do
+  Self.Boxes.BottomRight:= [X+646,Y+304,X+716,Y+350];
+
+  with GameTab.TopLeft do
+  Self.Boxes.CombatLvl:= [X+595,Y+230,X+686,Y+245];
+
+  with GameTab.TopLeft do
+  Self.Boxes.AutoRetaliate:= [X+567,Y+358,X+716,Y+401];
+
+  with GameTab.TopLeft do
+  Self.Boxes.Category:=[X+600,Y+441,X+685,Y+457];
+
+  Self.AttackStyles :=[Self.boxes.topleft, Self.Boxes.TopRight,Self.Boxes.BottomLeft,  Self.Boxes.BottomRight];
 end;
 
 var
-  Combat: TRSCombat;
+  Combat: TRSCombat;    
                                                                                          
