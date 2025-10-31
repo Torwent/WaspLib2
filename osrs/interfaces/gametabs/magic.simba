@@ -446,18 +446,18 @@ WriteLn Magic.IsSpellSelected(ERSSpell.ICE_BARRAGE);
 *)
 function TRSMagic.IsSelected(spell: ERSSpell): Boolean;
 var
-  bounds: TBox;
+  b,bounds: TBox;
 begin
   if spell in RS_INSTANT_THROW_SPELLS then Exit;
-  Result := Self.FindSpell(spell, bounds) and Target.HasColor($FFFFFF, 0, 10, bounds.Expand(2));
+  Result := Self.FindSpell(spell, b) and Target.HasColor($FFFFFF, 0, 10, bounds.Expand(2));
 end;
 
 function TRSMagic.IsSelected(spell: ERSSpell; selected: TPointArray): Boolean; overload;
 var
-  bounds: TBox;
+  b,bounds: TBox;
 begin
   if spell in RS_INSTANT_THROW_SPELLS then Exit;
-  if not Self.FindSpell(spell, bounds) then Exit;
+  if not Self.FindSpell(spell, b) then Exit;
   Result := bounds.Contains(selected.Mean());
 end;
 
