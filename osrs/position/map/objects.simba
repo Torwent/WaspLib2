@@ -157,7 +157,7 @@ var
   objs: TRSObjectArray;
 begin
   Map.Setup([ERSChunk.VARROCK]);
-  objs := TRSObject.Create(ObjectsJSON.GetByName('bank'));
+  objs := TRSObjectArray.Create(ObjectsJSON.GetByName('Bank booth')); 
 end;
 ```
 *)
