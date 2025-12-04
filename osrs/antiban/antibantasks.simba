@@ -681,6 +681,13 @@ begin
   end;
 end;
 
+
+procedure TAntiban.LoseFocus();
+begin
+  WriteLn GetDebugLn('Antiban', 'Losing client focus');
+  RSClient.LoseFocus();
+end;
+
 (* TODO:
 procedure TAntiban.MoveItems(items: TRSItemArray);
 var
@@ -882,7 +889,7 @@ const
     ['LargeRandomMouse',      @Antiban.LargeRandomMouse],
     ['SmallCameraRotation',   @Antiban.SmallCameraRotation],
     ['LargeCameraRotation',   @Antiban.LargeCameraRotation],
-    ['LoseFocus',             @RSClient.LoseFocus],
+    ['LoseFocus',             @Antiban.LoseFocus],
     ['HoverSkills',           @Antiban.HoverSkills],
     ['OpenSkills',            @Antiban.OpenSkills],
     ['HoverMakeItem',         @Antiban.HoverMakeItem],

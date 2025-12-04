@@ -110,7 +110,7 @@ begin
   taskObj.AddFloat('variation', 0.33);
   arr.Add('task', taskObj);
   Self.TaskList.Items.Add(Self.GetTaskListString('LoseFocus', '10 mins', '33%'));
-  Antiban.AddTask(@RSClient.LoseFocus, 10*ONE_MINUTE, 0.33);
+  Antiban.AddTask(@Antiban.LoseFocus, 10*ONE_MINUTE, 0.33);
 
 
   taskObj := new TJSONObject();

@@ -21,13 +21,13 @@ that can be used by Simba and back.
     RSMap: record
       const ChunkSide: Integer = 64;
       const Dimensions: TPoint = [100,200];
-      const Scope: TBox = [16, 19, 66, 196];
+      const Scope: TBox = [15, 19, 66, 196];
     end;
 
     Map: record
       const ChunkSide: Integer = 256;
       const Dimensions: TPoint = [2560, 5120];
-      const Scope: TBox = [4096, 4864, 16896, 50176];
+      const Scope: TBox = [3840, 4864, 16896, 50176];
     end;
   end;
 

@@ -502,27 +502,27 @@ Filters the current world list based on selected specific activity checkboxes.
 procedure TProfileForm.ApplyActivityFilters();
 var
   i, j, checkboxIndex: Integer;
-  hasSpecificActivity: Boolean;
+  anyChecked: Boolean;
 begin
   if Length(Self.ActivityCheckboxes) = 0 then
     Exit;
 
+  // Check if ANY activity checkbox is selected
+  anyChecked := False;
+  for i := 0 to High(Self.ActivityCheckboxes) do
+    if Self.ActivityCheckboxes[i].IsChecked() then
+    begin
+      anyChecked := True;
+      Break;
+    end;
+
+  // If none selected, no filtering needed (show all)
+  if not anyChecked then
+    Exit;
+
+  // Filter to ONLY include worlds matching checked activities
   j := 0;
   for i := 0 to High(Self.FilteredWorlds) do
-  begin
-    // Check if world has a specific activity
-    hasSpecificActivity := (Self.FilteredWorlds[i].ActivityString <> '') and 
-                          (Self.FilteredWorlds[i].ActivityString <> '-');
-    
-    // If no specific activity, include it (it passed the main activity type filters)
-    if not hasSpecificActivity then
-    begin
-      Self.FilteredWorlds[j] := Self.FilteredWorlds[i];
-      Inc(j);
-      Continue;
-    end;
-    
-    // If has specific activity, check if its checkbox is checked
     for checkboxIndex := 0 to High(Self.ActivityCheckboxes) do
       if (Self.ActivityCheckboxes[checkboxIndex].Hint = Self.FilteredWorlds[i].ActivityString) and
          Self.ActivityCheckboxes[checkboxIndex].IsChecked() then
@@ -531,7 +531,7 @@ begin
         Inc(j);
         Break;
       end;
-  end;
+
   SetLength(Self.FilteredWorlds, j);
 end;
 
@@ -871,6 +871,8 @@ begin
     Self.AllWorldsCache := WorldFetcher.GetFilteredWorlds();
   end;
 
+  WorldFetcher.Worlds := Self.AllWorldsCache;
+
   Self.RefreshActivities();
 
   Self.FilteredWorlds := WorldFetcher.FilterBySettings(settings);
@@ -1094,11 +1096,9 @@ end;
 ```pascal
 procedure TProfileForm.LoadSavedWorlds(worldsStr: String);
 ```
-Loads a comma-separated list of world numbers and displays them. Disables all filter checkboxes when showing saved worlds.
+Loads saved world numbers and displays them. Unchecks filter checkboxes but keeps activity options visible.
 *)
 procedure TProfileForm.LoadSavedWorlds(worlds: TIntegerArray);
-var
-  i: Integer;
 begin
   if worlds = [] then Exit;
 
@@ -1119,10 +1119,6 @@ begin
     Self.RestrictedCheckbox.SetChecked(False);
     Self.SkillTotalCheckbox.SetChecked(False);
     Self.SelectAllActivitiesCheckbox.SetChecked(False);
-
-    for i := 0 to High(Self.ActivityCheckboxes) do
-      Self.ActivityCheckboxes[i].Free();
-    SetLength(Self.ActivityCheckboxes, 0);
   end;
 end;
 

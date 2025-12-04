@@ -34,7 +34,7 @@ procedure TRSHouseLayoutFinder.Setup();
 var
   path, tmp: String;
 begin
-  Self.Version := WLAssets.JSON.Item['finders\house_layout.zip'].AsString;
+  Self.Version := WLAssets.JSON.Item['finders/house_layout.zip'].AsString;
   Self.CacheDir := WLEnv.CacheDir + 'houselayoutfinder' + PATH_SEP;
 
   //Delete old cache files if they exist

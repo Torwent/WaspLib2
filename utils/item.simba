@@ -116,6 +116,31 @@ begin
   end;
 end;
 
+(*
+### ERSItemQuantity.String2Quantity
+```pascal
+function ERSItemQuantity.String2Quantity(str: String): ERSItemQuantity; static;
+```
+Internal helper function to convert a string quantity into a ERSItemQuantity.
+
+Example:
+```pascal
+WriteLn ERSItemQuantity.String2Quantity('5');
+WriteLn ERSItemQuantity.String2Quantity('7');
+WriteLn ERSItemQuantity.String2Quantity('All');
+```
+*)
+function ERSItemQuantity.String2Quantity(str: String): ERSItemQuantity; static;
+begin
+  case LowerCase(str) of
+    '1':   Result := ERSItemQuantity.ONE;
+    '5':   Result := ERSItemQuantity.FIVE;
+    '10':  Result := ERSItemQuantity.TEN;
+    'all': Result := ERSItemQuantity.ALL;
+    else   Result := ERSItemQuantity.CUSTOM;
+  end;
+end;
+
 type
 (*
 ## ERSStack

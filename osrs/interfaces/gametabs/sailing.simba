@@ -8,7 +8,7 @@ Methods to interact with the sailing gametab:
 {$INCLUDE_ONCE WaspLib/osrs.simba}
 
 type
-  ESailingFacility = enum(HELM, REPAIR, CANNON, HOOK);
+  ESailingFacility = enum(HELM, REPAIR, WIND_CATCHER, CANNON, HOOK);
 
   ERSCrewAsignee = enum(NONE, ME, CREW);
 
@@ -88,14 +88,14 @@ ERSSailingTab = enum(FACILITIES, STATS, CREW);
 ```
 Enum represinting the available sailing tabs.
 *)
-  ERSSailingTab = enum(FACILITIES, STATS, CREW);
+  ERSSailingTab = enum(UNKNOWN, FACILITIES, STATS, CREW);
 
 (*
 ## TRSSailing
 Main record responsible with handling the Sailing gametab.
 *)
   TRSSailing = record
-    CombatBox, ShipNameBox, ShipHealthBox, TabTitle: TBox;
+    CombatBox, BoatNameBox, BoatHealthBox, TabTitle: TBox;
     Tabs: TBoxArray;
     Scrolls: array [ERSSailingTab] of TRSScrollBar;
   end;
@@ -105,8 +105,8 @@ begin
   with GameTab.Bounds do
   begin
     Self.CombatBox := [X1-3, Y1+1, X1+22, Y1+26];
-    Self.ShipNameBox := [X1+26, Y1+4, X2-2, Y1+26];
-    Self.ShipHealthBox := [X1+8, Y1+30, X2-6, Y1+42];
+    Self.BoatNameBox := [X1+26, Y1+4, X2-2, Y1+26];
+    Self.BoatHealthBox := [X1+8, Y1+30, X2-6, Y1+42];
 
     Self.Tabs := TBoxArray.Create([X1+2, Y1+46], 3, 1, 55, 20, [7,0]);
     Self.TabTitle := [X1+32, Y1+68, X2-32, Y1+82];
@@ -135,7 +135,7 @@ WriteLn Sailing.IsOpen();
 *)
 function TRSSailing.IsOpen(): Boolean;
 begin
-  Result := Target.HasColor([$1ABD1A, 7, EColorSpace.RGB, [1.247, 0.507, 1.247]], 1, Self.ShipHealthBox);
+  Result := Target.HasColor([$1ABD1A, 7, EColorSpace.RGB, [1.247, 0.507, 1.247]], 1, Self.BoatHealthBox);
 end;
 
 (*
@@ -161,16 +161,40 @@ begin
 end;
 
 
-property TRSSailing.ShipName: String;
+(*
+## Sailing.BoatName
+```pascal
+property TRSSailing.BoatName: String;
+```
+Returns the boat name
+
+Example:
+```pascal
+WriteLn Sailing.BoatName;
+```
+*)
+property TRSSailing.BoatName: String;
 begin
-  Result := OCR.Recognize(Self.ShipNameBox, RSFonts.BOLD_SHADOW, [RSFonts.ORANGE], 0);
+  Result := OCR.Recognize(Self.BoatNameBox, RSFonts.BOLD_SHADOW, [RSFonts.ORANGE], 0);
 end;
 
-property TRSSailing.ShipHealth: Integer;
+(*
+## Sailing.BoatHealth
+```pascal
+property TRSSailing.BoatHealth: Integer;
+```
+Returns the boat current health
+
+Example:
+```pascal
+WriteLn Sailing.BoatName;
+```
+*)
+property TRSSailing.BoatHealth: Integer;
 var
   str: String;
 begin
-  str := OCR.Recognize(Self.ShipHealthBox, RSFonts.PLAIN_11, [RSFonts.WHITE], 0);
+  str := OCR.Recognize(Self.BoatHealthBox, RSFonts.PLAIN_11, [RSFonts.WHITE], 0);
   Result := str.Before('/').ExtractInteger();
 end;
 
@@ -196,6 +220,16 @@ begin
     'Facilities': Result := ERSSailingTab.FACILITIES;
     'Stats': Result := ERSSailingTab.STATS;
     'Crew': Result := ERSSailingTab.CREW;
+    else
+    begin
+      if not title.EndsWith(')') then
+        Exit;
+      title := title.After('(');
+      if Length(title) > 1 then
+        case title[1] of
+          'H', 'P', 'D': Result := ERSSailingTab.FACILITIES;
+        end;
+    end;
   end;
 end;
 
@@ -227,6 +261,21 @@ begin
 end;
 
 
+(*
+## Sailing.GetFacilitySlots
+```pascal
+function TRSSailing.GetFacilitySlots(): TSailingFacilitySlotArray;
+```
+Returns a {ref}`TSailingFacilitySlotArray` of the facility slots that are
+currently visible.
+
+This will only return those that have their buttons and/or icons fully visible.
+
+Example:
+```pascal
+WriteLn Sailing.GetFacilitySlots();
+```
+*)
 function TRSSailing.GetFacilitySlots(): TSailingFacilitySlotArray;
 var
   tpa: TPointArray;

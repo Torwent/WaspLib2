@@ -148,7 +148,7 @@ var
   path, tmp: String;
 begin
   if Self.IsSetup then Exit;
-  Self.Version := WLAssets.JSON.Item['finders\items\items.zip'].AsString;
+  Self.Version := WLAssets.JSON.Item['finders/items/items.zip'].AsString;
   Self.Database.Setup(
     'ItemFinder', ['id', 'item', 'hash'],
     WLEnv.AssetsDir + 'finders' + PATH_SEP + 'items' + PATH_SEP + 'data' + PATH_SEP,

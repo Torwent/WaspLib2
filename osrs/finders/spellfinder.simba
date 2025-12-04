@@ -33,7 +33,7 @@ procedure TRSSpellFinder.Setup();
 var
   path, tmp: String;
 begin
-  Self.Version := WLAssets.JSON.Item['finders\spells.zip'].AsString;
+  Self.Version := WLAssets.JSON.Item['finders/spells.zip'].AsString;
   Self.CacheDir := WLEnv.CacheDir + 'spellfinder' + PATH_SEP;
 
   //Delete old cache files if they exist

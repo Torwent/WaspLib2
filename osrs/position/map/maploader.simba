@@ -244,9 +244,9 @@ var
 begin
   with WLAssets.JSON do
     Self.Version := HashString(EHashAlgo.CRC32,
-      Item['map\map.zip'].AsString + Item['map\heightmap.zip'].AsString +
-      Item['map\collision.zip'].AsString + Item['map\objects.zip'].AsString +
-      Item['map\npcs.zip'].AsString
+      Item['map/map.zip'].AsString + Item['map/heightmap.zip'].AsString +
+      Item['map/collision.zip'].AsString + Item['map/objects.zip'].AsString +
+      Item['map/npcs.zip'].AsString
     );
 
   Self.CacheDir := WLEnv.CacheDir + 'map' + PATH_SEP;
