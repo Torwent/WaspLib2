@@ -524,6 +524,24 @@ begin
   Result := FormatMilliseconds(Max(0, Round(task.Next - GetTimeRunning())), fmt);
 end;
 
+
+(*
+## Antiban.MsUntilBreak
+```pascal
+function TAntiban.MsUntilBreak(): Double;
+```
+Returns the number of milliseconds until the next scheduled break.
+If no breaks are scheduled, returns `High(Int32) / (2,147,483,647)`.
+*)
+function TAntiban.MsUntilBreak(): Double;
+begin
+  if Length(Self.Breaks) > 0 then
+    Result := Self.Breaks[0].Next - GetTimeRunning()
+  else
+    Result := High(Int32);
+end;
+
+
 (*
 ## Antiban.TimeUntilSleep
 ```pascal
@@ -535,6 +553,24 @@ function TAntiban.TimeUntilSleep(constref task: TSleepTask; fmt: String = TIME_F
 begin
   Result := FormatMilliseconds(Max(0, Round(task.Next - GetTimeRunning())), fmt);
 end;
+
+
+(*
+## Antiban.MsUntilSleep
+```pascal
+function TAntiban.MsUntilSleep(): Double;
+```
+Returns the number of milliseconds until the next scheduled sleep.
+If no sleeps are scheduled, returns `High(Int32) / (2,147,483,647)`.
+*)
+function TAntiban.MsUntilSleep(): Double;
+begin
+  if Length(Self.Sleeps) > 0 then
+    Result := Self.Sleeps[0].Next - GetTimeRunning()
+  else
+    Result := High(Int32);
+end;
+
 
 (*
 ## Antiban.SimulateBreaks
