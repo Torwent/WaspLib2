@@ -77,6 +77,8 @@ begin
         img.DrawColor := $FF00FF;
         img.DrawBox(slot.ItemBox);
         img.DrawColor := $FFFF00;
+        img.DrawBox(slot.QuantityBox);
+        img.DrawColor := $AAFFBB;
         img.DrawBox(slot.ItemNameBox);
         img.DrawColor := $FFFFFF;
         img.DrawBox(slot.StatusBox);
@@ -95,7 +97,7 @@ end.
   TRSGrandExchangeSlot = record
     Typ: EGESlotType;
     Bounds, Header, BuyButton, SellButton: TBox;
-    ItemBox, ItemNameBox, ValueBox, StatusBox: TBox;
+    ItemBox,QuantityBox, ItemNameBox, ValueBox, StatusBox: TBox;
   end;
 
   TRSGrandExchangeSlotArray = array of TRSGrandExchangeSlot;
@@ -117,10 +119,15 @@ begin
 
     Self.SellButton := Self.BuyButton.Offset([56,0]);
 
-    Self.ItemBox.X1 := X1+5;
-    Self.ItemBox.Y1 := Y1+33;
-    Self.ItemBox.X2 := Self.ItemBox.X1+36;
-    Self.ItemBox.Y2 := Self.ItemBox.Y1+34;
+    Self.ItemBox.X1 := X1+6;
+    Self.ItemBox.Y1 := Y1+35;
+    Self.ItemBox.X2 := Self.ItemBox.X1+31;
+    Self.ItemBox.Y2 := Self.ItemBox.Y1+31;
+
+    Self.QuantityBox.X1 := X1+6;
+    Self.QuantityBox.Y1 := Y1+35;
+    Self.QuantityBox.X2 := Self.QuantityBox.X1+35;
+    Self.QuantityBox.Y2 := Self.QuantityBox.Y1+9;
 
     Self.ItemNameBox.X1 := X1+44;
     Self.ItemNameBox.Y1 := Y1+33;
@@ -217,12 +224,19 @@ function TRSGrandExchangeSlot.Discover(): TRSItemArray;
 var
   img: TImage;
   hash: String;
+  b: Tbox;
 begin
-  img := Target.GetImage(Self.ItemBox);
+  b := Self.ItemBox;
+  b.X2 := b.X1 + 35;
+  b.Y2 := b.Y1 + 31;
+                    //h*w*4=4608
+  img := Target.GetImage(b);
+
   hash := ItemFinder.GetHash(img);
+
   if hash = '' then Exit;
-  Result := ItemFinder.GetHashItems(hash);
-end;
+    Result := ItemFinder.GetHashItems(hash);
+end; 
 
 (*
 ## TRSGrandExchangeSlot.Item
@@ -236,9 +250,26 @@ Example:
 WriteLn GrandExchange.Slots[7].Item;
 ```
 *)
+
+//This code was created by Bald 
 property TRSGrandExchangeSlot.Item: TRSItem;
+var
+  b: TBox;
+  lines: TStringArray;
+  i: Integer;
 begin
-  Result := OCR.RecognizeLines(Self.ItemNameBox, RSFonts.PLAIN_11, [RSFonts.LIGHT_ORANGE], 0).Join(' ');
+  b := Self.ItemNameBox;
+  SetLength(lines, b.Height div 11);
+  if lines = [] then Exit;
+
+  for i := 0 to High(lines) do
+    lines[i] := OCR.Recognize(
+      [b.X1, b.Y1 + (i * 11), b.X2, b.Y1 + ((i + 1) * 11) + 3],
+      RSFonts.PLAIN_11,
+      [RSFonts.LIGHT_ORANGE],
+      0
+    );
+  Result := Trim(lines.Join(' '));
 end;
 
 (*
@@ -279,7 +310,7 @@ var
   str: String;
 begin
   if (Self.GetType() = EGESlotType.EMPTY) or (Self.GetType() = EGESlotType.UNAVAILABLE) then Exit(-1);
-  str := OCR.Recognize(Self.ItemBox, RSFonts.PLAIN_11, [RSFonts.YELLOW], 0);
+  str := OCR.Recognize(Self.QuantityBox, RSFonts.PLAIN_11, [RSFonts.YELLOW], 0);
   Result := str.ExtractInteger(1);
 end;
 
