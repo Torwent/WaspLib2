@@ -62,6 +62,38 @@ begin
   TJSONParser(Self.Data).Save(Self.Path, [EJSONFormatOption.USE_TABS, EJSONFormatOption.SINGLE_LINE_ARR], 1);
 end;
 
+procedure TConfigJSON.Put(const key: String; value: Int64); overload;
+begin
+  if Self.Data.Has(key) then
+    Self.Data.Item[key].AsInt := value
+  else
+    Self.Data.AddInt(key, value);
+end;
+
+procedure TConfigJSON.Put(const key: String; value: Double); overload;
+begin
+  if Self.Data.Has(key) then
+    Self.Data.Item[key].AsFloat := value
+  else
+    Self.Data.AddFloat(key, value);
+end;
+
+procedure TConfigJSON.Put(const key: String; value: Boolean); overload;
+begin
+  if Self.Data.Has(key) then
+    Self.Data.Item[key].AsBool := value
+  else
+    Self.Data.AddBool(key, value);
+end;
+
+procedure TConfigJSON.Put(const key: String; value: String); overload;
+begin
+  if Self.Data.Has(key) then
+    Self.Data.Item[key].AsString := value
+  else
+    Self.Data.AddString(key, value);
+end;
+
 (*
 ## TConfigINI
 Type responsible for dealing with INI configuration files.
