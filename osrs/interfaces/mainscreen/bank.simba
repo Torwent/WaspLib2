@@ -241,7 +241,7 @@ begin
   btnColors := [[$0F1043, 0], [$23269F, 0.227]];
   with Self.Bounds do
   begin
-    Self.Worn := new TRSButton([X2-40, Y1+38, X2-7, Y1+71], btnColors);
+    Self.Worn := new TRSButton([X2-42, Y1+36, X2-5, Y1+73], btnColors);
 
     Self.Buttons[ERSBankButton.SETTINGS] := new TRSButton([X1+34, Y1+7, X1+54, Y1+27]);
     Self.Buttons[ERSBankButton.TUTORIAL] := new TRSButton([X1+58, Y1+7, X1+78, Y1+27]);
