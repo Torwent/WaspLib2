@@ -488,17 +488,31 @@ end;
 
 
 function TWeaponData.GetArray(index: Integer): TJSONItem;
+var
+  blankJSON : TJSONItem;
 begin
-  Self.Setup();
-  Result := Self.Data.Item[index];
+  try
+    Self.Setup();
+    Result := Self.Data.Item[index];
+  finally
+    WriteLn GetDebugLn('Object Not Found In DataBase' , False);
+    Result := blankJSON;
+  end;
 end;
 
 function TWeaponData.GetArray(key: String): TJSONItem; overload;
+var
+  blankJSON : TJSONItem;
 begin
-  Self.Setup();
-  if key = 'secondary_ammo' then key := 'ammo';
-  Result := Self.Data.Item[key];
-end;
+  try
+    Self.Setup();
+    if key = 'secondary_ammo' then key := 'ammo';
+    Result := Self.Data.Item[key];
+  finally
+    WriteLn GetDebugLn('Object Not Found In DataBase' , False);
+    Result := blankJSON;
+  end;
+end; 
 
 
 function TWeaponData.GetItems(key: Integer): TRSItemArray;
