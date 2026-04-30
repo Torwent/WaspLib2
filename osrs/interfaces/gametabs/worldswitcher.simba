@@ -379,6 +379,7 @@ begin
   timeout.Start(20 * ONE_SECOND);
 
   repeat
+    Sleep(20,40);
     available := Self.GetWorlds();
     if available = [] then Exit;
 
