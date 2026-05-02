@@ -156,7 +156,7 @@ begin
   for i := 1 to Length(text) do
   begin
     Target.KeySend(text[i]);
-    Sleep(Random(Target.Options.KeyPressMin+10, Target.Options.KeyPressMax+25));
+    Sleep(Random(Target.Options.KeyPressMin+80, Target.Options.KeyPressMax+80));
   end;
 
   Self.LastKey := Target.KeyCodeFromChar(text[Length(text)]);
