@@ -151,11 +151,6 @@ begin
   Self.Scroll.Setup();
   Self.Title.Setup(Self.Bounds);
 
-  Self.Title.CloseButton.X1 := Self.Title.CloseButton.X1 - 5;
-  Self.Title.CloseButton.X2 := Self.Title.CloseButton.X2 + 5;
-  Self.Title.CloseButton.Y1 := Self.Title.CloseButton.Y1 - 5;
-  Self.Title.CloseButton.Y2 := Self.Title.CloseButton.Y2 + 5;
-
   Self.Tabs := TBoxArray.Create(Self.Bounds.TopLeft.Offset(47, 42), 10, 1, 35, 28, [5, 0]);
   Self.SlotBoxes := TBoxArray.Create(Self.Bounds.TopLeft.Offset(57, 77), 8, (Self.Bounds.Height - 135) div 35, 31, 31, [17, 5]);
 
