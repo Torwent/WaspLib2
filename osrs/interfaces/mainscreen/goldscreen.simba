@@ -126,6 +126,7 @@ begin
 
   {─ title ─}
   Self.Title.Setup(Self.Bounds);
+  Self.Title.CloseButton := Self.Title.CloseButton.Expand(1);
 
   {─ item‑slot boxes ─}
   topRow     := TBoxArray.Create([Self.Bounds.X1 + 36, Self.Bounds.Y1 + 66], 9, 1, 31, 31, [14,30]);
