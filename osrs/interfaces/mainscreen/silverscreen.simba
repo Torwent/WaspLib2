@@ -67,6 +67,7 @@ begin
   end;
 
   Self.Title.Setup(Self.Bounds);
+  Self.Title.CloseButton := Self.Title.CloseButton.Expand(1);
 
   leftClickBoxes  := TBoxArray.Create(
                  [Self.Bounds.X1 + 10,  Self.Bounds.Y1 + 40],  // anchor
