@@ -176,7 +176,7 @@ begin
     for j := 0 to High(items) do
       for n := 0 to High(bitems) do
       begin
-        if items[j] <> bitems[n].Item then Continue;
+        if not SameText(items[j], bitems[n].Item) then Continue;
 
         stack := Inventory.Slots.ReadStack(i);
 
@@ -198,13 +198,6 @@ begin
       end;
 
     if not Bank.Deposit(items[0].ToBankItem(QUANTITY_ALL), True) then
-      Exit;
-  end;
-
-  for i := 0 to High(bitems) do
-  begin
-    if bitems[i].Quantity <= 0 then Continue;
-    if not Bank.Deposit(bitems[i], True) then
       Exit;
   end;
 
