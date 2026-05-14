@@ -258,15 +258,15 @@ Returns `True` if the given item is currently highlighted.
 *)
 function TRSGoldScreen.IsItemHighlighted(i: ERSGoldItem): Boolean;
 var
-  highlight: TColorTolerance := [4807018,2];
+  highlight: TColorTolerance := [$49596A, 2, EColorSpace.RGB, [1.000, 1.000, 1.000]];
 begin
-  if not Self.IsOpen() then
+ if not Self.IsOpen() then
     Exit;
 
   if not Self.CanCraftItem(i) then
     Exit;
 
-  Result := Target.FindColor(highlight, Self.ItemBoxes[i]).Length > 0;
+  Result := Target.HasColor(highlight, 80 ,Self.ItemBoxes[i]);
 end;
 
 (*
