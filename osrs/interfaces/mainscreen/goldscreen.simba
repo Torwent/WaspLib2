@@ -239,15 +239,19 @@ function TRSGoldScreen.CanCraftItem(Item: ERSGoldItem): Boolean;
 ```
 Returns `True` if the given item icon is available for crafting.
 *)
-function TRSGoldScreen.CanCraftItem(i: ERSGoldItem): Boolean;
+function TRSGoldScreen.CanCraftItem(i: ERSGoldItem): Boolean; 
 const
-  GOLD_COLOR: TColor := 2806763;
+  GOLD_COLOR   : TColor := 2806763;
+  AMULET_COLOR : TColorTolerance := [$24BCBD, 0.829, EColorSpace.HSV, [2.402, 0.499, 0.100]];
 begin
   if not Self.IsOpen() then
     Exit;
 
   Result := Target.FindColor(GOLD_COLOR, 1, Self.ItemBoxes[i]).Length > 0;
-end;
+
+  if not Result then
+  Result := Target.HasColor(AMULET_COLOR, 10 ,Self.ItemBoxes[i]);
+end; 
 
 (*
 ## GoldScreen.IsItemHighlighted
@@ -256,18 +260,22 @@ function TRSGoldScreen.IsItemHighlighted(Item: ERSGoldItem): Boolean;
 ```
 Returns `True` if the given item is currently highlighted.
 *)
-function TRSGoldScreen.IsItemHighlighted(i: ERSGoldItem): Boolean;
+function TRSGoldScreen.IsItemHighlighted(i: ERSGoldItem): Boolean; 
 var
-  highlight: TColorTolerance := [$49596A, 2, EColorSpace.RGB, [1.000, 1.000, 1.000]];
+  highlight   : TColorTolerance := [$49596A, 2, EColorSpace.RGB, [1.000, 1.000, 1.000]];
+  amuletColor : TColorTolerance := [$24BCBD, 0.829, EColorSpace.HSV, [2.402, 0.499, 0.100]];
 begin
- if not Self.IsOpen() then
+  if not Self.IsOpen() then
     Exit;
 
   if not Self.CanCraftItem(i) then
     Exit;
 
   Result := Target.HasColor(highlight, 80 ,Self.ItemBoxes[i]);
-end;
+
+  if not Result then
+  Result := Target.HasColor(amuletColor, 10 ,Self.ItemBoxes[i]);
+end; 
 
 (*
 ## GoldScreen.CraftItem
