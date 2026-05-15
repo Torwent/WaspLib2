@@ -238,7 +238,7 @@ if SilverScreen.CanCraftItem('Opal ring', box) then
   WriteLn 'Can craft opal ring';
 ```
 *)
-function TRSSilverScreen.CanCraftItem(Item : TRSItem; out Box : TBox) : Boolean;
+function TRSSilverScreen.CanCraftItem(var Item : TRSItem; out Box : TBox) : Boolean;
 const
   READY_GOLD  = $1F98FF;  // gold text (craftable)
   READY_WHITE = $FFFFFF;  // white (selected/ready)
@@ -248,6 +248,9 @@ var
 begin
   if not Self.IsOpen() then Exit;
 
+  if Item.Contains('amulet' , False) then
+  Item := Item + ' (u)';
+
   if not Self.Items.Find([Item], Slot) then
     Exit;
 
@@ -255,7 +258,7 @@ begin
 
   TPA := Target.FindColor(READY_GOLD, 1, Box) + Target.FindColor(READY_WHITE, 1, Box);
   Result := TPA.Length > 0;
-end;
+end;                                                       
 
 
 (*
