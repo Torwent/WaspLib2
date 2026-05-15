@@ -287,10 +287,13 @@ begin
   if not Result then Exit;
 
   if UseSpaceBar and Self.IsItemHighlighted(Item) then
-    Keyboard.KeyPress(EKeyCode.SPACE)
-  else
+  begin
+    Keyboard.KeyPress(EKeyCode.SPACE);
+    if not GoldScreen.IsOpen() then
+    Exit;
+  end;
     Mouse.Click(Self.ItemBoxes[Item], EMouseButton.LEFT);
-end;
+end;  
 
 var
 (*
