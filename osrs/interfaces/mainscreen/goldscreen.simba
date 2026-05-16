@@ -289,7 +289,7 @@ begin
   if UseSpaceBar and Self.IsItemHighlighted(Item) then
   begin
     Keyboard.KeyPress(EKeyCode.SPACE);
-    if not GoldScreen.IsOpen() then
+    if not Self.IsOpen() then
     Exit;
   end;
     Mouse.Click(Self.ItemBoxes[Item], EMouseButton.LEFT);
