@@ -1002,7 +1002,7 @@ end;
 
 
 
-procedure TAntibanFormHelper.OnListKeyDown(sender: TLazObject; var key: Int16; shift: ELazShiftStates);
+procedure TAntibanFormHelper.OnListKeyDown(sender: TLazObject; var key: UInt16; shift: ELazShiftStates);
 begin
   if key <> 46 then
     Exit;
