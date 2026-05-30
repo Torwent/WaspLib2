@@ -158,7 +158,7 @@ begin
     end;
 
   if ids = [] then
-    raise GetDebugLn('MapJSON', 'Entry with name ' + name + ' doesn''t exist on the loaded maps.');
+    Exit;
 
   if amount = 0 then
     Exit;
@@ -243,7 +243,7 @@ begin
       end;
 
   if ids = [] then
-    raise GetDebugLn('MapJSON', 'Entry with action ' + action + ' doesn''t exist on the loaded maps.');
+    Exit;
 
   if amount = 0 then
     Exit;

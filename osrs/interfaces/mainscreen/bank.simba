@@ -1382,9 +1382,26 @@ end;
 
 
 procedure TRSBank._SetupMapObjects();
+var
+  chests: TRSObjectArray;
 begin
-  Self.Banks   := TRSObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Bank'));
-  Self.Bankers := TRSEntityArray.Create(Map.Walker, NPCsJSON.GetByAction('Bank'));
+  try
+    Self.Banks   := TRSObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Bank'));
+  except
+    Self.Banks := [];
+  end;
+
+  try
+    Self.Bankers := TRSEntityArray.Create(Map.Walker, NPCsJSON.GetByAction('Bank'));
+  except
+    Self.Bankers := [];
+  end;
+
+  try
+    chests := TRSObjectArray.Create(Map.Walker, ObjectsJSON.GetByName('Bank chest'));
+    Self.Banks += chests;
+  except
+  end;
 end;
 
 (*
@@ -1425,10 +1442,20 @@ var
   npc: PRSEntity;
   me: TPoint;
 begin
-  if (Self.Banks = []) or (Self.Bankers = []) then
+  if (Length(Self.Banks) = 0) and (Length(Self.Bankers) = 0) then
     Self._SetupMapObjects();
 
+  if (Length(Self.Banks) = 0) and (Length(Self.Bankers) = 0) then
+    Exit(False);
+
   me := Map.Position();
+
+  if Length(Self.Banks) = 0 then
+    Exit(Self.Hover(Self.Bankers[Self.Bankers.ClosestIndex(me)], walk));
+
+  if Length(Self.Bankers) = 0 then
+    Exit(Self.Hover(Self.Banks[Self.Banks.ClosestIndex(me)], walk));
+
   obj := @Self.Banks[Self.Banks.ClosestIndex(me)];
   npc := @Self.Bankers[Self.Bankers.ClosestIndex(me)];
 
@@ -1475,7 +1502,7 @@ begin
     Result := obj.Interact(['Bank B', 'Bank E', 'Bank G', 'Use B']);
 
   if not Result then
-    if not MainScreen.IsUpText('Bank') or not ChooseOption.Select(['Bank B', 'Bank E']) then
+    if not MainScreen.IsUpText('Bank') or not ChooseOption.Select(['Bank B', 'Bank E', 'Use B']) then
       Exit;
 
   obj.Walker^.WaitMoving();
@@ -1509,10 +1536,20 @@ begin
     MSInterface.Close(True);
   end;
 
-  if (Self.Banks = []) or (Self.Bankers = []) then
+  if (Length(Self.Banks) = 0) and (Length(Self.Bankers) = 0) then
     Self._SetupMapObjects();
 
+  if (Length(Self.Banks) = 0) and (Length(Self.Bankers) = 0) then
+    Exit(False);
+
   me := Map.Position();
+
+  if Length(Self.Banks) = 0 then
+    Exit(Self.Open(Self.Bankers[Self.Bankers.ClosestIndex(me)], walk));
+
+  if Length(Self.Bankers) = 0 then
+    Exit(Self.Open(Self.Banks[Self.Banks.ClosestIndex(me)], walk));
+
   obj := @Self.Banks[Self.Banks.ClosestIndex(me)];
   npc := @Self.Bankers[Self.Bankers.ClosestIndex(me)];
 
