@@ -1,0 +1,28 @@
+//!PACKAGE EXAMPLE
+{$I WaspLib/main.simba}
+
+var
+  layout: TInventoryLayout;
+  layoutSelector: TLazComboBox;
+
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+begin
+  layout.Layout := InventoryForm.Layouts[layoutSelector.ItemIndex];
+
+  WriteLn('Inventory Layout: ', layout.Layout);
+  inherited();
+end;
+
+var
+  form: TScriptForm;
+  tab: TLazTabSheet;
+begin
+  form.Setup();
+
+  tab := form.CreateTab('My Settings');
+  form.CreateInventoryTab();
+
+  layoutSelector := InventoryForm.CreateInventoryCombobox(tab, 'Choose Inventory Layout:', 200, 200);
+
+  form.Run();
+end.

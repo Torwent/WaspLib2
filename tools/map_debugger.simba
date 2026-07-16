@@ -1,0 +1,14 @@
+//!PACKAGE SCRIPT
+(*
+(Map Debugger Tool)=
+# Tool: Map Debugger
+Tool to visually debug {ref}`TMap` with the {ref}`Map Debugger` tool.
+*)
+
+{$I WaspLib/main.simba}
+
+begin
+  Map.Setup([EChunk.VARROCK]);
+  MapDebugger.Setup(Map.Loader);
+  MapDebugger.Show();
+end.

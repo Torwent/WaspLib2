@@ -1,0 +1,417 @@
+(*
+# Client
+Methods relating to targeting the game client and detecting client states.
+*)
+
+{$DEFINE WL_CLIENT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## EClient
+```pascal
+EClient = enum(UNKNOWN, LEGACY, RUNELITE, OFFICIAL);
+```
+Enum that represent the client type.
+*)
+  EClient = enum(UNKNOWN, LEGACY, RUNELITE, OFFICIAL);
+
+(*
+## EMode
+```pascal
+EMode = enum(UNKNOWN, FIXED, RESIZABLE_CLASSIC, RESIZABLE_MODERN);
+```
+Enum that represent the client mode.
+*)
+  EMode = enum(UNKNOWN, FIXED, RESIZABLE, MODERN_COMPACT, MODERN_WIDE);
+
+const
+  RESIZABLE_MODES: set of EMode = [EMode.RESIZABLE..EMode.MODERN_WIDE];
+
+type
+(*
+## EPopoutPanel
+```pascal
+EPopoutPanel = enum(UNKNOWN, DISABLED, ENABLED);
+```
+Enum that represent the state of the popout panel on the official client.
+*)
+  EPopoutPanel = enum(DISABLED, CLOSED, OPEN);
+
+(*
+## TClient
+Record representing the RuneScape client ({ref}`Client`.
+*)
+  PClient = ^TClient;
+
+  TClient = record
+    Client: EClient;
+    Mode: EMode;
+    Canvas: TExternalCanvas;
+    OnLogin: array of procedure (sender: PClient; mode: EMode) of object;
+  end;
+
+(*
+## Client.GetClient
+```pascal
+function TClient.GetClient(): EClient;
+```
+Returns the client type being used.
+
+Example:
+```pascal
+WriteLn Client.GetClient();
+```
+*)
+function TClient.GetClient(): EClient;
+var
+  window: TWindowHandle;
+begin
+  {$IFDEF SIMBAHEADLESS}
+  window := StrToInt(Target.ToString().Between('Handle=', ','));
+  {$ELSE}
+  window := GetSimbaTargetWindow();
+  {$ENDIF}
+
+  case window.GetClassName() of
+    'JagRenderView', 'JagWindow':
+    begin
+      ITEM_SHADOW := $323232;
+      ITEM_SHADOW_GRAY := $323232;
+      ITEM_BORDER := $000000;
+      TEXT_SHADOW := $010000;
+      ITEM_BORDER_WHITE := $FEFEFE;
+      Exit(EClient.OFFICIAL);
+    end;
+  end;
+
+  case window.GetRootWindow().GetTitle() of
+    'Old School RuneScape': Result := EClient.LEGACY;
+    else if window.GetRootWindow().GetTitle().Contains('RuneLite') then
+      Result := EClient.RUNELITE;
+  end;
+end;
+
+
+(*
+## Client._Bounds
+```pascal
+function TClient._Bounds(img: TImage): TBox;
+function TClient._Bounds(): TBox; overload;
+```
+Internal helper methods to figure out the client bounds when we are on the
+`EClient.OFFICIAL` client.
+
+You should never have to use this directly.
+
+Example:
+```pascal
+ShowOnTarget(Client._Bounds());
+```
+*)
+function TClient._Bounds(img: TImage): TBox;
+var
+  x1, x2, y2: Integer;
+  win: TWindowHandle;
+begin
+  if img.Pixel[0, img.Height-1] <> $0 then
+    Exit(Target.Bounds);
+
+  for x1 := 1 to img.Width-1 do
+    if img.Pixel[x1, 150] <> $0 then
+      Break;
+
+  for x2 := img.Width-1 downto x1 do
+    if img.Pixel[x2, 150] <> $0 then
+      Break;
+
+  if img.Height-1 < 503 then
+  begin
+    {$IFDEF SIMBAHEADLESS}
+    win := StrToInt(Target.ToString().Between('Handle=', ','));
+    {$ELSE}
+    win := GetSimbaTargetWindow();
+    {$ENDIF}
+
+    win := win.GetRootWindow();
+    with win.GetBounds() do
+      win.SetBounds([X1, Y1, X2-1, Y1+535]);
+    Result := [x1, 0, x2, 503];
+  end
+  else
+  begin
+    for y2 := img.Height-1 downto 0 do
+      if img.Pixel[x1, y2] <> $0 then
+        Break;
+    Result := [x1, 0, x2, y2];
+  end;
+end;
+
+function TClient._Bounds(): TBox; overload;
+begin
+  Result := Self._Bounds(Target.GetImage());
+end;
+
+(*
+## Client.GetPopoutPanelState
+```pascal
+function TClient.GetPopoutPanelState(img: TImage): EPopoutPanel;
+function TClient.GetPopoutPanelState(): EPopoutPanel; overload;
+```
+Internal helper methods to figure out if the "Popout" panel is open or not
+when we are on the `EClient.OFFICIAL` client.
+
+You should never have to use this directly.
+
+Example:
+```pascal
+WriteLn Client.GetPopoutPanelState();
+```
+*)
+function TClient.GetPopoutPanelState(img: TImage): EPopoutPanel;
+var
+  x: Integer;
+begin
+  img.Crop([img.Width - 331, img.Height-2, img.Width-1, img.Height-1]);
+
+  //find tab border color.
+  for x := img.Width-1 downto 0 do
+    if img.Pixel[x, 0] = $010000 then
+      Break;
+
+  case x of
+    0..3, 15..17: Result := EPopoutPanel.OPEN;
+    270..273, 285..287: Result := EPopoutPanel.CLOSED;
+    else Result := EPopoutPanel.DISABLED;
+  end;
+end;
+
+function TClient.GetPopoutPanelState(): EPopoutPanel; overload;
+var
+  img: TImage;
+  b: TBox;
+begin
+  img := Target.GetImage();
+  b := Self._Bounds(img);
+  img.Crop(b);
+  Result := Self.GetPopoutPanelState(img);
+end;
+
+
+(*
+## Client.Bounds
+```pascal
+property TClient.Bounds: TBox;
+```
+Dynamic client bounds to handle different client quirks.
+
+Example:
+```pascal
+ShowOnTarget(Client.Bounds);
+```
+*)
+property TClient.Bounds: TBox;
+var
+  img: TImage;
+  b: TBox;
+begin
+  if Self.Client <> EClient.OFFICIAL then
+    Exit(Target.Bounds);
+
+  img := Target.GetImage();
+  b := Self._Bounds(img);
+
+  img.Crop(b);
+
+  case Self.GetPopoutPanelState(img) of
+    EPopoutPanel.DISABLED: Result := b;
+    EPopoutPanel.CLOSED:   Result := [b.X1, b.Y1, b.X2 - 42, b.Y2];
+    EPopoutPanel.OPEN:     Result := [b.X1, b.Y1, b.X2 - 312, b.Y2];
+  end;
+end;
+
+(*
+## Client.GetMode
+```pascal
+function TClient.GetMode(): EMode;
+```
+Returns the client mode.
+
+Example:
+```pascal
+WriteLn Client.GetMode();
+```
+*)
+function TClient.GetMode(): EMode;
+var
+  bounds: TBox;
+begin
+  if Self.Client = EClient.UNKNOWN then
+    Exit;
+
+  bounds := Self.Bounds;
+
+  // Music tab in each mode there are different colors at W-4, H-21
+  // Two colors each because tab can be active(red) or not(grey)
+  case Target.GetColor(bounds.BottomRight.Offset(-3,-20)) of
+    $25292C, $0A0C23: Result := EMode.FIXED;
+    $2C3134, $0C0E2B: Result := EMode.RESIZABLE;
+    $364145, $0E1339:
+    begin
+      if bounds.Width >= 948 then
+        Result := EMode.MODERN_WIDE
+      else
+        Result := EMode.MODERN_COMPACT;
+    end;
+  end;
+end;
+
+(*
+## Client.ModeChanged
+```pascal
+function TClient.ModeChanged(): Boolean;
+```
+Returns true if the client mode changed.
+*)
+function TClient.ModeChanged(): Boolean;
+var
+  current: EMode;
+begin
+  current := Self.GetMode();
+  Result := (current <> Self.Mode) and (current <> EMode.UNKNOWN);
+end;
+
+(*
+## Client.WaitModeChange
+```pascal
+function TClient.WaitModeChange(time: Integer = 600; interval: Integer = -1): Boolean;
+```
+Waits `time` milliseconds for the client mode to change
+*)
+function TClient.WaitModeChange(time: Integer = 1200; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.ModeChanged(), interval, time);
+end;
+
+
+
+(*
+## Client.IsLoggedIn
+```pascal
+function TClient.IsLoggedIn(): Boolean;
+```
+Returns true/false whether there's a player logged in or not.
+
+Example:
+```pascal
+WriteLn Client.IsLoggedIn();
+```
+*)
+function TClient.IsLoggedIn(): Boolean;
+var
+  i: Integer;
+  mode: EMode;
+begin
+  mode := Self.GetMode();
+  Result := mode <> EMode.UNKNOWN;
+  if not Result then
+    Exit;
+
+  for i := 0 to High(Self.OnLogin) do
+    Self.OnLogin[i](@Self, mode);
+end;
+
+(*
+## Client.WaitLoggedIn
+```pascal
+function TClient.WaitLoggedIn(time: Integer = 2000; interval: Integer = -1): Boolean;
+```
+Waits `time` milliseconds for the players to be logged in.
+
+Example:
+```pascal
+WriteLn Client.WaitLoggedIn();
+```
+*)
+function TClient.WaitLoggedIn(time: Integer = 2000; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsLoggedIn(), interval, time);
+end;
+
+
+function TClient.GetTooltipBounds(): TBox;
+var
+  pt: TPoint;
+  bounds: TBox;
+  tpa: TPointArray;
+begin
+  pt := Target.MouseXY;
+  bounds := Self._Bounds();
+
+  if not bounds.Contains(pt) then
+    Exit;
+
+  if pt.Y+43 > bounds.Y2 then
+  begin
+    bounds.Y1 := bounds.Y2 - 22;
+    bounds.Y2 := bounds.Y2 - 3;
+  end
+  else
+  begin
+    bounds.Y1 := pt.Y + 24;
+    bounds.Y2 := pt.Y + 43;
+  end;
+
+  tpa := Target.FindColor(TEXT_SHADOW, 0, bounds);
+  if tpa = [] then
+    Exit;
+
+  tpa := tpa.Cluster(7,4).SortFromFirstPointX(pt).First;
+  with tpa.Bounds() do
+  begin
+    bounds.X1 := Max(X1-6, 0);
+    bounds.X2 := X2+4;
+  end;
+
+  Result := bounds;
+end;
+
+(*
+## Client.ReadTooltip
+```pascal
+function TClient.ReadTooltip(): String;
+```
+Attempts to read the client tooltip if it's present.
+
+Example:
+```pascal
+WriteLn Client.ReadTooltip();
+```
+*)
+function TClient.ReadTooltip(): String;
+var
+  bounds: TBox;
+  font: ^TPixelFont;
+begin
+  case Self.Client of
+    EClient.OFFICIAL: font := @Fonts.PLAIN_12;
+    EClient.RUNELITE: font := @Fonts.SMALL;
+    else Exit;
+  end;
+
+  bounds := Self.GetTooltipBounds();
+  if bounds = Default(TBox) then
+    Exit;
+
+  Result := OCR.RecognizeShadow(bounds, font^, 0);
+end;
+
+
+var
+(*
+## Client variable
+Global {ref}`TClient` variable.
+*)
+  Client: TClient;

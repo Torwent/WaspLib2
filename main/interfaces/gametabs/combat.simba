@@ -1,0 +1,441 @@
+(*
+# Combat
+Methods to interact with the combat gametab:
+```{figure} ../../images/combattab.png
+```
+*)
+{$DEFINE WL_COMBAT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+const
+  WEAPON_CATEGORIES: TStringArray = [
+    'Axe', 'Banner', 'Blunt', 'Bludgeon', 'Bulwark', 'Claw', 'Egg', 'Partisan',
+    'Pickaxe', 'Polearm', 'Polestaff', 'Scythe', 'Slash Sword', 'Spear',
+    'Spiked', 'Stab Sword', '2H Sword', 'Unarmed', 'Whip',
+    'Blaster', 'Bow', 'Chinchompa', 'Crossbow', 'Gun', 'Thrown',
+    'Bladed Staff', 'Powered Staff', 'Staff', 'Salamander'
+  ];
+
+  WEAPON_STYLES: TStringArray = [
+    'Bash', 'Pound', 'Pummel', 'Spike', 'Impale', 'Focus', 'Chop', 'Hack',
+    'Stab', 'Slash', 'Lunge', 'Block', 'Flick', 'Lash', 'Deflect', 'Swipe',
+    'Jab', 'Fend', 'Smash', 'Punch', 'Kick', 'Scorch',
+    'Accurate', 'Rapid', 'Longrange', 'Flare',
+    'Spell', 'Blaze'
+  ];
+
+type
+  EWeaponCategory = enum(
+    //Melee
+    AXE, BANNER, BLUNT, BLUDGEON, BULWARK, CLAW, EGG, PARTISAN, PICKAXE,
+    POLEARM, POLESTAFF, SCYTHE, SLASH_SWORD, SPEAR, SPIKED, STAB_SWORD,
+    TWO_HANDED_SWORD, UNARMED, WHIP,
+    //Ranged
+    BLASTER, BOW, CHINCHOMPA, CROSSBOW, GUN, THROWN,
+    //Magic
+    BLADED_STAFF, POWERED_STAFF, STAFF,
+    //Other
+    SALAMANDER
+  );
+
+  EMeleeStyle = enum(NONE, STAB, SLASH, CRUSH);
+
+  EWeaponStyle = enum(
+    BASH, POUND, PUMMEL, SPIKE, IMPALE, FOCUS, CHOP, HACK, STAB, SLASH, LUNGE,
+    BLOCK, FLICK, LASH, DEFLECT, SWIPE, JAB, FEND, SMASH, PUNCH, KICK, SCORCH,
+    ACCURATE, RAPID, LONGRANGE, FLARE,
+    SPELL, BLAZE
+  );
+
+function EWeaponStyle.GetMeleeStyle(category: EWeaponCategory): EMeleeStyle;
+begin
+  case Self of
+    EWeaponStyle.SPIKE, EWeaponStyle.IMPALE, EWeaponStyle.STAB, EWeaponStyle.LUNGE:
+      Result := EMeleeStyle.STAB;
+
+    EWeaponStyle.CHOP, EWeaponStyle.HACK, EWeaponStyle.SLASH,
+    EWeaponStyle.FLICK, EWeaponStyle.LASH, EWeaponStyle.DEFLECT,
+    EWeaponStyle.SWIPE, EWeaponStyle.SCORCH:
+      Result := EMeleeStyle.SLASH;
+
+    EWeaponStyle.BASH, EWeaponStyle.POUND, EWeaponStyle.PUMMEL,
+    EWeaponStyle.FOCUS, EWeaponStyle.SMASH, EWeaponStyle.PUNCH, EWeaponStyle.KICK:
+      Result := EMeleeStyle.CRUSH;
+
+    EWeaponStyle.BLOCK:
+    begin
+      case category of
+        EWeaponCategory.AXE, EWeaponCategory.CLAW,
+        EWeaponCategory.SCYTHE, EWeaponCategory.SLASH_SWORD,
+        EWeaponCategory.TWO_HANDED_SWORD:
+          Result := EMeleeStyle.SLASH;
+
+        EWeaponCategory.BANNER, EWeaponCategory.PARTISAN,
+        EWeaponCategory.PICKAXE, EWeaponCategory.SPEAR, EWeaponCategory.STAB_SWORD:
+          Result := EMeleeStyle.STAB;
+
+        EWeaponCategory.BLUNT, EWeaponCategory.EGG, EWeaponCategory.POLESTAFF,
+        EWeaponCategory.SPIKED, EWeaponCategory.UNARMED:
+          Result := EMeleeStyle.CRUSH;
+      end;
+    end;
+
+    EWeaponStyle.JAB:
+    begin
+      case category of
+        EWeaponCategory.POLEARM, EWeaponCategory.BLADED_STAFF:
+          Result := EMeleeStyle.STAB;
+        EWeaponCategory.SCYTHE:
+          Result := EMeleeStyle.CRUSH;
+      end;
+    end;
+
+    EWeaponStyle.FEND:
+    begin
+      case category of
+        EWeaponCategory.POLEARM: Result := EMeleeStyle.STAB;
+        EWeaponCategory.BLADED_STAFF: Result := EMeleeStyle.CRUSH;
+      end;
+    end;
+  end;
+end;
+
+type
+(*
+## TCombat
+Main record responsible with handling the combat gametab.
+*)
+  TCombat = record
+    SailingBox, AutoRetaliateBox, SpecialAttackBox,
+    CategoryBox, _StylesBox: TBox;
+    _StyleBoxes: array [0..2] of TBoxArray;
+  end;
+
+procedure TCombat.SetupGameTab();
+begin
+  with GameTab.TopLeft do
+  begin
+    Self.SailingBox := [X-3, Y+1, X+22, Y+26];
+    Self.AutoRetaliateBox := [X+18, Y+155, X+165, Y+196];
+    Self.SpecialAttackBox := [X+18, Y+206, X+165, Y+229];
+    Self.CategoryBox := [X+22, Y+235, X+161, Y+255];
+    Self._StylesBox := [X+18, Y+47, X+165, Y+148];
+
+    Self._StyleBoxes[0] := TBoxArray.Create([X+18,Y+47], 2, 2, 68, 44, [11, 10]);
+    Self._StyleBoxes[1] := Copy(Self._StyleBoxes[0], 0, 3);
+    Self._StyleBoxes[2] := TBoxArray.Create([X+18,Y+47], 1, 3, 68, 29, [0, 7]);
+    Self._StyleBoxes[2] += TBoxArray.Create([X+97,Y+47], 1, 2, 68, 47, [0, 7]);
+  end;
+end;
+
+
+(*
+## Combat.IsOpen
+```pascal
+function TCombat.IsOpen(): Boolean;
+```
+Returns true/false if the combat tab is open.
+
+Example:
+```pascal
+WriteLn Combat.IsOpen();
+```
+*)
+function TCombat.IsOpen(): Boolean;
+begin
+  Result := GameTabs.IsOpen(EGameTab.COMBAT) and not Sailing.IsOpen();
+end;
+
+(*
+## Combat.Open
+```pascal
+function TCombat.Open(): Boolean;
+```
+Attempts to open the combat gametab.
+
+Example:
+```pascal
+WriteLn Combat.Open();
+```
+*)
+function TCombat.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.COMBAT);
+  if Result and not Self.IsOpen() then
+  begin
+    Mouse.Click(Self.SailingBox, EMouseButton.LEFT);
+    Result := SleepUntil(Self.IsOpen(), RandomMode(100, 50, 1500), 4*TICK);
+  end;
+end;
+
+
+(*
+## Combat.GetCategory
+```pascal
+function TCombat.GetCategory(): EWeaponCategory;
+```
+Returns the `EWeaponCategory` of the current weapon.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Combat.GetCategory();
+end.
+```
+*)
+function TCombat.GetCategory(): EWeaponCategory;
+var
+  str: String;
+begin
+  str := OCR.Recognize(Self.CategoryBox, Fonts.PLAIN_11, [TFonts.ORANGE], 0);
+  str := str.After('Category: ');
+
+  Result := EWeaponCategory(WEAPON_CATEGORIES.IndexOf(str));
+end;
+
+(*
+## Combat.StyleBoxes
+```pascal
+property TCombat.StyleBoxes: TBoxArray;
+```
+Returns the the attack style boxes available.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  while True do
+    ShowOnTarget(Combat.StyleBoxes);
+end.
+```
+```{figure} ../../images/attackstyles.gif
+```
+*)
+property TCombat.StyleBoxes: TBoxArray;
+var
+  tpa: TPointArray;
+begin
+  tpa := Target.FindColor(TFonts.ORANGE, 0, Self._StylesBox);
+
+  case Length(tpa.Cluster(6,6)) of
+    3: Exit(Self._StyleBoxes[1]);
+    4: Exit(Self._StyleBoxes[0]);
+    5: Exit(Self._StyleBoxes[2]);
+  end;
+end;
+
+
+function TCombat._GetWeaponStyle(b: TBox): EWeaponStyle;
+var
+  str: String;
+begin
+  str := OCR.Recognize(b, Fonts.PLAIN_11, [TFonts.ORANGE], 0);
+  Result := EWeaponStyle(WEAPON_STYLES.IndexOf(str));
+end;
+
+
+(*
+## Combat.WeaponStyle
+```pascal
+property TCombat.WeaponStyle: EWeaponStyle;
+property TCombat.WeaponStyle(value: EWeaponStyle): Boolean;
+```
+Gets/Sets the weapon `EWeaponStyle`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Combat.WeaponStyle;
+  WriteLn Combat.WeaponStyle := EWeaponStyle.BLOCK;
+  WriteLn Combat.WeaponStyle;
+end.
+```
+*)
+property TCombat.WeaponStyle: EWeaponStyle;
+var
+  b: TBox;
+begin
+  for b in Self.StyleBoxes do
+    if Target.HasColor([$1D1F82, 0.560, EColorSpace.HSL, [1.403, 1.403, 0.196]], 1, b) then
+      Exit(Self._GetWeaponStyle(b));
+end;
+
+property TCombat.WeaponStyle(value: EWeaponStyle): Boolean;
+var
+  b: TBox;
+  str: String;
+begin
+  if not Self.Open() then
+    Exit;
+
+  for b in Self.StyleBoxes do
+  begin
+    str := OCR.Recognize(b, Fonts.PLAIN_11, [TFonts.ORANGE], 0);
+    if str <> WEAPON_STYLES[value] then Continue;
+
+    if Target.HasColor([$1D1F82, 0.560, EColorSpace.HSL, [1.403, 1.403, 0.196]], 1, b) then
+      Exit(True);
+
+    Mouse.Click(b, EMouseButton.LEFT);
+    Exit(
+      SleepUntil(
+        Target.HasColor([$1D1F82, 0.560, EColorSpace.HSL, [1.403, 1.403, 0.196]], 1, b),
+        200, 3*TICK
+      )
+    );
+  end;
+end;
+
+
+function TCombat._GetMeleeStyle(category: EWeaponCategory): EMeleeStyle;
+var
+  weaponStyle: EWeaponStyle;
+begin
+  weaponStyle := Self.WeaponStyle;
+  Result := weaponStyle.GetMeleeStyle(category);
+end;
+
+
+(*
+## Combat.MeleeStyle
+```pascal
+property TCombat.MeleeStyle: EMeleeStyle;
+property TCombat.MeleeStyle(value: EMeleeStyle): Boolean;
+```
+Gets/Sets the combat `EMeleeStyle`. Doesn't do anything if we don't have a
+melee weapon.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Combat.MeleeStyle;
+  WriteLn Combat.MeleeStyle := EMeleeStyle.SLASH;
+  WriteLn Combat.MeleeStyle;
+end.
+```
+*)
+property TCombat.MeleeStyle: EMeleeStyle;
+begin
+  Result := Self._GetMeleeStyle(Self.GetCategory());
+end;
+
+property TCombat.MeleeStyle(value: EMeleeStyle): Boolean;
+var
+  weaponStyle: EWeaponStyle;
+  category: EWeaponCategory;
+  b: TBox;
+begin
+  if not Self.Open() then
+    Exit;
+
+  category := Self.GetCategory();
+  if value = Self._GetMeleeStyle(category) then
+    Exit(True);
+
+  for b in Self.StyleBoxes do
+  begin
+    weaponStyle := Self._GetWeaponStyle(b);
+    if weaponStyle.GetMeleeStyle(category) <> value then
+      Continue;
+    Mouse.Click(b, EMouseButton.LEFT);
+
+    Exit(
+      SleepUntil(
+        Target.HasColor([$1D1F82, 0.560, EColorSpace.HSL, [1.403, 1.403, 0.196]], 1, b),
+        200, 3*TICK
+      )
+    );
+  end;
+end;
+
+
+(*
+## Combat.AutoRetaliate
+```pascal
+property TCombat.AutoRetaliate: Boolean;
+property TCombat.AutoRetaliate(value: Boolean): Boolean;
+```
+Gets/Sets the auto retaliate state.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Combat.AutoRetaliate;
+  Combat.AutoRetaliate := True;
+  WriteLn Combat.AutoRetaliate;
+  Combat.AutoRetaliate := False;
+  WriteLn Combat.AutoRetaliate;
+end.
+```
+*)
+property TCombat.AutoRetaliate: Boolean;
+begin
+  Result := Target.HasColor([$1D1F82, 0.560, EColorSpace.HSL, [1.403, 1.403, 0.196]], 1, Self.AutoRetaliateBox);
+end;
+
+property TCombat.AutoRetaliate(value: Boolean): Boolean;
+begin
+  if not Self.Open() then
+    Exit;
+  if Self.AutoRetaliate = value then
+    Exit(True);
+
+  Mouse.Click(Self.AutoRetaliateBox, EMouseButton.LEFT);
+  Result := SleepUntil(Self.AutoRetaliate = value, 200, 3 * TICK);
+end;
+
+
+(*
+## Combat.SpecialAttack
+```pascal
+property TCombat.SpecialAttack: Boolean;
+property TCombat.SpecialAttack(value: Boolean): Boolean;
+```
+Gets/Sets the special attack state.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Combat.SpecialAttack;
+  Combat.SpecialAttack := True;
+  WriteLn Combat.SpecialAttack;
+  Combat.SpecialAttack := False;
+  WriteLn Combat.SpecialAttack;
+end.
+```
+*)
+property TCombat.SpecialAttack: Boolean;
+begin
+  Result := Minimap.SpecialEnabled();
+end;
+
+property TCombat.SpecialAttack(value: Boolean): Boolean;
+begin
+  if not Minimap.HasSpecial() then
+    Exit;
+
+  if Self.SpecialAttack = value then
+    Exit(True);
+
+  if not Self.IsOpen() then
+  begin
+    if value then
+      Exit(Minimap.EnableSpecial(0));
+    Exit(Minimap.DisableSpecial());
+  end;
+
+  Mouse.Click(Self.SpecialAttackBox, EMouseButton.LEFT);
+  Result := SleepUntil(Self.SpecialAttack = value, 200, 3 * TICK);
+end;
+
+var
+(*
+## Combat variable
+Global {ref}`TCombat` variable.
+*)
+  Combat: TCombat;

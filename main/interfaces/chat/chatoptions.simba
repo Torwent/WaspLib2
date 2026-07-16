@@ -1,0 +1,469 @@
+(*
+# Chat Options
+The {ref}`Chat` interface options menu that shows up when you are interacting
+with certain objects or NPCs.
+
+```{figure} ../../images/chat_options.png
+A chat options menu.
+```
+*)
+{$DEFINE WL_CHAT_OPTIONS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+var
+  CHAT_OPTION_COLORS: TColorArray = [TFonts.BLACK, TFonts.WHITE, TFonts.BLUE];
+
+type
+(*
+## TChatOption
+Helper record to handler chat options.
+*)
+  TChatOption = record
+    Text: String;
+    Bounds: TBox;
+    Key: EKeyCode;
+  end;
+  TChatOptionArray = array of TChatOption;
+
+{$R-}
+(*
+(Chat.Options)=
+## Chat.Options property
+```pascal
+property TChat.Options(const colors: TColorArray): TChatOptionArray;
+property TChat.Options: TChatOptionArray;
+```
+Returns every chat option visible with the specified `colors`.
+
+Example:
+```pascal
+img := Target.GetImage();
+for option in Chat.Options do
+  img.DrawBox(option.Bounds);
+img.Show();
+img.Free();
+```
+
+```{figure} ../../images/chat_getoptions.png
+```
+*)
+property TChat.Options(const colors: TColorArray): TChatOptionArray;
+var
+  pt: TPoint;
+  i: Integer;
+begin
+  OCR.RecognizeLines(Self.Bounds, Fonts.QUILL_8, colors, 0);
+  if OCR.Engine.Matches.IsEmpty then
+    Exit;
+
+  SetLength(Result, Length(OCR.Engine.Matches));
+
+  pt := Self.Bounds.TopLeft;
+
+  for i := 0 to High(OCR.Engine.Matches) do
+  begin
+    Result[i].Bounds := OCR.Engine.Matches[i].Bounds.Offset(pt);
+    Result[i].Text := OCR.Engine.Matches[i].Text;
+    Result[i].Key := EKeyCode(Ord(EKeyCode.NUM_1) + i);
+  end;
+
+  if ('Click here to continue' in Result[High(Result)].Text) then
+    Result[High(Result)].Key := EKeyCode.SPACE;
+end;
+
+property TChat.Options: TChatOptionArray;
+begin
+  Result := Self.Options[[TFonts.BLACK, TFonts.WHITE]];
+end;
+
+
+
+(*
+### Chat.Options.ToString
+```pascal
+function TChatOptionArray.ToString(): String;
+```
+Returns the {ref}`TChatOptionArray` as a string with it's options separated with
+`LINE_SEP`.
+
+Example:
+```pascal
+WriteLn Chat.Options.ToString();
+```
+*)
+function TChatOptionArray.ToString(): String;
+var
+  i: Integer;
+begin
+  if Self.IsEmpty then
+    Exit;
+
+  Result := Self[0].Text;
+  for i := 1 to High(Self) do
+    Result += LINE_SEP + Self[i].Text;
+end;
+
+(*
+### Chat.Options.IndexOf
+```pascal
+function TChatOptionArray.IndexOf(const txt: String; matchCase: Boolean = True): Integer;
+```
+Returns the index of the specified `option`.
+
+`option` doesn't have to be the entire string of the option, a partial string is fine.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  options: TChatOptionArray;
+  i: Integer;
+begin
+  options := Chat.Options;
+  i := options.IndexOf('access my bank');
+  if i >= 0 then
+    ShowOnTarget(options[i].Bounds);
+end.
+```
+```{figure} ../../images/chat_findoption.png
+```
+*)
+function TChatOptionArray.IndexOf(const txt: String; matchCase: Boolean = True): Integer;
+begin
+  for Result := 0 to High(Self) do
+    if Self[Result].Text.Contains(txt, matchCase) then
+      Exit;
+  Result := -1;
+end;
+
+(*
+### Chat.Options.Get
+```pascal
+function TChatOptionArray.Get(
+  const txt: String; matchCase: Boolean = True
+): TChatOption;
+```
+Returns the specified `txt` as a `TChatOption` if it exists on the current
+{ref}`TChatOptionArray`.
+
+`txt` doesn't have to be the entire string of the option, a partial string is fine.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  ShowOnTarget(Chat.Options.Get('access my bank').Bounds);
+end.
+```
+```{figure} ../../images/chat_findoption.png
+```
+*)
+function TChatOptionArray.Get(
+  const txt: String; matchCase: Boolean = True
+): TChatOption;
+var
+  i: Integer;
+begin
+  i := Self.IndexOf(txt, matchCase);
+  if i > -1 then
+    Result := Self[i];
+end;
+
+(*
+### Chat.Options.Contains
+```pascal
+function TChatOptionArray.Contains(
+  const txt: String; matchCase: Boolean = True
+): Boolean; overload;
+```
+Returns True/False if the chat option with the specified `txt` text is in this
+{ref}`TChatOptionArray`.
+
+`txt` doesn't have to be the entire string of the option, a partial string is fine.
+
+Example:
+```pascal
+WriteLn Chat.Options.Contains('access my bank');
+```
+*)
+function TChatOptionArray.Contains(
+  const txt: String; matchCase: Boolean = True
+): Boolean; overload;
+begin
+  Result := Self.IndexOf(txt, matchCase) > -1;
+end;
+
+(*
+### Chat.Options.Select
+```pascal
+function TChatOptionArray.Select(
+  const txt: String; matchCase: Boolean = True; keyProbability: Single = -1
+): Boolean;
+```
+Selects a chat option whose text matches `txt`.
+
+Example:
+```pascal
+WriteLn Chat.Options.Select('access my bank');
+```
+*)
+function TChatOptionArray.Select(
+  const txt: String; matchCase: Boolean = True; keyProbability: Single = -1
+): Boolean;
+var
+  idx: Integer;
+  option: TChatOption;
+begin
+  idx := Self.IndexOf(txt, matchCase);
+  if idx < 0 then
+    Exit;
+
+  option := Self[idx];
+
+  if keyProbability < 0 then
+    keyProbability := Biometrics.RandomDouble(0.5);
+
+  if RandomBoolean(keyProbability) then
+    Keyboard.KeyPress(option.Key)
+  else
+    Mouse.Click(option.Bounds, EMouseButton.LEFT);
+
+  Result := True;
+end;
+
+
+(*
+## Chat.WaitOption
+```pascal
+function TChat.WaitOption(
+  const txt: String;
+  matchCase: Boolean = True;
+  colors: TColorArray = CHAT_OPTION_COLORS;
+  time: Integer = TICK;
+  interval: Integer = -1
+): Boolean;
+```
+Same as {ref}`Chat.ContainsOption` but waits up to `time` milliseconds for it to be true.
+
+Example:
+```pascal
+WriteLn Chat.WaitOption('access my bank');
+```
+*)
+function TChat.WaitOption(
+  const txt: String;
+  matchCase: Boolean = True;
+  colors: TColorArray = CHAT_OPTION_COLORS;
+  time: Integer = TICK;
+  interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then
+    interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.Options[colors].Contains(txt, matchCase), time, interval);
+end;
+
+
+(*
+## Chat Options: Continue
+Methods to handle the continue option in the {ref}`Chat` box.
+*)
+
+(*
+### Chat.ContainsContinue
+```pascal
+function TChat.ContainsContinue(): Boolean;
+```
+Returns true if there's a "Click here to continue" option available.
+
+Example:
+```pascal
+WriteLn Chat.ContainsContinue();
+```
+*)
+function TChat.ContainsContinue(): Boolean;
+var
+  opts: TChatOptionArray;
+begin
+  opts := Self.Options[[TFonts.BLUE, TFonts.WHITE]];
+  Result := opts.Contains('Click here to continue') or opts.Contains('Please wait');
+end;
+
+(*
+### Chat.ContinueChat
+```pascal
+function TChat.ContinueChat(keyProbability: Single = -1): Boolean;
+```
+Selects the "Click here to continue" chat option.
+
+Example:
+```pascal
+WriteLn Chat.ContinueChat();
+```
+*)
+function TChat.Continue(keyProbability: Single = -1): Boolean;
+var
+  colors: TColorArray;
+begin
+  if keyProbability < 0 then
+    keyProbability := Biometrics.RandomDouble(0.5);
+
+  colors := [TFonts.BLUE, TFonts.WHITE];
+  if not Self.Options[colors].Select('Click here to continue', True, keyProbability) then
+    Exit;
+
+  Result := Self.WaitOption('Please wait', True, colors, 3000) and
+            SleepUntil(not Self.Options[colors].Contains('Please wait', True), RandomMode(100, 50, 1500), 3000);
+end;
+
+(*
+### Chat.ContinueUntilOption
+```pascal
+function TChat.ContinueUntilOption(const txt: String; timeout: Int64 = 10*SECOND): Boolean;
+```
+Selects the "Click here to continue" continuously until `option` is available
+as a chat option or until we reach the `timeout` which is measured in milliseconds.
+
+Example:
+```pascal
+WriteLn Chat.ContinueUntilOption('access my bank');
+```
+*)
+function TChat.ContinueUntilOption(const txt: String; timeout: Int64 = 10*SECOND): Boolean;
+begin
+  timeout := Time() + timeout;
+  while (Time() < timeout) do
+  begin
+    if Self.Options.Contains(txt, True) then
+      Break;
+    Self.Continue();
+    Sleep(0, 2500, ERandomDir.LEFT);
+  end;
+
+  Result := Self.Options.Select(txt);
+end;
+
+(*
+## Chat Options: Title
+Methods and properties to handle the title option in the {ref}`Chat` box.
+The "Title" option is a text you cannot select and is red, often with 2 swords pointing
+to it but not always.
+*)
+
+(*
+### Chat.Title
+```pascal
+property TChat.Title: String;
+```
+Returns the chat options title.
+
+Example:
+```pascal
+WriteLn Chat.Title;
+```
+*)
+property TChat.Title: String;
+var
+  options: TChatOptionArray;
+begin
+  options := Self.Options[[$000080]];
+  if options.IsEmpty then
+    Exit;
+  Result := options[0].Text;
+end;
+
+(*
+### Chat.IsTitle
+```pascal
+function TChat.IsTitle(const txt: String; similarity: Single = 0.8): Boolean;
+```
+Returns True/False if the current chat title matches `txt`.
+
+Example:
+```pascal
+WriteLn Chat.IsTitle('Select an option');
+```
+*)
+function TChat.IsTitle(const txt: String; similarity: Single = 0.8): Boolean;
+begin
+  Result := Self.Title.Similarity(txt) >= similarity;
+end;
+
+(*
+### Chat.WaitTitle
+```pascal
+function TChat.WaitTitle(
+  const txt: String;
+  time: Integer = TICK;
+  similarity: Single = 0.8;
+  interval: Integer = -1
+): Boolean;
+```
+Returns True/False if the current chat title matches `txt` until `time` runs out.
+
+Example:
+```pascal
+WriteLn Chat.WaitTitle('Select an option');
+```
+*)
+function TChat.WaitTitle(
+  const txt: String;
+  time: Integer = TICK;
+  similarity: Single = 0.8;
+  interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then
+    interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsTitle(txt, similarity), time, interval);
+end;
+
+
+(*
+## Chat Options: Level Up
+Methods to handle level up messages.
+*)
+
+(*
+### Chat.LeveledUp
+```pascal
+function TChat.LeveledUp(): Boolean;
+```
+Returns true if we have the level up message on the chat box.
+
+Example:
+```pascal
+if Chat.LeveledUp() then
+  Chat.Continue();
+```
+*)
+function TChat.LeveledUp(): Boolean;
+begin
+  Result := Self.Options[[TFonts.DARK_BLUE]].Contains('Congratulations', True);
+end;
+
+
+(*
+### Chat.HandleLevelUp
+```pascal
+function TChat.HandleLevelUp(keyProbability: Single = -1): Boolean;
+```
+Attempts to handle the {ref}`Chat.LevelUp` notification.
+
+Example:
+```pascal
+Chat.HandleLevelUp();
+```
+*)
+function TChat.HandleLevelUp(keyProbability: Single = -1): Boolean;
+var
+  timeout: UInt64;
+begin
+  timeout := Time() + 8000;
+  repeat
+    Self.Continue(keyProbability);
+    Sleep(60, 3000, ERandomDir.LEFT);
+    Result := Chat.GetDisplayName() <> '';
+  until Result or (Time() > timeout);
+end;
+{$R+}

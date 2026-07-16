@@ -1,0 +1,99 @@
+(*
+# Interface
+The core of interface handling.
+*)
+
+{$DEFINE WL_INTERFACE_CORE_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TInterface
+Core record for `Interfaces` with a lot of interface coordinate data.
+*)
+  TInterface = record
+    Bounds: TBox;
+    Width, Height: Integer;
+    Center, TopLeft, TopRight, BottomRight, BottomLeft: TPoint;
+    Quad: TQuad;
+    const BORDER: TColor = $010000;
+  end;
+
+type
+  TInterfaceTitle = record
+    Bounds, CloseButton: TBox;
+    Font: ^TPixelFont;
+    TitleColor: TColor;
+    IsOpen: function (): Boolean of object;
+  end;
+
+function TInterfaceTitle._IsOpen(): Boolean;
+begin
+  Result := Target.HasColor(TInterface.BORDER, 0, 80, Self.CloseButton);
+end;
+
+procedure TInterfaceTitle.Setup(const bounds: TBox);
+begin
+  Self.Bounds.X1 := bounds.X1 + 50;
+  Self.Bounds.Y1 := bounds.Y1 + 10;
+  Self.Bounds.X2 := bounds.X2 - 50;
+  Self.Bounds.Y2 := Self.Bounds.Y1 + 17;
+
+  Self.CloseButton.X1 := bounds.X2-27;
+  Self.CloseButton.Y1 := bounds.Y1+7;
+  Self.CloseButton.X2 := bounds.X2-7;
+  Self.CloseButton.Y2 := bounds.Y1+27;
+
+  Self.TitleColor := TFonts.ORANGE;
+
+  Self.IsOpen := @Self._IsOpen;
+  Self.Font := @Fonts.BOLD;
+end;
+
+
+
+function TInterfaceTitle.WaitOpen(time: Integer = 600; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+
+function TInterfaceTitle.GetTitle(): String;
+begin
+  Result := OCR.Recognize(Self.Bounds, Self.Font^, [Self.TitleColor, $0], 0);
+end;
+
+function TInterfaceTitle.IsTitle(text: String; similarity: Single = 0.8): Boolean;
+var
+  match: Single;
+begin
+  match := OCR.LocateInvert(Self.Bounds, text, [$344049,$0], 2, Self.Font^);
+  Result := match >= similarity;
+end;
+
+function TInterfaceTitle.WaitTitle(text: String; similarity: Single = 0.8; time: Integer = 600; interval: Integer = -1): Boolean; overload;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsTitle(text, similarity), interval, time);
+end;
+
+
+function TInterfaceTitle.Close(escape: Boolean): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit(True);
+
+  case escape of
+    False: Mouse.Click(Self.CloseButton, EMouseButton.LEFT);
+    True:  Target.KeyPress(EKeyCode.ESCAPE);
+  end;
+
+  Result := SleepUntil(not Self.IsOpen(), 50, 600);
+end;
+
+function TInterfaceTitle.Close(escapeProbability: Single = -1): Boolean; overload;
+begin
+  if escapeProbability = -1 then escapeProbability := Biometrics.RandomDouble(0.5);
+  Result := Self.Close(RandomBoolean(escapeProbability));
+end;

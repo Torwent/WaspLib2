@@ -1,0 +1,42 @@
+name: Documentation
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "**/*.simba"
+      - "**/*.md"
+
+permissions:
+  pages: write
+  id-token: write
+
+jobs:
+  documentation:
+    if: ${{ github.repository_owner == 'WaspScripts' }}
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: checkout
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Generate Documentation
+        run: |
+          sudo apt-get install python3 python3-pip
+          sudo pip3 install sphinx furo myst-parser sphinx-copybutton linkify-it-py sphinx-togglebutton sphinxemoji sphinxext-opengraph[social_cards]
+          cd wasplib-docs/docgen/
+          python3 docgen.py ../../
+
+      - name: Upload to GitHub Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: wasplib-docs/docgen/build/
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

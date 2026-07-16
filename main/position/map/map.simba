@@ -1,0 +1,746 @@
+(*
+# Map
+This file is responsible for the TMap positioning system.
+It was made from scratch by Torwent but heavily inspired in the original
+TWalker by [slacky](https://slacky.one/) and it's future iterations made by
+Olly.
+Without them, this wouldn't be possible.
+
+For a online interactive map you can visit
+[WaspScripts map](https://map.waspscripts.com/)
+
+For something simpler and much closer to the original
+[slacky](https://slacky.one/) walker check out {ref}`Image Map`.
+
+For debugging purposes you can use `{$DEFINE WL_DEBUG_MAP}` before including
+{ref}`WaspLib`.
+*)
+
+{$DEFINE WL_MAP_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_MAP}
+{.$DEFINE WL_DEBUG_MAP}
+
+type
+(*
+## TPosition
+Record holding a player's full position:
+- X, Y coordinate
+- Z which is the player height on the current heightmap
+- Plane which is the player's current plane if several planes are being used.
+*)
+  TPosition = record
+    X, Y, Plane: Int32;
+    Z: Single;
+  end;
+
+function TPosition.ToPoint(): TPoint;
+begin
+  Result := [Self.X, Self.Y];
+end;
+
+type
+(*
+## TMap
+Record responsible for positioning.
+*)
+  TMap = record
+    RegionIndex: Int32;
+    Region: TMapRegion;
+    Walker: TWalker;
+    Loader: TMapLoader;
+    Sample: TMapSample;
+    Filters: TBoxFilterArray;
+    Mode: EPositionMode;
+
+    Similarity: Single;
+    Cache: record
+      LocalPosition: TPoint;
+      Position: TPoint;
+      FullPosition: TPosition;
+      MatchTemplate: TMatchTemplateCache;
+    end;
+
+    Normalize, DisableHeightmap, IsSetup: Boolean;
+  end;
+
+  PRSMap = ^TMap;
+
+function TMap.Position(): TPoint; forward;
+
+function TMap.Height(pt: TPoint = [0,0]; global: Boolean = True): Single; forward;
+
+
+(*
+## Map.AddLocalFilter
+```pascal
+procedure TMap.AddLocalFilter(filter: TBox; inside: Boolean);
+```
+Adds a position filter to the `TMap`.
+
+This is a way to making it impossible for you to get positions inside of the
+`filter` boxes your `TMap` has.
+
+It's useful to understand the different between local and global coordinates to
+know if you should use this or {ref}`Map.AddGlobalFilter` instead.
+*)
+procedure TMap.AddLocalFilter(filter: TBox; inside: Boolean);
+begin
+  with Self.Loader do
+    Self.Filters += [[
+      filter.X1 div Downscale, filter.Y1 div Downscale,
+      filter.X2 div Downscale, filter.Y2 div Downscale
+    ], inside];
+end;
+
+(*
+## Map.AddGlobalFilter
+```pascal
+procedure TMap.AddGlobalFilter(regionIdx: Int32; filter: TBox; inside: Boolean);
+```
+Adds a position filter to the `TMap`.
+
+This is a way to making it impossible for you to get positions inside of the
+`filter` boxes your `TMap` has.
+
+It's useful to understand the different between local and global coordinates to
+know if you should use this or {ref}`Map.AddLocalFilter` instead.
+*)
+procedure TMap.AddGlobalFilter(regionIdx: Int32; filter: TBox; inside: Boolean);
+begin
+  filter := Self.Loader.GetLocal(regionIdx, filter);
+  filter := filter.Clip(Self.Loader.Regions[regionIdx].Region);
+  Self.AddLocalFilter(filter, inside);
+end;
+
+(*
+## Map.InternalSetup
+```pascal
+procedure TMap.InternalSetup();
+```
+Internal TMap setup method.
+This is caleld automatically for you and you shouldn't need to call it.
+*)
+procedure TMap.InternalSetup();
+var
+  i: Int32;
+  b: TBox;
+begin
+  if Self.Sample.Amount = 0 then Self.Sample.Amount := 4;
+  if Self.Sample.Radius = 0 then Self.Sample.Radius := -1;
+
+  Self.Filters := [];
+  for i := 0 to High(Self.Loader.Regions) do
+  begin
+    b := Self.Loader.Regions[i].Region.Expand(-Self.Loader.Padding);
+    Self.AddLocalFilter(b, True);
+  end;
+
+  Self.Walker.Setup(
+    @Self.Position,
+    @Self.Height, @Self.Loader.GetLocal, @Self.Loader.GetGlobal,
+    @Self.Loader.Graph, Self.Loader.Map
+  );
+  Self.Walker.Name := 'Map.Walker';
+
+  if not Self.IsSetup then
+  begin
+    Self.Normalize := True;
+    Self.IsSetup := True;
+  end;
+end;
+
+
+(*
+## Map.Setup
+```pascal
+procedure TMap.SetupEx(boxes: TBoxArray; planes: TIntegerArray = [0]; downscale: UInt32 = 8);
+procedure TMap.Setup(chunks: TMapChunkArray; downscale: UInt32 = 8);
+procedure TMap.Setup(echunks: set of EChunk; downscale: UInt32 = 8); overload;
+```
+Sets up a {ref}`TMap`.
+*)
+procedure TMap.SetupEx(boxes: TBoxArray; planes: TIntegerArray = [0]; downscale: UInt32 = 8);
+var
+  i: Int32;
+  chunk: TMapChunk;
+  chunks: array of TMapChunk;
+begin
+  chunk.Planes := planes;
+
+  for i := 0 to High(boxes) do
+  begin
+    chunk.Box := boxes[i];
+    chunks += chunk;
+  end;
+
+  Self.Loader.Load(chunks, downscale);
+  Self.InternalSetup();
+end;
+
+procedure TMap.Setup(chunks: TMapChunkArray; downscale: UInt32 = 8);
+begin
+  Self.Loader.Load(chunks, downscale);
+  Self.InternalSetup();
+end;
+
+procedure TMap.Setup(echunks: set of EChunk; downscale: UInt32 = 8); overload;
+var
+  chunks: array of TMapChunk;
+  echunk: EChunk;
+begin
+  for echunk in echunks do
+    chunks += echunk.Get();
+  Self.Setup(chunks, downscale);
+end;
+
+(*
+## Map.Add
+```pascal
+procedure TMap.AddEx(boxes: TBoxArray; planes: TIntegerArray = [0]; downscale: UInt32 = 8);
+procedure TMap.Add(chunks: TMapChunkArray; downscale: UInt32 = 8);
+procedure TMap.Add(echunks: set of EChunk; downscale: UInt32 = 8); overload;
+```
+TMap to add maps to an already setup TMap.
+*)
+procedure TMap.AddEx(boxes: TBoxArray; planes: TIntegerArray = [0]; downscale: UInt32 = 8);
+var
+  i: Int32;
+  chunks: TMapChunkArray;
+begin
+  SetLength(chunks, Length(boxes));
+
+  for i := 0 to High(boxes) do
+  begin
+    chunks[i].Box := boxes[i];
+    chunks[i].Planes := planes;
+  end;
+
+  Self.Loader.Add(chunks, downscale);
+  Self.InternalSetup();
+end;
+
+procedure TMap.Add(chunks: TMapChunkArray; downscale: UInt32 = 8);
+var
+  chunk: TMapChunk;
+begin
+  for chunk in chunks do
+    Self.AddEx([chunk.Box], chunk.Planes, downscale);
+end;
+
+procedure TMap.Add(echunks: set of EChunk; downscale: UInt32 = 8); overload;
+var
+  chunks: array of TMapChunk;
+  echunk: EChunk;
+begin
+  for echunk in echunks do
+    chunks += echunk.Get();
+  Self.Add(chunks, downscale);
+end;
+
+
+(*
+## Map.ScaledSearch
+```pascal
+function TMap.ScaledSearch(img: TImage): TPointArray;
+```
+Internal TMap method used to get an initial TPointArray of possible positions.
+This is performed in a downscaled map with a downscaled minimap.
+This is very innacurate by itself but by ruling down most of the map
+in a downscaled search before doing a full sized search speed has a dramatic boost.
+You probably won't ever need to call this directly.
+*)
+function TMap.ScaledSearch(img: TImage): TPointArray;
+var
+  sample: TImage;
+  matrix: TSingleMatrix;
+  w, h, i, loops, width, height, padding: Int32;
+  pt, loaderOffset: TPoint;
+  filters: TBoxArray;
+  {$IFDEF WL_DEBUG_MAP}
+  debugImg, matrixImg: TImage;
+  {$ENDIF}
+begin
+  padding := Self.Loader.Padding div Self.Loader.Downscale;
+
+  sample := Minimap.ScaleMinimap(img, Self.Loader.Downscale, Self.Sample.Radius);
+
+  matrix := MatchTemplateMask(
+    Self.Loader.DownscaledMatrix, sample.ToMatrix(),
+    ETMFormula.TM_CCOEFF_NORMED, Self.Cache.MatchTemplate
+  );
+
+  w := sample.Width div 2;
+  h := sample.Height div 2;
+
+  loaderOffset := [Self.Loader.Downscale div 2, Self.Loader.Downscale div 2];
+  matrix.GetSize(width, height);
+  width -= 1;
+  height -= 1;
+
+  for i := 0 to High(Self.Filters) do
+  begin
+    if Self.Filters[i].Inside then
+      filters += Self.Filters[i].Box.Offset([-padding, -padding])
+    else
+      matrix.Fill(Self.Filters[i].Box.Offset([-padding, -padding]), 0);
+  end;
+
+  {$IFDEF WL_DEBUG_MAP}
+  debugImg := Self.Loader.DownscaledMap.Copy();
+  matrixImg := new TImage();
+  matrixImg.FromMatrix(matrix);
+  debugImg.DrawAlpha := 120;
+  debugImg.DrawImage(matrixImg, [padding, padding]);
+  for i := 0 to High(Self.Filters) do
+  begin
+    if Self.Filters[i].Inside then
+      debugImg.DrawColor := $00FF00
+    else
+      debugImg.DrawColor := $0000FF;
+    debugImg.DrawBox(Self.Filters[i].Box);
+  end;
+  debugImg.Show();
+  Sleep(2000);
+  {$ENDIF}
+
+  while Length(Result) < Self.Sample.Amount do
+  begin
+    pt := matrix.ArgMax();
+    if filters.ContainsPoint(pt) > -1 then
+      Result += (pt.Offset(w, h) * Self.Loader.Downscale) + loaderOffset;
+    matrix.Fill([Max(0, pt.X-5), Max(0, pt.Y-5), Min(width, pt.X+5), Min(height, pt.Y+5)], 0);
+    if Inc(loops) > 70 then
+      Break;
+  end;
+end;
+
+(*
+## Map.Position
+```pascal
+function TMap.Position(): TPoint;
+function TMap.FullPosition(): TPosition;
+```
+Returns the players current position on the loaded map.
+`TMap.FullPosition()` also returns the current Z level.
+
+Example:
+```pascal
+WriteLn(Map.Position());
+WriteLn(Map.Similarity); // Check to see the match percentage if needed
+```
+*)
+function TMap.Position(): TPoint;
+const
+  SCALE: Int32 = 2;
+var
+  clean, half: TImage;
+  matrix: TIntegerMatrix;
+  results: TPointArray;
+  i: Int32;
+  hit, center: TPoint;
+  angle, match: Single;
+  searchFunc: TImageMapSearchFunction;
+begin
+  Self.RegionIndex := -1;
+  Self.Region := [];
+  Self.Similarity := 0;
+
+  angle := Minimap.CompassRadians;
+  clean := Minimap.GetCleanImage(angle, Self.Sample.Radius);
+
+  results := Self.ScaledSearch(clean);
+
+  half := Minimap.ScaleMinimap(clean, SCALE, Self.Sample.Radius);
+  if Self.Mode = EPositionMode.SPEED then
+  begin
+    searchFunc := @TImageMap.FullSearch;
+    half := half.Blend(half.FindColor($0, 0), 10);
+  end
+  else
+    searchFunc := @TImageMap.FullSearchEx;
+
+  matrix := half.ToMatrix();
+
+  for i := 0 to High(results) do
+  begin
+    hit := searchFunc(matrix, Self.Loader.HalfMap, results[i], SCALE, match);
+
+    if match > Self.Similarity then
+    begin
+      Self.Similarity := match;
+      Result := hit;
+    end;
+  end;
+
+  center := clean.Center;
+
+  if Client.Mode = EMode.FIXED then
+    center := center.Offset(0, 8).Rotate(-angle, center)
+  else
+    center := center.Offset(2, 1).Rotate(-angle, center);
+  Result := Result.Offset(center);
+
+  Self.Cache.LocalPosition := Result;
+
+  Self.RegionIndex := Self.Loader.LocalIndex(Result);
+  if Self.RegionIndex < 0 then
+    Exit([0,0]);
+
+  Self.Region := Self.Loader.Regions[Self.RegionIndex];
+  Result := Self.Loader.GetGlobal(Self.RegionIndex, Result);
+
+  if Self.Normalize then
+    Result := RSTranslator.Normalize(Result);
+  Self.Cache.Position := Result;
+end;
+
+function TMap.FullPosition(): TPosition;
+begin
+  with Self.Position() do
+  begin
+    Result.X := X;
+    Result.Y := Y;
+    Result.Plane := Self.Region.Plane;
+    Result.Z := Self.Height([X,Y]);
+  end;
+
+  Self.Cache.FullPosition := Result;
+end;
+
+function TMap.GetRegionIndex(): Int32;
+begin
+  Self.Position();
+  Result := Self.RegionIndex;
+end;
+
+
+(*
+## Map.Height
+```pascal
+function TMap.Height(pt: TPoint; global: Boolean = True): Single;
+```
+Returns the height of the player at the specified coordinate if there's a heightmap loaded.
+If `pt` is `[0,0]`, which is the default then we will use our current position.
+`global` decides wether the coordinate is converted to {ref}`global points` or if it's meant to be used
+as internal {ref}`local points`.
+
+Example:
+```pascal
+WriteLn Map.Height();
+```
+*)
+function TMap.Height(pt: TPoint = [0,0]; global: Boolean = True): Single;
+var
+  neighbours: TPointArray;
+  p: TPoint;
+begin
+  if Self.DisableHeightmap or not Assigned(Self.Loader.Heightmap) then
+    Exit(0.0);
+
+  if pt = [0,0] then
+  begin
+    global := False;
+    Self.Position();
+    pt := Self.Cache.LocalPosition;
+  end;
+
+  if global then
+    pt := Self.Loader.GetLocal(Self.RegionIndex, pt);
+
+  neighbours := [
+    pt, pt.Offset(-1,-1), pt.Offset(1,-1), pt.Offset(-1,1),  pt.Offset(1,1)
+  ];
+
+  for p in neighbours do
+  begin
+    if Self.Loader.Heightmap.InImage(p.X, p.Y) then
+      Result += RSTranslator.Color2Height(Self.Loader.Heightmap.Pixel[p.X,p.Y])
+    else if Self.Loader.Heightmap.InImage(pt.X, pt.Y) then
+      Result += RSTranslator.Color2Height(Self.Loader.Heightmap.Pixel[pt.X,pt.Y]);
+  end;
+
+  Result := Result/Length(neighbours);
+end;
+
+
+function TMap.GetQuad(me, pt: TPoint; angle: Single = $FFFF): TQuad;
+var
+  vector: TVector2;
+  corners: TVector3Array;
+  h: Single;
+  currLoc: TPoint;
+  arr: TPointArray;
+begin
+  if angle = $FFFF then
+    angle := Minimap.CompassRadians;
+  vector := Self.Walker.Point2MMVec(me, pt, angle);
+  pt := vector.ToPoint();
+
+  if not Minimap.PointOnZoomQuad(pt) then Exit;
+
+  vector := Minimap.NormalizeEx(vector, angle);
+  me := Self.Loader.GetLocal(me);
+
+  h := Self.Height(me, False);
+
+  currLoc := me + vector.ToPoint() - Minimap.Center;
+
+  corners := [
+    [vector.X-2, vector.Y-2, Self.Height(currLoc + [-1,-1], False) - h],
+    [vector.X+2, vector.Y-2, Self.Height(currLoc + [1,-1],  False) - h],
+    [vector.X+2, vector.Y+2, Self.Height(currLoc + [1,1],   False) - h],
+    [vector.X-2, vector.Y+2, Self.Height(currLoc + [-1,1],  False) - h]
+  ];
+
+  arr := Projection.Run(corners, angle);
+  Result := [arr[0], arr[1], arr[2], arr[3]];
+end;
+
+
+(*
+## Map.DebugPosition
+```pascal
+function TMap.DebugPosition(): TPoint;
+```
+Debugs the player position in the currently loaded map.
+
+Example:
+```pascal
+Map.Setup(...);
+while True do
+  Map.DebugPosition();
+```
+*)
+function TMap.DebugPosition(print: Boolean = True): TPoint;
+  function _BoxStr(b: TBox): String;
+  begin
+    Result := Format('[%d, %d, %d, %d]', [b.X1, b.Y1, b.X2, b.Y2]);
+  end;
+var
+  x1, y1, x2, y2, x, y, i: Int32;
+  pt, local: TPoint;
+  img, map, cleanMinimap: TImage;
+  time: Double;
+  lines: TStringArray;
+  rads: Single;
+  txt: String;
+begin
+  Target.FreezeImage();
+
+  time   := PerformanceTime();
+  Result := Self.Position();
+  time   := PerformanceTime() - time;
+
+  case Self.RegionIndex of
+    -1:  local := Result;
+    else
+    begin
+      local := Self.Loader.GetLocal(Self.RegionIndex, Result);
+      x := Self.Region.Region.X1;
+      y := Self.Region.Region.Y1;
+    end;
+  end;
+
+  x1 := Max(0, local.X - 200);
+  y1 := Max(0, local.Y - 200);
+  x2 := Min(x1 + 400, Self.Loader.Map.Width  - 1);
+  y2 := Min(y1 + 400, Self.Loader.Map.Height - 1);
+
+  x := local.X - x1;
+  y := local.Y - y1;
+
+  rads := Minimap.CompassRadians;
+
+  lines := [
+    'Position:',
+    ' - Local : '  + Format('[%d, %d]', [local.X, local.Y]),
+    ' - Global: ' + Format('[%d, %d]', [Result.X, Result.Y]),
+    '',
+    'Region:',
+    ' - Index   : ' + ToStr(Self.RegionIndex),
+    ' - Name    : ' + ToStr(Self.Region.Name),
+    ' - Plane   : ' + ToStr(Self.Region.Plane),
+    ' - Local   : ' + _BoxStr(Self.Region.Region),
+    ' - Original: ' + _BoxStr(Self.Region.Original),
+    ' - Radians : '  + ToStr(rads),
+    ' - Compass : '  + ToStr(RadToDeg(rads)),
+    '',
+    'Certainty: ' + ToStr(Round(Self.Similarity, 3)),
+    'Time     : ' + ToStr(Round(time)) + ' ms'
+  ];
+
+  map := Self.Loader.Map.Copy([x1, y1, x2, y2]);
+  map.DrawColor := $00FF00;
+  map.DrawLine(Point(0, y), Point(x2 - x1, y));
+  map.DrawLine(Point(x, 0), Point(x, y2 - y1));
+  map.DrawColor := $FFFFFF;
+  map.DrawBox([x - 2, y - 2, x + 2, y + 2]);
+
+  cleanMinimap := Minimap.GetCleanImage();
+  img := new TImage(700 + cleanMinimap.Width, 450);
+  img.DrawImage(map, [10, 20]);
+
+  with cleanMinimap.Center do
+  begin
+    if Client.Mode = EMode.FIXED then
+      pt := Point(X, Y).Offset(0, 8).Rotate(-rads, [X,Y])
+    else
+      pt := Point(X, Y).Offset(2, 1).Rotate(-rads, [X,Y]);
+  end;
+
+  cleanMinimap.DrawColor := $FFFFFF;
+  cleanMinimap.DrawBox(TBox.Create(pt, 1, 1));
+  cleanMinimap.DrawColor := $FF;
+  cleanMinimap.DrawCross(pt, 4);
+
+  {$IFDEF WINDOWS}
+  img.FontName := 'Consolas';
+  {$ENDIF}
+  img.FontSize := 18;
+  img.FontAntialiasing := True;
+
+  img.DrawColor := $FFFFFF;
+  for i := 0 to High(lines) do
+  begin
+    txt += lines[i] + LINE_SEP;
+    img.DrawText(lines[i], [430, cleanMinimap.Height + 20 + 20 * i]);
+  end;
+
+  if print then
+    WriteLn txt;
+
+  img.DrawImage(cleanMinimap, [520, 10]);
+  img.Show();
+
+  Target.UnFreezeImage();
+end;
+
+(*
+## Map.DebugHeight
+```pascal
+procedure TMap.DebugHeight(img: TImage; dots: EDots);
+procedure TMap.DebugHeight(dots: EDots = [EDot.PLAYER..EDot.ITEM]); overload;
+```
+Debugs the heightmap with {ref}`MM2MS`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  Map.Setup([EChunk.VARROCK]);
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    Map.DebugHeight();
+  end;
+end.
+```
+
+```{figure} ../../images/mm2ms_height.gif
+```
+*)
+procedure TMap.DebugHeight(img: TImage; dots: EDots);
+const
+  DOT_COLORS: TColorArray = [$FFFFFF, $00FFFF, $0000FF];
+var
+  quad: TQuad;
+  arr, tpa: TPointArray;
+  pt, q, loc, currLoc: TPoint;
+  x,y: Int32;
+  vector: TVector3;
+  corners: TVector3Array;
+  angle, h: Single;
+  dot: EDot;
+begin
+  angle := Minimap.CompassRadians;
+
+  img.DrawColor := $00FF00;
+  img.DrawAlpha := $FF;
+
+  Self.Position();
+  loc := Self.Cache.LocalPosition;
+  h := RSTranslator.Color2Height(Self.Loader.Heightmap.Pixel[loc.X,loc.Y]);
+
+  for x := Minimap.Center.X - 120 to Minimap.Center.X + 120 with 4 do
+    for y := Minimap.Center.Y - 120 to Minimap.Center.Y + 120 with 4 do
+    begin
+      vector := Point(x,y).ToVec3().Rotate(angle, Minimap.Center);
+      pt := vector.ToPoint();
+
+      if not Minimap.PointOnZoomQuad(pt) then Continue;
+
+      with Minimap.NormalizeEx([vector.X, vector.Y], angle) do
+      begin
+        vector.X := X;
+        vector.Y := Y;
+      end;
+
+      currLoc := loc + Point(x,y) - Minimap.Center;
+
+      corners := [
+        [vector.X-2, vector.Y-2, Self.Height(currLoc + [-1,-1], False) - h],
+        [vector.X+2, vector.Y-2, Self.Height(currLoc + [1,-1],  False) - h],
+        [vector.X+2, vector.Y+2, Self.Height(currLoc + [1,1],   False) - h],
+        [vector.X-2, vector.Y+2, Self.Height(currLoc + [-1,1],  False) - h]
+      ];
+
+      arr := Projection.Run(corners, angle);
+      quad := [arr[0], arr[1], arr[2], arr[3]];
+      tpa += quad.Corners.Connect();
+    end;
+
+  img.DrawTPA(MainScreen.Filter(tpa));
+
+  for dot in dots do
+  begin
+    tpa := [];
+    for q in Minimap.GetDots(dot) do
+    begin
+      vector := q.ToVec3();
+      pt := vector.ToPoint();
+
+      if not Minimap.PointOnZoomQuad(pt) then Continue;
+
+      with Minimap.NormalizeEx([vector.X, vector.Y], angle) do
+      begin
+        vector.X := X;
+        vector.Y := Y;
+      end;
+
+      currLoc := loc + q - Minimap.Center;
+
+      corners := [
+        [vector.X-2, vector.Y-2, Self.Height(currLoc - [1,3],  False) - h],
+        [vector.X+2, vector.Y-2, Self.Height(currLoc + [3,-3], False) - h],
+        [vector.X+2, vector.Y+2, Self.Height(currLoc + [3,1],  False) - h],
+        [vector.X-2, vector.Y+2, Self.Height(currLoc - [1,1],  False) - h]
+      ];
+
+      arr := Projection.Run(corners, angle);
+      quad := [arr[0], arr[1], arr[2], arr[3]];
+      tpa += quad.Corners.Connect();
+    end;
+
+    img.DrawColor := DOT_COLORS[dot];
+    img.DrawTPA(MainScreen.Filter(tpa));
+  end;
+end;
+
+procedure TMap.DebugHeight(dots: EDots = ALL_DOTS); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  Self.DebugHeight(img, dots);
+  img.Show();
+end;
+
+
+var
+(*
+## Map variable
+Global {ref}`TMap` variable.
+*)
+  Map: TMap;

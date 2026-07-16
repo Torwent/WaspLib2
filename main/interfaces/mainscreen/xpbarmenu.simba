@@ -1,0 +1,205 @@
+(*
+# XPBar Menu
+Methods to interact with the XPBar Menu interface.
+```{figure} ../../images/xpbar_menu_interface.png
+```
+*)
+
+{$DEFINE WL_XPBAR_MENU_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  EXPBarMenuOption = enum(
+    POSITION, SIZE, SPEED, DURATION,
+    COUNTER, PROGRESS_BAR, COLOUR, GROUP, FAKE_DROPS
+  );
+
+(*
+(TXPBarMenu)=
+## TXPBarMenu type
+Main record to interact with the {ref}`XPBar Menu` interface.
+*)
+  TXPBarMenu = record
+    Title: TInterfaceTitle;
+    Bounds, Headers: TBox;
+    DropDowns: TDropDownArray;
+  end;
+
+procedure TXPBarMenu.SetupInterface();
+begin
+  Self.Bounds := MSInterface.CreateBounds([0, 2, 0, -2], 486, 330);
+
+  Self.Title.Setup(Self.Bounds);
+  with Self.Bounds do
+    Self.Headers := [X1+13, Y1+43, X2-13, Y1 + 43 + 24];
+
+  SetLength(Self.DropDowns, Ord(High(EXPBarMenuOption))+1);
+  with Self.Bounds do
+  begin
+    Self.DropDowns[0].Bounds := [X1 + 18, Y1 + 68, X1 + 132, Y1 + 87];
+    Self.DropDowns[0].Setup(['Right', 'Middle', 'Left'], Fonts.PLAIN_12);
+    Self.DropDowns[1].Bounds := [X1 + 138, Y1 + 68, X1 + 247, Y1 + 87];
+    Self.DropDowns[1].Setup(['Smallest', 'Medium', 'Largest'], Fonts.PLAIN_12);
+    Self.DropDowns[2].Bounds := [X1 + 253, Y1 + 68, X1 + 352, Y1 + 87];
+    Self.DropDowns[2].Setup(['Default', 'Slower', 'Faster'], Fonts.PLAIN_12);
+    Self.DropDowns[3].Bounds := [X1 + 358, Y1 + 68, X1 + 467, Y1 + 87];
+    Self.DropDowns[3].Setup(['Permanent', '1 sec', '3 secs', '10 secs'], Fonts.PLAIN_12);
+
+    Self.DropDowns[4].Bounds := [X1 + 18, Y1 + 114, X1 + 122, Y1 + 133];
+    Self.DropDowns[4].Setup(
+      [
+        'Total XP', 'Most recent', 'Agility', 'Attack', 'Construction', 'Cooking',
+        'Crafting', 'Defence', 'Farming', 'Firemaking', 'Fishing', 'Fletching',
+        'Herblore', 'Hitpoints', 'Hunter', 'Magic', 'Mining', 'Prayer', 'Ranged',
+        'Runecraft', 'Sailing', 'Slayer', 'Smithing', 'Strength', 'Thieving',
+        'Woodcutting', 'Off'
+      ],
+      Fonts.PLAIN_12
+    );
+    Self.DropDowns[5].Bounds := [X1 + 128, Y1 + 114, X1 + 232, Y1 + 133];
+    Self.DropDowns[5].Setup(
+      [
+        'Off', 'Most recent', 'Agility', 'Attack', 'Construction', 'Cooking',
+        'Crafting', 'Defence', 'Farming', 'Firemaking', 'Fishing', 'Fletching',
+        'Herblore', 'Hitpoints', 'Hunter', 'Magic', 'Mining', 'Prayer', 'Ranged',
+        'Runecraft', 'Sailing', 'Slayer', 'Smithing', 'Strength', 'Thieving',
+        'Woodcutting', 'Total XP goal'
+      ],
+      Fonts.PLAIN_12
+    );
+    Self.DropDowns[6].Bounds := [X1 + 238, Y1 + 114, X1 + 317, Y1 + 133];
+    Self.DropDowns[6].Setup(
+      ['White', 'Lilac', 'Cyan', 'Jade', 'Lime', 'Yellow', 'Orange', 'Pink'],
+      Fonts.PLAIN_12
+    );
+    Self.DropDowns[7].Bounds := [X1 + 323, Y1 + 114, X1 + 387, Y1 + 133];
+    Self.DropDowns[7].Setup(['Off', 'On'], Fonts.PLAIN_12);
+    Self.DropDowns[8].Bounds := [X1 + 393, Y1 + 114, X1 + 467, Y1 + 133];
+    Self.DropDowns[8].Setup(['Off', 'On'], Fonts.PLAIN_12);
+  end;
+end;
+
+
+(*
+## XPBarMenu.IsOpen
+```pascal
+function TXPBarMenu.IsOpen(): Boolean;
+```
+Returns true if the xpbar menu is open.
+
+Example:
+```pascal
+WriteLn XPBarMenu.IsOpen();
+```
+*)
+function TXPBarMenu.IsOpen(): Boolean;
+begin
+  Result := InRange(
+    Target.CountColor(TFonts.ORANGE, 0, Self.Headers), 393, 582
+  );
+end;
+
+(*
+## XPBarMenu.WaitOpen
+```pascal
+function TXPBarMenu.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+```
+Returns true if the xpbar menu opens within `time` milliseconds..
+
+Example:
+```pascal
+WriteLn XPBarMenu.WaitOpen();
+```
+*)
+function TXPBarMenu.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+
+(*
+## XPBarMenu.Open
+```pascal
+function TXPBarMenu.Open(): Boolean;
+```
+Attempts to open the XPBar menu and returns true on success.
+
+Example:
+```pascal
+WriteLn XPBarMenu.Open();
+```
+*)
+function TXPBarMenu.Open(): Boolean;
+begin
+  if Self.IsOpen() then
+    Exit(True);
+  Mouse.Move(XPBar.Button);
+  if ChooseOption.Select('Setup') then
+    Result := Self.WaitOpen();
+end;
+
+
+(*
+## XPBarMenu.Close
+```pascal
+function TXPBarMenu.Close(escape: Boolean): Boolean;
+function TXPBarMenu.Close(escapeProbability: Single = 0): Boolean; overload;
+```
+Closes the XPBar menu, depending on `escape` or `escapeProbability the function
+will either click the button or press escape key.
+
+Example:
+```pascal
+WriteLn XPBarMenu.Close();
+```
+*)
+function TXPBarMenu.Close(escape: Boolean): Boolean;
+begin
+  Result := Self.Title.Close(escape);
+end;
+
+function TXPBarMenu.Close(escapeProbability: Single = -1): Boolean; overload;
+begin
+  Result := Self.Title.Close(escapeProbability);
+end;
+
+
+(*
+## XPBarMenu.Fix
+```pascal
+function TXPBarMenu.Fix(attempts: Integer = 3): Boolean;
+```
+Attempts to fix the XPBar menu with the expected settings.
+
+Example:
+```pascal
+WriteLn XPBarMenu.Fix();
+```
+*)
+function TXPBarMenu.Fix(attempts: Integer = 3): Boolean;
+begin
+  Result := Self.Open() and
+            Self.DropDowns[EXPBarMenuOption.DURATION].Select('Permanent') and
+            Self.DropDowns[EXPBarMenuOption.COUNTER].Select('Total XP') and
+            Self.Close();
+
+  if not Result then
+  begin
+    if Dec(attempts) = 0 then
+      Exit;
+    Sleep(TICK, 3*TICK);
+    Result := Self.Fix(attempts);
+  end;
+end;
+
+var
+(*
+## XPBarMenu variable
+Global {ref}`TXPBarMenu` variable.
+*)
+  XPBarMenu: TXPBarMenu;

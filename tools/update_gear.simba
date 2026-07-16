@@ -1,0 +1,220 @@
+//!PACKAGE SCRIPT
+const
+  ENDPOINT = 'https://oldschool.runescape.wiki/api.php?';
+  SILENT: Boolean = False;
+  TEST_ITEM: String = '';
+
+  SLOT_NAMES: TStringArray = [
+    'head', 'cape', 'neck', 'ammo', 'weapon', 'body', 'shield', 'legs', 'hands',
+    'feet', 'ring', 'spec_weapons', '2h'
+  ];
+
+function GetEndPoint(name: String): String;
+begin
+  Result := ENDPOINT + 'action=parse&page=' +
+            name.Replace(' ', '_').Replace('+', '%2B') +
+            '&prop=wikitext&redirects=1&format=json';
+end;
+
+type TSlotArray = array [0..12] of TStringArray;
+
+var
+  Slots: TSlotArray;
+
+function TStringArray.GetStr(): String;
+var
+  i: Integer;
+begin
+  if Self = [] then Exit('[]');
+  Result := '[';
+  for i := 0 to High(Self)-1 do
+    Result += '"' + Self[i] + '", ';
+  Result += '"' + Self[High(Self)] + '"]';
+end;
+
+function TSlotArray.GetStr(): String;
+var
+  i: Integer;
+begin
+  for i := 0 to 11 do
+    Result += '  "' + SLOT_NAMES[i] + '": ' + Self[i].Unique().Sorted().GetStr() + ',' + LINE_SEP;
+  Result += '  "' + SLOT_NAMES[12] + '": ' + Self[12].Unique().Sorted().GetStr();
+end;
+
+procedure FillSlot(item, txt: String);
+var
+  str: String;
+begin
+  if not txt.RegExprExists('equipable(?:[0-9])? = Yes') then
+    Exit;
+
+  if txt.Contains('slot = weapon') then
+  begin
+    Slots[4] += item;
+    if txt.Contains('Category:Weapons with Special attacks') then
+      Slots[11] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = 2h') then
+  begin
+    Slots[12] += item;
+    if txt.Contains('Category:Weapons with Special attacks') then
+      Slots[11] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = head') then
+  begin
+    Slots[0] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = cape') then
+  begin
+    Slots[1] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = neck') then
+  begin
+    Slots[2] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = ammo') then
+  begin
+    Slots[3] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = body') then
+  begin
+    Slots[5] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = shield') then
+  begin
+    Slots[6] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = legs') then
+  begin
+    Slots[7] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = hands') then
+  begin
+    Slots[8] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = feet') then
+  begin
+    Slots[9] += item;
+    Exit;
+  end;
+
+  if txt.Contains('slot = ring') then
+    Slots[10] += item;
+end;
+
+procedure TStringArray.Filter();
+var
+  i: Integer;
+  tmp: String;
+begin
+  for i := High(Self) downto 0 do
+  begin
+    if Self[i].StartsWith('noted ') or Self[i].EndsWith(' 100') or
+       Self[i].EndsWith(' 75') or Self[i].EndsWith(' 50') or
+       Self[i].EndsWith(' 25') or Self[i].EndsWith(' 0') then
+    begin
+      Delete(Self, i, 1);
+      Continue;
+    end;
+
+    //get rid of jewellery charges...
+    if not Self[i].EndsWith(')') then Continue;
+
+    tmp := Self[i].Between('(', ')');
+    if not tmp.IsInteger then Continue;
+
+    tmp := Self[i].Replace('(' + tmp + ')', '(' + ToStr(StrToInt(tmp) + 1) + ')');
+
+    if Self.Contains(tmp) then
+      Delete(Self, i, 1);
+  end;
+end;
+
+var
+  items: TStringArray;
+  i: Integer;
+  url: String;
+  json, tmp: TJSONParser;
+  text: String;
+begin
+  ClearSimbaOutput();
+
+  items := FileReadLines({$MACRO DIR} + '..' + PATH_SEP + 'finders' + PATH_SEP + 'items' + PATH_SEP + 'data' + PATH_SEP + 'item.txt').Unique();
+  items.Filter();
+
+  for i := 0 to High(items) do
+  begin
+    if (TEST_ITEM <> '') and (i > 0) then Break;
+    if i mod 300 = 0 then
+      WriteLn('Reading information from the wiki ', i, '/', High(items), ' items done.');
+
+    if TEST_ITEM <> '' then
+      url := GetEndPoint(TEST_ITEM)
+    else
+      url := GetEndPoint(items[i]);
+
+    if TEST_ITEM <> '' then
+      WriteLn url;
+
+    try
+      json := new TJSONParser();
+      json.Parse(HTTPClient.Get(url));
+    except
+      WriteLn('Failed to fetch: ', items[i]);
+    end;
+
+    if TEST_ITEM <> '' then
+      WriteLn json.Format();
+
+    if json = nil then
+    begin
+      WriteLn('Failed to fetch, json is nil: ', items[i]);
+      Continue;
+    end;
+
+    try
+      tmp := json.Item['parse'];
+    except
+      WriteLn('Failed to find parse: ', items[i]);
+      Continue;
+    end;
+
+    try
+      text := tmp.Item['wikitext'].Format([EJSONFormatOption.SINGLE_LINE_ARR]);
+    except
+      if not SILENT then
+        WriteLn('Failed to find wikitext: ', items[i]);
+      Continue;
+    end;
+
+    if TEST_ITEM <> '' then
+      FillSlot(TEST_ITEM, text)
+    else
+      FillSlot(items[i], text);
+  end;
+
+  text := '{' + LINE_SEP + Slots.GetStr() + LINE_SEP + '}';
+  WriteLn text;
+  if TEST_ITEM = '' then
+    FileWrite({$MACRO DIR} + '..' + PATH_SEP + 'jsons' + PATH_SEP + 'gear.json', text);
+end;

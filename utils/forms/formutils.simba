@@ -1,0 +1,1401 @@
+(*
+# Form Utilities
+Forms and components extensions.
+
+The following contains custom components and methods to be used in a `TLazForm`.
+*)
+{$DEFINE WL_FORMUTILS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+type
+(*
+## TFormUtils
+Type that olds several method utilities for `TLazForms`.
+*)
+  TFormUtils = record
+    DPI: Integer;
+    Scale: Single;
+    const BASE_DPI: Integer = 96;
+  end;
+
+procedure TFormUtils.Setup();
+var
+  font: TLazFont;
+begin
+  font := TLazFont.Create();
+  Self.DPI := font.PixelsPerInch;
+  font.Free();
+
+  Self.Scale := Self.DPI / Self.BASE_DPI;
+end;
+
+{$H-}
+(*
+## FormUtils.NumberField
+```pascal
+procedure TFormUtils.NumberField(sender: TLazObject; var key: Char);
+```
+Callback method to limit user input to numbers only and backspace.
+This numbers can be `Integers` only.
+For `Doubles` check {ref}`FormUtils.FloatField`
+*)
+procedure TFormUtils.NumberField(sender: TLazObject; var key: Char);
+begin
+  case key of
+    '0'..'9', #8: ;
+    else key := #0;
+  end;
+end;
+
+(*
+## FormUtils.FloatField
+```pascal
+procedure TFormUtils.FloatField(sender: TLazObject; var key: Char);
+```
+Callback method to limit user input to numbers only and backspace.
+This numbers can be `Integers` or `Doubles` only.
+For `Integers` only check {ref}`FormUtils.FloatField`
+*)
+procedure TFormUtils.FloatField(sender: TLazObject; var key: Char);
+begin
+  case key of
+    '0'..'9', #8: ;
+    '.': if TLazCustomEdit(sender).Text.Contains('.') then key := #0;
+    else key := #0;
+  end;
+end;
+
+(*
+## FormUtils.MailField
+```pascal
+procedure TFormUtils.MailField({$H-}sender: TLazObject;{$H+} var key: Char);
+```
+Callback method to limit user input to characters used in email addresses.
+*)
+procedure TFormUtils.MailField(sender: TLazObject; var key: Char);
+begin
+  if key = ' ' then key := #0;
+end;
+
+(*
+## FormUtils.TimeField
+```pascal
+procedure TFormUtils.TimeField(sender: TLazObject; var key: Char);
+```
+Callback method to limit user input to numbers only, backspace and a few
+characters used in time like ":", "-", "_", ",", etc.
+*)
+procedure TFormUtils.TimeField(sender: TLazObject; var key: Char);
+begin
+  case key of
+    '0'..'9', #8, '.', ':', '-', '_', ',', ' ': ;
+    else key := #0;
+  end;
+end;
+
+(*
+## FormUtils.NumberArrayField
+```pascal
+procedure TFormUtils.NumberArrayField(sender: TLazObject; var key: Char);
+```
+Callback method to limit user input to a `TIntegerArray`. Brackets not included.
+*)
+procedure TFormUtils.NumberArrayField(sender: TLazObject; var key: Char);
+begin
+  case key of
+    '0'..'9', ',', ' ' , #8: ;
+    else key := #0;
+  end;
+end;
+{$H+}
+
+(*
+## FormUtils.OpenURL
+```pascal
+procedure TLazControl.OpenURL(sender: TLazObject);
+```
+Opens the URL in the control caption if there's any.
+*)
+procedure TFormUtils.OpenURL(sender: TLazObject);
+var
+  url: String;
+begin
+  url := Trim(TLazControl(sender).Caption);
+  if url.IsURL() then URLOpenInBrowser(url);
+end;
+
+(*
+## FormUtils.OnMouseEnterURL
+```pascal
+procedure TFormUtils.OnMouseEnterURL(sender: TLazObject);
+```
+Mouse hover callback for URLs. Basically changes the control text color to blue.
+If you use this you should also use {ref}`FormUtils.OnMouseLeaveURL` to restore
+the color to the default when the mouse leaves the control.
+*)
+procedure TFormUtils.OnMouseEnterURL(sender: TLazObject);
+begin
+  TLazControl(sender).Font.Color := $FF0000;
+end;
+
+(*
+## FormUtils.OnMouseLeaveURL
+```pascal
+procedure TFormUtils.OnMouseLeaveURL(sender: TLazObject);
+```
+Mouse leave callback for URLs. Basically changes the control text color to
+the default.
+
+This should only be used if you are also using {ref}`FormUtils.OnMouseEnterURL`
+to change the control text color to blue.
+*)
+procedure TFormUtils.OnMouseLeaveURL(sender: TLazObject);
+begin
+  TLazControl(sender).Font.Color := $20000000;
+end;
+
+(*
+## FormUtils.OnCheckboxAnchorClick
+```pascal
+procedure TFormUtils.OnCheckboxAnchorClick(sender: TLazObject);
+```
+Made for components that are anchored to a `TLazCheckbox`,
+this makes it so clicking them toggles the checkbox.
+*)
+procedure TFormUtils.OnCheckboxAnchorClick(sender: TLazObject);
+var
+  caption: TLazLabel;
+  checkbox: TLazCheckBox;
+begin
+  caption := TLazLabel(sender);
+  if caption.Anchors = [] then
+    raise GetDebugLn('FormUtils', 'Label has to be anchored to a control.');
+
+  if ELazAnchorKind.Top in caption.Anchors then
+    checkbox := TLazCheckbox(caption.AnchorSideTop.Control)
+  else if ELazAnchorKind.Right in caption.Anchors then
+    checkbox := TLazCheckbox(caption.AnchorSideRight.Control)
+  else if ELazAnchorKind.Bottom in caption.Anchors then
+    checkbox := TLazCheckbox(caption.AnchorSideBottom.Control)
+  else if ELazAnchorKind.Left in caption.Anchors then
+    checkbox := TLazCheckbox(caption.AnchorSideLeft.Control);
+
+  checkbox.Checked := not checkbox.Checked;
+  if checkbox.OnChange <> nil then
+    Lapify(checkbox.OnChange)(checkbox);
+end;
+
+(*
+## FormUtils.OnCheckboxToggleParent
+```pascal
+procedure TFormUtils.OnCheckboxToggleParent(sender: TLazObject);
+```
+Made for `TLazCheckbox` so they can enable/disable all of their sibling
+components.
+*)
+procedure TFormUtils.OnCheckboxToggleParent(sender: TLazObject);
+var
+  checkbox: TLazCheckBox;
+  checked: Boolean;
+  parent: TLazWinControl;
+  i: Integer;
+  control: TLazComponent;
+begin
+  checkbox := TLazCheckBox(sender);
+  checked := checkbox.Checked;
+  parent := checkbox.Parent;
+
+  for i := 0 to parent.ComponentCount-1 do
+  begin
+    control := parent.GetComponent(i);
+    if checkbox <> control then
+      TLazControl(control).Enabled := checked;
+  end;
+end;
+
+var
+  FormUtils: TFormUtils;
+
+property TLazControl.Left(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControl.Left: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+
+property TLazControl.Top(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControl.Top: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+
+property TLazControl.Width(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControl.Width: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+property TLazControl.Height(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControl.Height: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+property TLazControl.Right: Integer;
+begin
+  Result := Self.Left+Self.Width;
+end;
+
+property TLazControl.Bottom: Integer;
+begin
+  Result := Self.Top+Self.Height;
+end;
+
+
+procedure TLazControl.SetBounds(aLeft, aTop, aWidth, aHeight: Integer); override;
+begin
+  inherited(
+    Round(aLeft * FormUtils.Scale), Round(aTop * FormUtils.Scale),
+    Round(aWidth * FormUtils.Scale), Round(aHeight * FormUtils.Scale)
+  );
+end;
+
+
+property TLazSizeConstraints.MinWidth(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazSizeConstraints.MinWidth: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+property TLazSizeConstraints.MaxWidth(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazSizeConstraints.MaxWidth: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+
+property TLazSizeConstraints.MinHeight(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazSizeConstraints.MinHeight: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+property TLazSizeConstraints.MaxHeight(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazSizeConstraints.MaxHeight: Integer; override;
+begin
+  Result := Round(inherited() / FormUtils.Scale);
+end;
+
+
+property TLazControlBorderSpacing.Left(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControlBorderSpacing.Top(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControlBorderSpacing.Right(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControlBorderSpacing.Bottom(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControlBorderSpacing.Around(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+property TLazControlBorderSpacing.InnerBorder(value: Integer); override;
+begin
+  inherited(Round(value * FormUtils.Scale));
+end;
+
+
+
+procedure TLazForm.ScaleToDPI();
+begin
+  Self.ScaleBy(Self.Font.PixelsPerInch, FormUtils.BASE_DPI);
+end;
+
+(*
+## TLazControl.SetFontColor
+```pascal
+procedure TLazControl.SetChildsFontColor(value: Integer);
+```
+Recursevely sets all childrens fonts colors to `value`.
+*)
+procedure TLazControl.SetChildsFontColor(value: TColor);
+var
+  i: Integer;
+begin
+  for i := 0 to Self.ComponentCount - 1 do
+    TLazControl(Self.GetComponent(i)).SetChildsFontColor(value);
+  Self.Font.Color := value;
+end;
+
+
+function TLazComponent.NameMatch(name: String): Boolean;
+begin
+  Result := (Self <> nil) and (Self.Name = name);
+end;
+
+(*
+## TLazComponent.GetChild
+```pascal
+function TLazComponent.GetChild(name: String): TLazComponent;
+```
+Recursively search for a children with the specified name.
+*)
+function TLazComponent.GetChild(name: String): TLazComponent;
+var
+  i: Integer;
+begin
+  if Self = nil then Exit;
+
+  if Self.Name = name then Exit(Self);
+
+  for i := 0 to Self.ComponentCount - 1 do
+  begin
+    Result := Self.GetComponent(i).GetChild(name);
+    if Result <> nil then
+      Break;
+  end;
+end;
+
+(*
+## TLazComponent.RemoveChildren
+```pascal
+procedure TLazComponent.RemoveChildren(release: Boolean = False);
+```
+Recursively remove children from a parent.
+
+To also free the parent set **release** to true.
+
+All children are freed when using this.
+*)
+procedure TLazComponent.RemoveChildren(release: Boolean = False);
+var
+  child: TLazComponent;
+begin
+  if Self.ComponentCount = 0 then
+  begin
+    if release then Self.Free();
+    Exit;
+  end;
+
+  child := Self.GetComponent(0);
+  Self.RemoveComponent(child);
+  child.RemoveChildren(True);
+  Self.RemoveChildren(release);
+end;
+
+
+(*
+## TLazLabel.SetURL
+```pascal
+procedure TLazLabel.SetURL();
+```
+Makes a `TLazLabel` a clickable URL that will open in the browser.
+
+You must set the caption yourself.
+
+Example:
+```pascal
+lbl.Caption := 'https://waspscripts.dev';
+lbl.SetURL();
+```
+*)
+procedure TLazLabel.SetURL();
+begin
+  Self.OnMouseEnter := @FormUtils.OnMouseEnterURL;
+  Self.OnMouseLeave := @FormUtils.OnMouseLeaveURL;
+  Self.OnClick := @FormUtils.OpenURL;
+  Self.Cursor := ELazCursor.HandPoint;
+end;
+
+
+(*
+## CustomEdit.IsEmpty
+```pascal
+function TCustomEdit.IsEmpty(): Boolean;
+```
+Returns true or false if the `TCustomEdit` are empty.
+This includes:
+- `TCustomEdit`
+- `TLazEdit`
+- `TLazMemo`
+*)
+function TLazCustomEdit.IsEmpty(): Boolean;
+var
+  txt: String;
+  i: Integer;
+begin
+  txt := Self.Text;
+  for i := 1 to Length(txt) do
+    if txt[i] <> ' ' then Exit(False);
+  Result := True;
+end;
+
+(*
+## CustomEdit.GetIntegerArray
+```pascal
+function TCustomEdit.GetIntegerArray(): TIntegerArray;
+```
+Returns the TIntegerArray in the TCustomEdit (TLazEdit and TLazMemo).
+It's probably a good idea to limit the TCustomEdit input with **TLazComponent.IntArrayField()**.
+*)
+function TLazCustomEdit.GetIntegerArray(min, max: Integer = 0): TIntegerArray;
+var
+  str, s: String;
+  int: Integer;
+begin
+  str := Self.Text;
+
+  for s in str.Split(',') do
+  begin
+    int := s.Trim().ExtractInteger();
+    if (min = max) or InRange(int, min, max) then
+      Result += int;
+  end;
+end;
+
+
+procedure TLazControl.AnchorVertically(anchor: Pointer; spacing: Integer = 0);
+begin
+  Self.AnchorSideLeft.Control := TLazControl(anchor);
+  Self.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+  Self.AnchorSideTop.Control := TLazControl(anchor);
+  Self.AnchorSideTop.Side := ELazAnchorSideReference.Bottom;
+  if spacing > 0 then
+    Self.BorderSpacing.Top := spacing;
+end;
+
+procedure TLazControl.AnchorHorizontally(anchor: Pointer; spacing: Integer = 0);
+begin
+  Self.AnchorSideTop.Control := TLazControl(anchor);
+  Self.AnchorSideTop.Side := ELazAnchorSideReference.Top;
+  Self.AnchorSideLeft.Control := TLazControl(anchor);
+  Self.AnchorSideLeft.Side := ELazAnchorSideReference.Bottom;
+  if spacing > 0 then
+    Self.BorderSpacing.Left := spacing;
+end;
+
+
+(*
+## TLazControl.CreateEx
+```pascal
+function TLazPanel.CreateEx(owner: Pointer): TLazPanel; static;
+function TLazPanel.CreateEx(
+  owner: Pointer; width, height: Integer
+): TLazPanel; static; overload;
+
+function TLazPageControl.CreateEx(owner: Pointer): TLazPageControl; static;
+function TLazPageControl.CreateEx(
+  owner: Pointer; left, top, width, height: Integer
+): TLazPageControl; static; overload;
+
+function TLazLabel.CreateEx(owner: Pointer): TLazLabel; static;
+function TLazLabel.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazLabel; static; overload;
+
+function TLazEdit.CreateEx(owner: Pointer): TLazEdit; static;
+function TLazEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazEdit; static; overload;
+
+function TLazSpinEdit.CreateEx(owner: Pointer): TLazSpinEdit; static;
+function TLazSpinEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazSpinEdit; static; overload;
+
+function TLazFloatSpinEdit.CreateEx(owner: Pointer): TLazFloatSpinEdit; static;
+function TLazFloatSpinEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazFloatSpinEdit; static; overload;
+
+function TLazMemo.CreateEx(owner: Pointer): TLazMemo; static;
+function TLazMemo.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazMemo; static; overload;
+
+function TLazButton.CreateEx(owner: Pointer): TLazButton; static;
+function TLazButton.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazButton; static; overload;
+
+function TLazCheckBox.CreateEx(owner: Pointer): TLazCheckBox; static;
+function TLazCheckBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazCheckBox; static; overload;
+
+function TLazToggleBox.CreateEx(owner: Pointer): TLazToggleBox; static;
+function TLazToggleBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazToggleBox; static; overload;
+
+function TLazRadioButton.CreateEx(owner: Pointer): TLazRadioButton; static;
+function TLazRadioButton.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazRadioButton; static; overload;
+
+function TLazComboBox.CreateEx(owner: Pointer): TLazComboBox; static;
+function TLazComboBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazComboBox; static; overload;
+
+function TLazListBox.CreateEx(owner: Pointer): TLazListBox; static;
+function TLazListBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazListBox; static; overload;
+
+function TLazCheckListBox.CreateEx(owner: Pointer): TLazCheckListBox; static;
+function TLazCheckListBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazCheckListBox; static; overload;
+
+function TLazTrackBar.CreateEx(owner: Pointer): TLazTrackBar; static;
+function TLazTrackBar.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazTrackBar; static; overload;
+
+function TLazImage.CreateEx(owner: Pointer): TLazImage; static;
+function TLazImage.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazImage; static; overload;
+
+function TImageBox.CreateEx(owner: Pointer): TImageBox; static;
+function TImageBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TImageBox; static; overload;
+
+function TLazScrollBox.CreateEx(owner: Pointer): TLazScrollBox; static;
+function TLazScrollBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazScrollBox; static; overload;
+
+function TLazTimeEdit.CreateEx(owner: Pointer): TLazTimeEdit; static;
+function TLazTimeEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazTimeEdit; static; overload;
+
+function TLazDateEdit.CreateEx(owner: Pointer): TLazDateEdit; static;
+function TLazDateEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazDateEdit; static; overload;
+```
+Constructor functions for most `TLazControls`.
+*)
+function TLazPanel.CreateEx(owner: Pointer): TLazPanel; static;
+begin
+  Result := TLazPanel.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazPanel.CreateEx(
+  owner: Pointer; left, top, width, height: Integer
+): TLazPanel; static; overload;
+begin
+  Result := TLazPanel.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+end;
+
+
+function TLazPageControl.CreateEx(owner: Pointer): TLazPageControl; static;
+begin
+  Result := TLazPageControl.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazPageControl.CreateEx(
+  owner: Pointer; left, top, width, height: Integer
+): TLazPageControl; static; overload;
+begin
+  Result := TLazPageControl.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+end;
+
+
+function TLazLabel.CreateEx(owner: Pointer): TLazLabel; static;
+begin
+  Result := TLazLabel.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazLabel.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazLabel; static; overload;
+begin
+  Result := TLazLabel.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  Result.Caption := caption;
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazEdit.CreateEx(owner: Pointer): TLazEdit; static;
+begin
+  Result := TLazEdit.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazEdit; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazEdit.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazSpinEdit.CreateEx(owner: Pointer): TLazSpinEdit; static;
+begin
+  Result := TLazSpinEdit.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazSpinEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazSpinEdit; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazSpinEdit.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazFloatSpinEdit.CreateEx(owner: Pointer): TLazFloatSpinEdit; static;
+begin
+  Result := TLazFloatSpinEdit.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazFloatSpinEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazFloatSpinEdit; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazFloatSpinEdit.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazMemo.CreateEx(owner: Pointer): TLazMemo; static;
+begin
+  Result := TLazMemo.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazMemo.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazMemo; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazMemo.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazButton.CreateEx(owner: Pointer): TLazButton; static;
+begin
+  Result := TLazButton.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+  Result.Cursor := ELazCursor.HandPoint;
+end;
+
+function TLazButton.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazButton; static; overload;
+begin
+  Result := TLazButton.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  Result.Caption := caption;
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazCheckBox.CreateEx(owner: Pointer): TLazCheckBox; static;
+begin
+  Result := TLazCheckBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+  Result.Cursor := ELazCursor.HandPoint;
+end;
+
+function TLazCheckBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazCheckBox; static; overload;
+begin
+  Result := TLazCheckBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  Result.Caption := caption;
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazToggleBox.CreateEx(owner: Pointer): TLazToggleBox; static;
+begin
+  Result := TLazToggleBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazToggleBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazToggleBox; static; overload;
+begin
+  Result := TLazToggleBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  Result.Caption := caption;
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazRadioButton.CreateEx(owner: Pointer): TLazRadioButton; static;
+begin
+  Result := TLazRadioButton.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazRadioButton.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazRadioButton; static; overload;
+begin
+  Result := TLazRadioButton.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  Result.Caption := caption;
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazComboBox.CreateEx(owner: Pointer): TLazComboBox; static;
+begin
+  Result := TLazComboBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+  Result.Style := ELazComboBoxStyle.DropDownList;
+end;
+
+function TLazComboBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazComboBox; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazComboBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazListBox.CreateEx(owner: Pointer): TLazListBox; static;
+begin
+  Result := TLazListBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazListBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazListBox; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazListBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazCheckListBox.CreateEx(owner: Pointer): TLazCheckListBox; static;
+begin
+  Result := TLazCheckListBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazCheckListBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazCheckListBox; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazCheckListBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazTrackBar.CreateEx(owner: Pointer): TLazTrackBar; static;
+begin
+  Result := TLazTrackBar.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazTrackBar.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazTrackBar; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazTrackBar.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazImage.CreateEx(owner: Pointer): TLazImage; static;
+begin
+  Result := TLazImage.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazImage.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazImage; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazImage.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TImageBox.CreateEx(owner: Pointer): TImageBox; static;
+begin
+  Result := TImageBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TImageBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TImageBox; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TImageBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazScrollBox.CreateEx(owner: Pointer): TLazScrollBox; static;
+begin
+  Result := TLazScrollBox.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazScrollBox.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazScrollBox; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazScrollBox.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazTimeEdit.CreateEx(owner: Pointer): TLazTimeEdit; static;
+begin
+  Result := TLazTimeEdit.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazTimeEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazTimeEdit; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazTimeEdit.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+function TLazDateEdit.CreateEx(owner: Pointer): TLazDateEdit; static;
+begin
+  Result := TLazDateEdit.Create(TLazControl(owner));
+  Result.Parent := TLazComponent(owner);
+end;
+
+function TLazDateEdit.CreateEx(
+  owner: Pointer; caption: String; hint: String = '';
+  left, top, width, height: Integer = 0
+): TLazDateEdit; static; overload;
+var
+  lbl: TLazLabel;
+begin
+  Result := TLazDateEdit.CreateEx(owner);
+
+  if left > 0 then Result.Left := left;
+  if top > 0 then Result.Top := top;
+  if width > 0 then Result.Width := width;
+  if height > 0 then Result.Height := height;
+
+  if caption <> '' then
+  begin
+    lbl := TLazLabel.CreateEx(owner, caption, hint);
+    lbl.AnchorSideBottom.Control := Result;
+    lbl.AnchorSideBottom.Side := ELazAnchorSideReference.Top;
+    lbl.AnchorSideLeft.Control := Result;
+    lbl.AnchorSideLeft.Side := ELazAnchorSideReference.Top;
+    lbl.Anchors := [ELazAnchorKind.Bottom, ELazAnchorKind.Left];
+  end;
+
+  if hint <> '' then
+  begin
+    Result.Hint := hint;
+    Result.ShowHint := True;
+  end;
+end;
+
+
+(*
+## TLazPageControl.AddTabEx
+```pascal
+function TLazPageControl.AddTabEx(caption: String): TLazTabSheet;
+```
+Created a `TLazTabSheet` on the page control with the specified `caption`.
+*)
+function TLazPageControl.AddTabEx(caption: String): TLazTabSheet;
+begin
+  Result := Self.AddTab();
+  Result.Caption := caption;
+  Result.Width := Self.Width;
+  Result.Height := Self.Height;
+end;
+
+(*
+## TLazControl.LoadImage
+```pascal
+procedure TLazControl.LoadImage(path: String);
+procedure TLazControl.LoadImage(img: TImage); overload;
+```
+Load a image file and set it as the background for a TLazControl.
+This can be used to set images for TLazPanels, TLazPageControls, TLazTabSheet, TLazButtons, etc.
+*)
+procedure TLazControl.LoadImage(path: String);
+var
+  img: TLazImage;
+begin
+  img := TLazImage.CreateEx(Self);
+  img.Picture.LoadFromFile(path);
+  img.SetBounds(0, 0, Self.Width, Self.Height);
+  img.Stretch := True;
+  img.Proportional := True;
+  img.Align := ELazAlign.Client;
+end;
+
+procedure TLazControl.LoadImage(img: TImage); overload;
+var
+  limg: TLazImage;
+begin
+  limg := TLazImage.CreateEx(Self);
+  limg.Picture.Bitmap := img.ToLazBitmap();
+  limg.SetBounds(0, 0, Self.Width, Self.Height);
+  limg.Stretch := True;
+  limg.Proportional := True;
+  limg.Align := ELazAlign.Client;
+end;
+
+
+function TLazStrings.Search(value: String; lo: Integer = 0): Integer;
+begin
+  value := value.ToLower();
+  for Result := lo to Self.Count - 1 do
+    if value in Self.Strings[Result].ToLower() then
+      Exit;
+  Result := -1;
+end;
+
+function TLazListBox.Search(value: String): Integer;
+var
+  lo: Integer;
+begin
+  if Length(value) > 1 then
+    lo := Self.ItemIndex+1
+  else
+    lo := 0;
+
+  Result := Self.Items.Search(value, lo);
+  if Result > -1 then
+    Self.ItemIndex := Result;
+end;
+
+function TLazComboBox.Search(value: String): Integer;
+var
+  lo: Integer;
+begin
+  if Length(value) > 1 then
+    lo := Self.ItemIndex+1
+  else
+    lo := 0;
+
+  Result := Self.Items.Search(value, lo);
+  if Result > -1 then
+    Self.ItemIndex := Result;
+end;

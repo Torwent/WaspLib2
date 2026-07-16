@@ -1,0 +1,332 @@
+(*
+# XPBar
+Methods to interact with the XP bar.
+*)
+
+{$DEFINE WL_XPBAR_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  TXPTracker = record
+    Start, Current, Previous: UInt64;
+  end;
+
+procedure TXPTracker.Reset();
+begin
+  Self.Start := 0;
+  Self.Current := 0;
+  Self.Previous := 0;
+end;
+
+function TXPTracker.Earned(): UInt64;
+begin
+  Result := Self.Current-Self.Previous;
+end;
+
+function TXPTracker.Total(): UInt64;
+begin
+  Result := Self.Current-Self.Start;
+end;
+
+type
+(*
+## TXPBar
+Record responsible with interacting with the {ref}`XPBar`.
+*)
+  TXPBar = record
+    Button: TCircle;
+    Bounds: TBox;
+    Font: TPixelFont;
+
+    Tracker, OnlineTracker: TXPTracker;
+
+    SetupAttempts: Integer;
+    IsSetup: Boolean;
+
+    const INNER_BORDER: TColor = $45525A;
+    const OUTER_BORDER: TColor = $233038;
+  end;
+
+(*
+## XPBar.SetupInterface
+```pascal
+procedure TXPBar.SetupInterface();
+```
+Internal method used to setup the {ref}`TXPBar` coordinates and core values.
+
+This is automatically called for you on the {ref}`XPBar variable`.
+*)
+procedure TXPBar.SetupInterface();
+begin
+  case Client.Mode of
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Button := [Minimap.Bounds.X1 - 40, Minimap.Bounds.Y1 + 32,  11];
+    EMode.FIXED:
+      Self.Button := [Minimap.Bounds.X1 - 40, Minimap.Bounds.Y1 + 26,  11];
+  end;
+
+  MainScreen.Mask.DrawColor := $FFFFFF;
+  MainScreen.Mask.DrawCircleFilled(Self.Button.Expand(2));
+  Self.IsSetup := False;
+end;
+
+
+(*
+## XPBar.IsOpen
+```pascal
+function TXPBar.IsOpen(): Boolean;
+```
+Checks if the XPBar circle is enabled.
+This does not mean that the XPBar is actually visible, simply that according to the
+XPBar circle, it is enabled.
+
+Example:
+```pascal
+WriteLn XPBar.IsEnabled();
+```
+*)
+function TXPBar.IsOpen(): Boolean;
+begin
+  Result := Target.HasColor($B0E4EF, 0, 50, Self.Button.Bounds);
+end;
+
+(*
+## XPBar.WaitOpen
+```pascal
+function TXPBar.WaitOpen(time: Integer = TICK; interval: Integer = -1): Boolean;
+```
+Waits for the XPBar to be open.
+This does not mean that the XPBar is actually visible, simply that according to the
+XPBar button, it is enabled.
+
+Example:
+```pascal
+WriteLn XPBar.WaitOpen();
+```
+*)
+function TXPBar.WaitOpen(time: Integer = TICK; interval: Integer = -1): Boolean;
+begin
+  if interval = -1 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+(*
+## XPBar.Open
+```pascal
+function TXPBar.Open(): Boolean;
+```
+Opens the XPBar by clicking the XPBar circle.
+
+Example:
+```pascal
+if not XPBar.IsOpen() then
+  WriteLn XPBar.Open();
+```
+*)
+function TXPBar.Open(): Boolean;
+begin
+  if Self.IsOpen() then
+    Exit(True);
+  Mouse.Click(Self.Button, EMouseButton.LEFT);
+  Result := Self.WaitOpen();
+end;
+
+(*
+## XPBar.Close
+```pascal
+function TXPBar.Close(): Boolean;
+```
+Closes the XPBar by clicking the XPBar circle.
+
+Example:
+```pascal
+if XPBar.IsOpen() then
+  WriteLn XPBar.Close();
+```
+*)
+function TXPBar.Close(): Boolean;
+begin
+  if not Self.IsOpen() then Exit(True);
+  Mouse.Click(Self.Button, EMouseButton.LEFT);
+  Result := SleepUntil(Self.IsOpen(), RandomMode(100, 50, 1500), 600);
+end;
+
+
+(*
+## XPBar.Setup
+```pascal
+function TXPBar.Setup(): Boolean;
+```
+Internal method automatically called by WaspLib once when attempting to read the XPBar.
+Should only ever run once.
+*)
+function TXPBar.Setup(): Boolean;
+var
+  border: TPointArray;
+begin
+  if Self.IsSetup then
+    Exit(True);
+  if not Self.Open() then
+    Exit;
+
+  if Inc(Self.SetupAttempts) > 3 then
+  begin
+    DebugLn('XPBar', 'Something seems to be wrong with your Experience Bar.', ELogLevel.WARN);
+    DebugLn('XPBar', 'If you keep seeing this message fix your Experience Bar settings!', ELogLevel.WARN);
+  end;
+
+  border := Target.FindColor(Self.OUTER_BORDER, 0, MSInterface.Bounds);
+  if border = [] then
+    Exit;
+
+  Self.Bounds := border.Bounds();
+
+  //Trackbar is visible on XP (height 38) and hidden otherwise (height 29).
+  if Self.Bounds.Height = 29 then
+    Self.Bounds.Y2 += 9
+  else
+  if Self.Bounds.Height <> 38 then
+    Exit;
+
+  case Self.Bounds.Width of
+    119: Self.Font := Fonts.PLAIN_11;
+    129: Self.Font := Fonts.PLAIN_12;
+    140: Self.Font := Fonts.BOLD;
+    else Exit;
+  end;
+
+  Result := Target.HasColor(Self.INNER_BORDER, 0, 280, Self.Bounds);
+  if Result then
+  begin
+    Self.IsSetup := True;
+    Self.SetupAttempts := 0;
+  end;
+end;
+
+
+(*
+## XPBar.Read
+```pascal
+function TXPBar.Read(): UInt64;
+```
+Reads the XP in the XPBar.
+
+Example:
+```pascal
+WriteLn XPBar.Read();
+```
+*)
+function TXPBar.Read(): UInt64;
+var
+  str: String;
+  count: Integer;
+begin
+  if not Self.Setup() then
+    Exit;
+  if not Target.HasColor(Self.INNER_BORDER, 0, 280, Self.Bounds) then
+    Exit;
+
+  count := Target.CountColor(ITEM_BORDER, 0, Self.Bounds);
+  if ((count <> 45) and (not InRange(count, 141, 150))) then
+  begin
+    DebugLn('XPBar', 'Your XPBar doesn''t seem to be set to count "Total Experience"', ELogLevel.WARN);
+    DebugLn('XPBar', 'XP Tracking won''t be used and this can cause issues.', ELogLevel.WARN);
+  end;
+
+  str := OCR.Recognize(Self.Bounds, Self.Font, [$FFFFFF], 0);
+
+  Result := str.ExtractInteger(0);
+  if Result = 0 then
+    Exit;
+
+  if Result < Self.Tracker.Previous then
+  begin
+    Self.Tracker.Reset();
+    Self.OnlineTracker.Reset();
+    Exit(0);
+  end;
+
+  if Self.Tracker.Start = 0 then
+  begin
+    Self.Tracker.Start := Result;
+    Self.OnlineTracker.Start := Result;
+  end;
+
+  if Self.Tracker.Previous = 0 then
+  begin
+    Self.Tracker.Previous := Result;
+    Self.OnlineTracker.Previous := Result;
+  end;
+
+  Self.Tracker.Current := Result;
+  Self.OnlineTracker.Current := Result;
+end;
+
+(*
+## XPBar.EarnedXP
+```pascal
+function TXPBar.EarnedXP(): Boolean;
+```
+Returns True/False if we earned XP since the last time this, {ref}`XPBar.Read`
+or {ref}`XPBar.WaitXP` were called.
+
+When this returns true it also resets {ref}`Activity`.
+
+Example:
+```pascal
+while True do
+  WriteLn XPBar.EarnedXP();
+```
+*)
+function TXPBar.EarnedXP(): Boolean;
+var
+  read: UInt64;
+begin
+  read := Self.Read();
+  Result := read > Self.Tracker.Previous;
+
+  if Result then
+  begin
+    if WaspClient.UpdatePayload(Self.OnlineTracker.Earned(), 0) then
+      Self.OnlineTracker.Previous := Self.Tracker.Current;
+    Self.Tracker.Previous := Self.Tracker.Current;
+    Activity.Restart();
+  end;
+end;
+
+(*
+## XPBar.WaitXP
+```pascal
+function TXPBar.WaitXP(time: Integer = TICK; interval: Integer = -1): Boolean;
+```
+Waits a set amount of time until XPBar.EarnedXP() is true.
+*)
+function TXPBar.WaitXP(time: Integer = TICK; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.EarnedXP(), interval, time);
+end;
+
+
+(*
+## XPBar.TotalEarnedXP
+```pascal
+function TXPBar.TotalEarnedXP(update: Boolean = False): UInt64;
+```
+Returns the total amount of earned experience tracked since the script started running.
+This is pretty reliable but should be taken with a grain of salt since XPBar can be misread
+due to several reasons, like open interfaces.
+*)
+function TXPBar.TotalEarnedXP(update: Boolean = True): UInt64;
+begin
+  if update then
+    Self.Read();
+  Result := Self.Tracker.Total();
+end;
+
+var
+(*
+## XPBar variable
+Global {ref}`TXPBar` variable.
+*)
+  XPBar: TXPBar;

@@ -1,0 +1,56 @@
+(*
+# Recorder SubProcess
+Standalone script meant to be ran by WaspLib to record a target
+*)
+{$loadlib Plugins/wasp-plugins/librecorder/librecorder}
+{$loadlib Plugins/wasp-plugins/libremoteinput/libremoteinput}
+{$loadlib Plugins/wasp-plugins/waspinput/waspinput}
+
+var
+  Process: TProcessID;
+  Frame: TImage;
+
+{$H-}
+function GetFrame(sender: TRecorder): Pointer;
+begin
+  Frame := Target.GetImage();
+  Result := Frame.Data;
+end;
+
+function IsTerminated(sender: TRecorder): Boolean;
+begin
+  Result := (not IsProcessRunning(Process)) or (not Target.IsValid());
+end;
+{$H+}
+
+var
+  Debugging: Boolean;
+  Recorder: TRecorder;
+  Window: TWindowHandle;
+begin
+  Debugging := LowerCase(GetEnvVar('debugging')) = 'true';
+  if Debugging then
+  begin
+    WriteLn('Arguments: ', GetProcessArgs());
+    WriteLn('Env Variables: ', GetEnvVars());
+  end;
+
+  Process := StrToInt(GetEnvVar('script'));
+  Window := StrToInt(GetEnvVar('target'));
+  case GetEnvVar('plugin') of
+    'remote-input': Target.SetPlugin({$MACRO LOADEDLIB(libremoteinput)}, ToStr(Window.GetPID()));
+    'wasp-input': Target.SetPlugin({$MACRO LOADEDLIB(waspinput)}, ToStr(Window.GetPID()));
+    else Target.SetWindow(Window);
+  end;
+
+  Recorder := TRecorder.Create(
+    StrToInt(GetEnvVar('time'), 20), GetEnvVar('path'),
+    Target.Width, Target.Height,
+    @GetFrame, @IsTerminated
+  );
+
+  Recorder.SetFFMPEG(SimbaEnv.PluginsPath + 'wasp-plugins' + PATH_SEP + 'librecorder' + PATH_SEP + 'ffmpeg.exe');
+
+  Recorder.Run(Debugging);
+  Recorder.Free();
+end;

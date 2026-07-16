@@ -1,0 +1,423 @@
+(*
+# Goals Form
+This page is about the {ref}`Goals Form`, a dedicated `TLazForm` to configure
+skill level goals for a script.
+
+This is meant to be used with {ref}`TScriptForm` with
+{ref}`TScriptForm.CreateGoalsButton` and will setup a small `TLazPanel` on it
+with a checkbox and a button to open the form:
+```{figure} ../../images/goalsform.png
+```
+*)
+{$DEFINE WL_GOALS_FORM_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  TGoalsFormHelper = record
+    Actions, Time: ^UInt64;
+    Stats: ^Boolean;
+    ActionsEdit, TimeEdit: TLazSpinEdit;
+    LevelsForm: TLazForm;
+    LevelsButton: TLazButton;
+    Config: TConfigJSON;
+
+    Unzipping: Boolean;
+    Timeout: TCountDown;
+    Version, CacheDir: String;
+    const ZIP: String = WLEnv.AssetsDir + 'images' + PATH_SEP + 'skills.zip';
+  end;
+
+{$H-}
+procedure TGoalsFormHelper.OnClose(sender: TLazObject; var closeAction: ELazFormCloseAction);
+begin
+  Self.LevelsButton.Caption := 'Open stats goals';
+end;
+{$H+}
+
+procedure TGoalsFormHelper.OnStatsToggle(sender: TLazObject);
+var
+  checkbox: TLazCheckBox;
+  checked: Boolean;
+begin
+  FormUtils.OnCheckboxToggleParent(sender);
+  checkbox := TLazCheckBox(sender);
+  checked := checkbox.Checked;
+  Self.Stats^ := checked;
+
+  if checked then
+    checkbox.Caption := 'Disable'
+  else
+    checkbox.Caption := 'Enable';
+
+  if Self.Config.Data.Assert('stats', EJSONType.BOOL) then
+    Self.Config.Data.Item['stats'].AsBool := checked
+  else
+    Self.Config.Data.AddBool('stats', checked);
+
+  Self.Config.Save();
+end;
+
+procedure TGoalsFormHelper.OnLevelsClick(sender: TLazObject);
+begin
+  if Self.LevelsForm.Showing then
+  begin
+    Self.LevelsForm.Close();
+    Exit;
+  end;
+
+  TLazButton(sender).Caption := 'Close stats goals';
+  Self.LevelsForm.ShowModal();
+end;
+
+procedure TGoalsFormHelper.OnActionsChange(sender: TLazObject);
+var
+  spinner: TLazSpinEdit;
+  name: String;
+begin
+  spinner := TLazSpinEdit(sender);
+  name := spinner.Name;
+
+  Self.Actions^ := spinner.Value;
+
+  if Self.Config.Data.Assert(name, EJSONType.INT) then
+    Self.Config.Data.Item[name].AsInt := spinner.Value
+  else
+    Self.Config.Data.AddInt(name, spinner.Value);
+  Self.Config.Save();
+end;
+
+procedure TGoalsFormHelper.OnTimeChange(sender: TLazObject);
+var
+  spinner: TLazSpinEdit;
+  name: String;
+begin
+  spinner := TLazSpinEdit(sender);
+  name := spinner.Name;
+
+  Self.Time^ := spinner.Value;
+
+  if Self.Config.Data.Assert(name, EJSONType.INT) then
+    Self.Config.Data.Item[name].AsInt := spinner.Value
+  else
+    Self.Config.Data.AddInt(name, spinner.Value);
+  Self.Config.Save();
+end;
+
+procedure TGoalsFormHelper.OnLevelChange(sender: TLazObject);
+var
+  spinner: TLazSpinEdit;
+  name: String;
+  skill: ESkill;
+begin
+  spinner := TLazSpinEdit(sender);
+  name := spinner.Name;
+  skill := ESkill(StrToInt(name.After('skill_')));
+
+  Stats.Goals[skill] := spinner.Value;
+
+  if Self.Config.Data.Assert(name, EJSONType.INT) then
+    Self.Config.Data.Item[name].AsInt := Stats.Goals[skill]
+  else
+    Self.Config.Data.AddInt(name, Stats.Goals[skill]);
+  Self.Config.Save();
+end;
+
+procedure TGoalsFormHelper.SetupLevelsForm(owner: Pointer);
+var
+  info: TLazLabel;
+  skill: ESkill;
+  key: String;
+  img: TLazImage;
+  edit: TLazSpinEdit;
+  checkbox: TLazCheckBox;
+begin
+  Self.LevelsForm := TLazForm.Create(TLazComponent(owner));
+  Self.LevelsForm.Caption := 'Stats Goals';
+  Self.LevelsForm.Position := ELazFormPosition.OwnerFormCenter;
+  Self.LevelsForm.BorderStyle := ELazFormBorderStyle.Dialog;
+  Self.LevelsForm.Width := 400;
+  Self.LevelsForm.Height := 400;
+  Self.LevelsForm.Position := ELazFormPosition.ScreenCenter;
+  Self.LevelsForm.OnClose := @Self.OnClose;
+
+  checkbox := TLazCheckBox.CreateEx(Self.LevelsForm, '', '', 10, 10);
+
+  info := TLazLabel.CreateEx(
+    Self.LevelsForm,
+    'Configure skill limits for scripts to stop.' + LINE_SEP +
+    'Setting a skill to 0 means it has no limit.' + LINE_SEP +
+    'Close this window when you are done.',
+    '',
+    Round(Self.LevelsForm.Width * 0.05),
+    40,
+    Round(Self.LevelsForm.Width * 0.9),
+    70
+  );
+  info.Alignment := ELazAlignment.Center;
+  info.Font.Name := 'Courier New';
+  info.OptimalFill := True;
+
+  for skill := Low(ESkill) to High(ESkill)-1 do
+  begin
+    img := TLazImage.CreateEx(Self.LevelsForm);
+    img.Picture.LoadFromFile(Self.CacheDir + ToStr(skill) + '.png');
+    img.SetBounds(
+      70 + 90 * (Ord(skill) mod 3),
+      info.Bottom + 10 + 27 * (Ord(skill) div 3), 25, 25
+    );
+    img.Stretch := True;
+    img.Proportional := True;
+
+    edit := TLazSpinEdit.CreateEx(
+      Self.LevelsForm, '', '', img.Right + 5, img.Top, 50
+    );
+    edit.MinValue := 0;
+    edit.MaxValue := 99;
+    edit.Increment := 5;
+    edit.ValueEmpty := False;
+
+    key := 'skill_' + ToStr(Ord(skill));
+    edit.Name := key;
+
+    if Self.Config.Data.Assert(key, EJSONType.INT) then
+      Stats.Goals[skill] := Self.Config.Data.Item[key].AsInt;
+    edit.Value := Stats.Goals[skill];
+    edit.OnChange := @Self.OnLevelChange;
+  end;
+
+  img := TLazImage.CreateEx(Self.LevelsForm);
+  img.Picture.LoadFromFile(Self.CacheDir + ToStr(skill) + '.png');
+  img.SetBounds(150, info.Bottom + 10 + 27 * (Ord(skill) div 3), 25, 25);
+
+  img.Stretch := True;
+  img.Proportional := True;
+
+  edit := TLazSpinEdit.CreateEx(
+    Self.LevelsForm, '', '', img.Right + 5, img.Top, 80
+  );
+  edit.MinValue := 0;
+  edit.MaxValue := 2376;
+  edit.Increment := 5;
+  edit.ValueEmpty := False;
+
+  key := 'skill_' + ToStr(Ord(skill));
+  edit.Name := key;
+
+  if Self.Config.Data.Assert(key, EJSONType.INT) then
+    Stats.Goals[skill] := Self.Config.Data.Item[key].AsInt;
+  edit.Value := Stats.Goals[skill];
+  edit.OnChange := @Self.OnLevelChange;
+
+  if Self.Config.Data.Assert('stats', EJSONType.BOOL) then
+    checkbox.Checked := Self.Config.Data.Item['stats'].AsBool;
+
+  if not checkbox.Checked then
+    Self.OnStatsToggle(checkbox)
+  else
+  begin
+    Self.Stats^ := True;
+    checkbox.Caption := 'Disable';
+  end;
+
+  checkbox.OnChange := @Self.OnStatsToggle;
+end;
+
+
+function TGoalsFormHelper.Create(owner: Pointer; actions, time, levels: Boolean = True; orientation: EOrientation = EOrientation.VERTICAL): TLazPanel;
+var
+  lbl: TLazLabel;
+  y, size: Integer;
+  timer: TCountDown;
+begin
+  timer.Start(8*SECOND);
+  while Self.Unzipping do
+  begin
+    Sleep(100);
+    if timer.IsFinished then
+    begin
+      DebugLn('GoalsForm', 'Unzipping files, please wait.');
+      timer.Restart();
+    end;
+
+    if Self.Timeout.IsFinished then
+    begin
+      DirDelete(Self.CacheDir, False);
+      raise GetDebugLn('GoalsForm', 'Timed out unzipping skill images.');
+    end;
+  end;
+
+  Self.Config.Setup('goals' + PATH_SEP + ToStr(ProfileIndex));
+
+  case orientation of
+    EOrientation.HORIZONTAL:
+    begin
+      Result := TLazPanel.CreateEx(owner, 0, 0, 0, 40);
+
+      if levels then
+      begin
+        Self.LevelsButton := TLazButton.CreateEx(
+          Result, 'Open stats goals', 'Open the stats goals form.',
+          10, y, 140
+        );
+        Self.LevelsButton.Align := ELazAlign.Left;
+        Self.LevelsButton.BorderSpacing.Top    := 6;
+        Self.LevelsButton.BorderSpacing.Bottom := 6;
+        Self.LevelsButton.BorderSpacing.Left   := 5;
+      end;
+
+      if time then
+      begin
+        lbl := TLazLabel.CreateEx(Result, 'minutes', 'Maximum amount of time in minutes for the bot to stop.');
+        lbl.Align := ELazAlign.Left;
+        lbl.BorderSpacing.Top    := 10;
+        lbl.BorderSpacing.Bottom := 10;
+        lbl.BorderSpacing.Left   := 5;
+        lbl.BorderSpacing.Right  := 30;
+        Self.TimeEdit := TLazSpinEdit.CreateEx(Result, '', 'Maximum amount of time in minutes for the bot to stop.', 0, 0, 80);
+        Self.TimeEdit.Align := ELazAlign.Left;
+        Self.TimeEdit.BorderSpacing.Around := 8;
+        lbl := TLazLabel.CreateEx(Result, 'Stop after', 'Maximum amount of time in minutes for the bot to stop.');
+        lbl.Align := ELazAlign.Left;
+        lbl.BorderSpacing.Top    := 10;
+        lbl.BorderSpacing.Bottom := 10;
+        lbl.BorderSpacing.Left   := 30;
+        lbl.BorderSpacing.Right  := 5;
+        size += 234;
+      end;
+
+      if actions then
+      begin
+        lbl := TLazLabel.CreateEx(Result, 'actions', 'Maximum amount of actions for the bot to stop.');
+        lbl.Align := ELazAlign.Left;
+        lbl.BorderSpacing.Top    := 10;
+        lbl.BorderSpacing.Bottom := 10;
+        lbl.BorderSpacing.Left   := 5;
+        lbl.BorderSpacing.Right  := 30;
+        Self.ActionsEdit := TLazSpinEdit.CreateEx(Result, '', 'Maximum amount of actions for the bot to stop.', 0, 0, 80);
+        Self.ActionsEdit.Align := ELazAlign.Left;
+        Self.ActionsEdit.BorderSpacing.Around := 8;
+        lbl := TLazLabel.CreateEx(Result, 'Stop after', 'Maximum amount of actions for the bot to stop.');
+        lbl.Align := ELazAlign.Left;
+        lbl.BorderSpacing.Top    := 10;
+        lbl.BorderSpacing.Bottom := 10;
+        lbl.BorderSpacing.Left   := 30;
+        lbl.BorderSpacing.Right  := 5;
+        size += 234;
+      end;
+
+      Result.Width := size;
+    end;
+
+    EOrientation.VERTICAL:
+    begin
+      Result := TLazPanel.CreateEx(owner, 0, 0, 240, 0);
+      y := 10;
+
+      if actions then
+      begin
+        lbl := TLazLabel.CreateEx(Result, 'Stop after', 'Maximum amount of actions for the bot to stop.', 10, y);
+        Self.ActionsEdit := TLazSpinEdit.CreateEx(Result, '', 'Maximum amount of actions for the bot to stop.', 0, 0, 80);
+        Self.ActionsEdit.AnchorHorizontally(lbl, 34);
+        Self.ActionsEdit.BorderSpacing.Top := -2;
+        lbl := TLazLabel.CreateEx(Result, 'actions', 'Maximum amount of actions for the bot to stop.');
+        lbl.AnchorHorizontally(Self.ActionsEdit, 5);
+        lbl.BorderSpacing.Top := 2;
+        y += 30;
+        size += 34;
+      end;
+
+      if time then
+      begin
+        lbl := TLazLabel.CreateEx(Result, 'Stop after', 'Maximum amount of time in minutes for the bot to stop.', 10, y);
+        Self.TimeEdit := TLazSpinEdit.CreateEx(Result, '', 'Maximum amount of time in minutes for the bot to stop.', 0, 0, 80);
+        Self.TimeEdit.AnchorHorizontally(lbl, 34);
+        Self.TimeEdit.BorderSpacing.Top := -2;
+        lbl := TLazLabel.CreateEx(Result, 'minutes', 'Maximum amount of time in minutes for the bot to stop.');
+        lbl.AnchorHorizontally(Self.TimeEdit, 5);
+        lbl.BorderSpacing.Top := 2;
+        y += 30;
+        size += 34;
+      end;
+
+      if levels then
+      begin
+        Self.LevelsButton := TLazButton.CreateEx(
+          Result, 'Open stats goals', 'Open the stats goals form.',
+          10, y, 140
+        );
+      end;
+
+      Result.Height := size;
+    end;
+  end;
+
+  Result.BevelWidth := 0;
+
+  if actions then
+  begin
+    if Self.Config.Data.Assert('actions', EJSONType.INT) then
+      Self.ActionsEdit.Value := Self.Config.Data.Item['actions'].AsInt;
+    Self.ActionsEdit.Name := 'actions';
+    Self.ActionsEdit.OnChange := @Self.OnActionsChange;
+  end;
+
+  if time then
+  begin
+    if Self.Config.Data.Assert('time', EJSONType.INT) then
+      Self.TimeEdit.Value := Self.Config.Data.Item['time'].AsInt;
+    Self.TimeEdit.Name := 'time';
+    Self.TimeEdit.OnChange := @Self.OnTimeChange;
+  end;
+
+  if levels then
+  begin
+    Self.LevelsButton.OnClick := @Self.OnLevelsClick;
+    Self.SetupLevelsForm(owner);
+  end;
+end;
+
+procedure TGoalsFormHelper.Unzipped(constref result: TASyncUnzipResult);
+var
+  name, msg: String;
+begin
+  if not result.Success then
+  begin
+    DirDelete(Self.CacheDir, False);
+    raise GetDebugLn('GoalsForm', result.Exception);
+  end;
+  name := PathExtractName(result.ZipFile);
+  msg := 'Finished async unzip of ' +  name + ' in ' + ToStr(Round(result.TimeUsed, 2)) + 'ms.';
+  DebugLn('GoalsForm', msg, ELogLevel.SUCCESS);
+  Self.Unzipping := False;
+end;
+
+procedure TGoalsFormHelper.Setup();
+var
+  path, tmp: String;
+begin
+  Self.Version := WLAssets.JSON.Item['images/skills.zip'].AsString;
+  Self.CacheDir := WLEnv.CacheDir + 'skills' + PATH_SEP;
+
+  //Delete old cache files if they exist
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
+    if tmp = Self.Version then Continue;
+    DirDelete(path, False);
+  end;
+
+  Self.CacheDir += Self.Version + PATH_SEP;
+
+  if not DirCreate(Self.CacheDir) then
+    raise GetDebugLn('SpellFinder', 'Failed to create cache directory: ' + Self.CacheDir);
+
+  if DirList(Self.CacheDir).IsEmpty then
+  begin
+    Self.Unzipping := True;
+    Self.Timeout.Start(2*MINUTE);
+    Async.FileUnZip(Self.ZIP, Self.CacheDir, @Self.Unzipped);
+  end;
+end;
+
+var
+  GoalsForm: TGoalsFormHelper;

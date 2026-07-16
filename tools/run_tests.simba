@@ -1,0 +1,23 @@
+//!PACKAGE SCRIPT
+(*
+# Tool: Run tests
+Tool to run the library tests located in the tests folder.
+*)
+var
+  path, name, output: String;
+  files: TStringArray;
+  result: Boolean;
+begin
+  ClearSimbaOutput();
+
+  path := {$MACRO DIR} + '..' + PATH_SEP + 'tests' + PATH_SEP;
+  files := DirList(path);
+
+  for name in files do
+  begin
+    if not name.EndsWith('.simba') then Continue;
+
+    result := RunSimbaScript(name, [], output);
+    WriteLn('Test: ', name.After('tests' + PATH_SEP).Before('.simba'), ', Result: ', result, ', Output: ', output);
+  end;
+end;

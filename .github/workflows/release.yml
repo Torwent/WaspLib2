@@ -1,0 +1,367 @@
+name: Release
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      build_hash: ${{ steps.simba-url.outputs.buildHash }}
+      base_url: ${{ steps.simba-url.outputs.baseUrl }}
+      test_files: ${{ steps.list-test-files.outputs.testFiles }}
+      plugins_hash: ${{ steps.wasp-plugins-hash.outputs.sha }}
+      assets_hash: ${{ steps.wasp-assets-hash.outputs.sha }}
+    steps:
+      - name: Fetch Simba 2 download URL
+        id: simba-url
+        run: |
+          README_URL="https://raw.githubusercontent.com/Villavu/Simba-Build-Archive/refs/heads/main/README.md"
+          README=$(curl -sSL "$README_URL")
+          FULL_URL=$(echo "$README" | grep -oP '\[Win64\]\(/[^)]*simba2000[^)]*Win64\.zip\?raw=true\)' | head -n1 | sed 's/^\[Win64\](//; s/)$//')
+
+          if [[ -z "$FULL_URL" ]]; then
+            echo "Error: Could not find simba2000 Win64 URL in README"
+            exit 1
+          fi
+
+          FULL_URL="https://raw.githubusercontent.com/Villavu/Simba-Build-Archive/refs/heads/main${FULL_URL}"
+
+          if [[ $FULL_URL =~ ([a-zA-Z0-9]{10})/Win64\.zip ]]; then
+            BUILD_HASH="${BASH_REMATCH[1]}"
+          else
+            echo "Error: Could not extract build hash from $FULL_URL"
+            exit 1
+          fi
+
+          BASE_URL="${FULL_URL%Win64.zip*}"
+          echo "baseUrl=$BASE_URL" >> $GITHUB_OUTPUT
+          echo "buildHash=$BUILD_HASH" >> $GITHUB_OUTPUT
+          echo "fullUrl=$FULL_URL" >> $GITHUB_OUTPUT
+          echo "FULL_URL=$FULL_URL"
+          echo "BUILD_HASH=$BUILD_HASH"
+          echo "BASE_URL=$BASE_URL"
+
+      - name: Checkout WaspLib
+        uses: actions/checkout@v5
+        with:
+          path: ./Includes/WaspLib
+
+      - name: Upload WaspLib repo
+        uses: actions/upload-artifact@v6
+        with:
+          name: wasplib
+          path: ./Includes/WaspLib
+
+      - name: List .simba files
+        id: list-test-files
+        run: |
+          cd ./Includes/WaspLib/tests
+          FILES=$(find . -maxdepth 1 -name '*.simba' -printf '%f\n' | jq -R . | jq -s -c .)
+          echo "Files found: $FILES"
+          echo "testFiles=$FILES" >> $GITHUB_OUTPUT
+
+      - name: Get wasp-plugins hash
+        id: wasp-plugins-hash
+        run: |
+          SHA=$(git ls-remote https://github.com/WaspScripts/wasp-plugins.git HEAD | awk '{ print $1 }')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Get wasp-assets hash
+        id: wasp-assets-hash
+        run: |
+          SHA=$(git ls-remote https://github.com/WaspScripts/wasp-assets.git HEAD | awk '{ print $1 }')
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+  tests:
+    needs: setup
+    strategy:
+      fail-fast: true
+      matrix:
+        target:
+          - os: windows-latest
+            arch: Win32
+            exec: ./Simba-Win32.exe
+          - os: windows-latest
+            arch: Win64
+            exec: ./Simba-Win64.exe
+          - os: ubuntu-latest
+            arch: Linux64
+            exec: ./Simba-Linux64
+          # - os: ubuntu-24.04-arm
+          #   arch: Linux arm64
+          #   exec: ./Simba-Linux
+          # - os: macos-latest
+          #   arch: Mac arm64
+          #   exec: ./Simba-Mac-Arm.dmg
+
+        file: ${{ fromJSON(needs.setup.outputs.test_files) }}
+    runs-on: ${{ matrix.target.os }}
+    steps:
+      #Simba
+      - name: Check Simba64 cache
+        uses: actions/cache@v5
+        id: simba-cache
+        with:
+          path: ${{ matrix.target.exec }}
+          key: simba-cache-${{ matrix.target.arch }}-${{ needs.setup.outputs.build_hash }}
+          enableCrossOsArchive: true
+
+      - name: Download Simba 2.0 (${{ matrix.target.arch }})
+        if: steps.simba-cache.outputs.cache-hit != 'true'
+        shell: bash
+        run: |
+          base_url="${{ needs.setup.outputs.base_url }}"
+          arch="${{ matrix.target.arch }}"
+          arch="${arch// /%20}"
+          download_url="${base_url}${arch}.zip?raw=true"
+          echo "Download ${{ matrix.target.arch }} URL: $download_url"
+          output_file="download.zip"
+          curl -L "$download_url" -o "$output_file"
+          unzip -o "$output_file" -d .
+          rm -f "$output_file"
+
+      - name: Mount on macOS
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          hdiutil attach "./Simba-Mac-Arm.dmg"
+          APP=$(find /Volumes -name Simba.app -type d | head -n1)
+          cp "$APP/Contents/MacOS/Simba" ./Simba
+          chmod +x ./Simba
+
+      #Plugins
+      - name: Cache wasp-plugins
+        uses: actions/cache@v5
+        id: wasp-plugins-cache
+        with:
+          path: ./Plugins/wasp-plugins
+          key: wasp-plugins-${{ needs.setup.outputs.plugins_hash }}
+
+      - name: Checkout wasp-plugins
+        if: steps.wasp-plugins-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: WaspScripts/wasp-plugins
+          path: ./Plugins/wasp-plugins
+
+      #Assets
+      - name: Cache wasp-assets
+        uses: actions/cache@v5
+        id: wasp-assets-cache
+        with:
+          path: ./Data/Assets
+          key: wasp-assets-${{ needs.setup.outputs.assets_hash }}
+
+      - name: Checkout wasp-assets
+        if: steps.wasp-assets-cache.outputs.cache-hit != 'true'
+        uses: actions/checkout@v5
+        with:
+          repository: WaspScripts/wasp-assets
+          path: ./Data/Assets
+
+      - name: Download WaspLib repo artifacts
+        uses: actions/download-artifact@v7
+        with:
+          name: wasplib
+          path: ./Includes/WaspLib
+
+      - name: Install GTK2 on Linux
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gtk2.0
+
+      - name: Run tests
+        shell: bash
+        run: |
+          echo "Running test ${{ matrix.file }} on ${{ matrix.target.arch }}"
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            ./Simba --extractopenssl --run "./Includes/WaspLib/tests/${{ matrix.file }}"
+          elif [ "$RUNNER_OS" = "Linux" ]; then
+            ls ./Plugins/wasp-plugins/libtpaex
+            xvfb-run -a ${{ matrix.target.exec }} --extractopenssl --run "./Includes/WaspLib/tests/${{ matrix.file }}"
+          else
+            ${{ matrix.target.exec }} --extractopenssl --run "./Includes/WaspLib/tests/${{ matrix.file }}"
+          fi
+
+  release:
+    needs: tests
+    if: ${{ github.repository_owner == 'WaspScripts' && github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "Wasp Bot"
+          git config --global user.email "waspbot@waspscripts.com"
+
+      - name: Recreate release branch
+        run: |
+          git fetch --all
+          git branch -D release || true
+          git checkout -b release origin/main
+
+      - name: Remove unwanted files
+        run: rm -rf tests
+
+      - name: Strip multi-line comments
+        run: find . -name "*.simba" -type f -exec perl -0777 -i -pe 's/\(\*.*?\*\)//gs' {} +
+
+      - name: Commit and push to release
+        run: |
+          git add .
+          git commit -m "Sync release with main and strip comments" || echo "No changes to commit"
+          git push origin release --force
+
+      - name: Check release branch size
+        run: |
+          echo "Release branch size:"
+          du -sh .
+
+      - name: Check main branch size
+        run: |
+          git fetch origin main
+          git checkout -b temp-main origin/main
+          echo "Main branch size:"
+          du -sh .
+
+  version:
+    needs: [setup, tests, release]
+    if: ${{ github.repository_owner == 'WaspScripts' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          ref: main
+
+      - name: Set up Git
+        run: |
+          git config --global user.name "Wasp Bot"
+          git config --global user.email "waspbot@waspscripts.com"
+
+      - name: Get current date
+        id: date
+        run: |
+          echo "CURRENT_YEAR=$(date +'%Y')" >> $GITHUB_ENV
+          echo "CURRENT_MONTH=$(date +'%m')" >> $GITHUB_ENV
+          echo "CURRENT_DAY=$(date +'%d')" >> $GITHUB_ENV
+
+      - name: Get commit hash
+        id: commit-hash
+        run: echo "COMMIT_HASH=$(git rev-parse --short HEAD)" >> $GITHUB_ENV
+
+      - name: Update version.simba on main branch
+        run: |
+          sed -i "s/WL_VERSION_YEAR: Integer = .*/WL_VERSION_YEAR: Integer = $CURRENT_YEAR;/" version.simba
+          sed -i "s/WL_VERSION_MONTH: Integer = .*/WL_VERSION_MONTH: Integer = $CURRENT_MONTH;/" version.simba
+          sed -i "s/WL_VERSION_DAY: Integer = .*/WL_VERSION_DAY: Integer = $CURRENT_DAY;/" version.simba
+          sed -i "s/WL_VERSION_COMMIT_HASH: String = .*/WL_VERSION_COMMIT_HASH: String = '$COMMIT_HASH';/" version.simba
+
+      - name: Push changes to main branch
+        run: |
+          git add version.simba
+          git commit -m "Automatic version bump to $CURRENT_YEAR.$CURRENT_MONTH.$CURRENT_DAY-$COMMIT_HASH" || echo "No changes to commit on main"
+          git push
+
+      - name: Switch to release branch
+        run: |
+          git fetch origin release
+          git checkout release
+
+      - name: Update version.simba on release branch
+        run: |
+          sed -i "s/WL_VERSION_YEAR: Integer = .*/WL_VERSION_YEAR: Integer = $CURRENT_YEAR;/" version.simba
+          sed -i "s/WL_VERSION_MONTH: Integer = .*/WL_VERSION_MONTH: Integer = $CURRENT_MONTH;/" version.simba
+          sed -i "s/WL_VERSION_DAY: Integer = .*/WL_VERSION_DAY: Integer = $CURRENT_DAY;/" version.simba
+          sed -i "s/WL_VERSION_COMMIT_HASH: String = .*/WL_VERSION_COMMIT_HASH: String = '$COMMIT_HASH';/" version.simba
+
+      - name: Push changes to release branch
+        run: |
+          git add version.simba
+          git commit -m "Automatic version bump to $CURRENT_YEAR.$CURRENT_MONTH.$CURRENT_DAY-$COMMIT_HASH" || echo "No changes to commit on release"
+          git push origin release
+
+      - name: Create git tag
+        id: tag
+        run: |
+          TAG_NAME="$CURRENT_YEAR.$CURRENT_MONTH.$CURRENT_DAY-$COMMIT_HASH"
+          echo "TAG_NAME=$TAG_NAME" >> $GITHUB_ENV
+          git tag $TAG_NAME
+          git push origin $TAG_NAME
+
+      - name: Create GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create $TAG_NAME --generate-notes
+
+      - name: Create Uploaded Release
+        run: |
+          ZIP_NAME="$TAG_NAME.zip"
+          git archive --format zip --output "$ZIP_NAME" HEAD
+          echo "ZIP_NAME=$ZIP_NAME" >> $GITHUB_ENV
+
+      - name: Upload release to Supabase
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          curl -X POST "$SUPABASE_URL/storage/v1/object/wasplib/$ZIP_NAME" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Content-Type: application/zip" \
+            --data-binary @"$ZIP_NAME"
+          curl -X DELETE "$SUPABASE_URL/storage/v1/object/wasplib/latest.zip" \
+            -H "Authorization: Bearer $SUPABASE_KEY"
+          curl -X POST "$SUPABASE_URL/storage/v1/object/copy" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"bucketId\": \"wasplib\",
+              \"sourceKey\": \"$ZIP_NAME\",
+              \"destinationKey\": \"latest.zip\"
+            }"
+
+      - name: Insert release metadata
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          SIMBA_BUILD_HASH: ${{ needs.setup.outputs.build_hash }}
+        run: |
+          DATA=$(jq -nc \
+            --arg version "$TAG_NAME" \
+            --arg simba "$SIMBA_BUILD_HASH" \
+            '{version: $version, simba: $simba}'
+          )
+          curl -X POST "$SUPABASE_URL/rest/v1/wasplib" \
+            -H "apikey: $SUPABASE_KEY" \
+            -H "Authorization: Bearer $SUPABASE_KEY" \
+            -H "Content-Type: application/json" \
+            -H "Content-Profile: scripts" \
+            -d "$DATA"
+
+      - name: Discord notification
+        shell: bash
+        run: |
+          BODY=$(jq -nc \
+            --arg title "WaspLib Version $TAG_NAME" \
+            --arg desc "${{ github.event.head_commit.message || 'No commit message available' }}
+
+            Download: https://github.com/WaspScripts/WaspLib/releases/tag/$TAG_NAME" \
+            --arg url  "https://github.com/WaspScripts/WaspLib/commit/${{ github.sha }}" \
+            --arg foot "Author: ${{ github.event.head_commit.author.name }}" \
+            --argjson color 16742912 \
+            '{embeds:[{title:$title,description:$desc,url:$url,color:$color,footer:{text:$foot}}]}')
+          curl \
+              -H "Content-Type: application/json" \
+              -d "$BODY" \
+              ${{ secrets.UPDATES_WEBHOOK }}

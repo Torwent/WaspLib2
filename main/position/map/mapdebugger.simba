@@ -1,0 +1,435 @@
+(*
+# Map Debugger
+Tool to help debug {ref}`TMap` and {ref}`TMapLoader`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  Map.Setup([EChunk.VARROCK]);
+  MapDebugger.Setup(Map.Loader);
+  MapDebugger.Show();
+end.
+```
+
+```{figure} ../../images/map_debugger.gif
+```
+*)
+
+{$DEFINE WL_MAPDEBUGGER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{$R-}
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('TMapDebugger', 'Range checks are enabled for map debugger, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+(*
+## TMapDebugger
+Main record used to hold core values of the {ref}`Map Debugger`.
+*)
+  TMapDebugger = record
+    ImageBox: TImageBox;
+    Images: TImageArray;
+
+    Graph: TWebGraph;
+
+    Selected: Integer;
+    Path: TPointArray;
+    Local, Global: TPoint;
+
+    GetGlobal: function (pt: TPoint; offset: TPoint = [0,0]): TPoint of object;
+
+    Coordinate, SelectedInfo: TLazLabel;
+    ShowGraph, ShowWalkableSpace, ShowWalkableClusters, ShowObjectClusters, Normalize: Boolean;
+    ColorArray: TColorArray;
+    Target: TTarget;
+  end;
+
+procedure TMapDebugger.OnChange(sender: TLazObject);
+begin
+  Self.ImageBox.SetImage(Self.Images[TLazComboBox(sender).ItemIndex]);
+end;
+
+{$H-}
+procedure TMapDebugger.ImgBoxPaint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  p: TPoint;
+  b: TBox;
+  tpa: TPointArray;
+  i: Int32;
+begin
+  if Self.ShowWalkableSpace then
+    canvas.DrawPoints(Self.Graph.WalkableSpace, Self.ColorArray.Last);
+
+  if Self.ShowWalkableClusters then
+    for i := 0 to High(Self.Graph.WalkableClusters) do
+      canvas.DrawPoints(Self.Graph.WalkableClusters[i], Self.ColorArray[i]);
+
+  if Self.ShowObjectClusters then
+    for i := 0 to High(Self.Graph.ObjectClusters) do
+      canvas.DrawPoints(Self.Graph.ObjectClusters[i], Self.ColorArray[i]);
+
+  if Self.ShowGraph and (Self.Graph.Nodes <> []) then
+  begin
+    Self.Graph.Draw(canvas);
+    if Self.Selected > -1 then
+    begin
+      canvas.DrawBoxFilled(TBox.Create(Self.Graph.Nodes[Self.Selected], 1, 1), $00FF00);
+      if Self.Path <> [] then
+      begin
+        for i := 0 to High(Self.Path)-1 do
+        begin
+          tpa := TPointArray.CreateFromLine(Self.Path[i], Self.Path[i+1]);
+          canvas.DrawPoints(tpa, $FF0000);
+        end;
+
+      end;
+    end;
+  end;
+
+  with sender.MouseXY do
+    p := [X div 4 * 4, Y div 4 * 4];
+
+  tpa := TBox.Create(p.X-1, p.Y-1, p.X + 4, p.Y + 4).Corners();
+  tpa := tpa.Connect().Difference(tpa);
+  canvas.DrawPoints(tpa, $F7AA4E);
+end;
+
+procedure TMapDebugger.OnKeyDown(sender: TImageBox; var key: UInt16; shift: ELazShiftStates);
+begin
+  if Self.Normalize then
+  begin
+    case EKeyCode(key) of
+      EKeyCode.LEFT: Self.Target.MouseX -= 4;
+      EKeyCode.UP: Self.Target.MouseY -= 4;
+      EKeyCode.RIGHT: Self.Target.MouseX += 4;
+      EKeyCode.DOWN: Self.Target.MouseY += 4;
+    end;
+  end
+  else
+  begin
+    case EKeyCode(key) of
+      EKeyCode.LEFT: Self.Target.MouseX -= 1;
+      EKeyCode.UP: Self.Target.MouseY -= 1;
+      EKeyCode.RIGHT: Self.Target.MouseX += 1;
+      EKeyCode.DOWN: Self.Target.MouseY += 1;
+    end;
+  end;
+end;
+
+procedure TMapDebugger.ImgBoxMouseDown(sender: TImageBox; button: ELazMouseButton; shift: ELazShiftStates; x, y: Int32);
+var
+  g: TPoint;
+begin
+  if button <> ELazMouseButton.Left then
+    Exit;
+
+  Self.Selected := Self.Graph.Nodes.NearestIndex(Self.Local);
+
+  if not Self.Graph.Nodes.IsEmpty and Self.Local.InRange(Self.Graph.Nodes[Self.Selected], 4) then
+  begin
+    g := Self.GetGlobal(Self.Graph.Nodes[Self.Selected]);
+
+    Self.SelectedInfo.Caption :=
+      'Selected Index: ' + ToStr(Self.Selected).PadRight(4, ' ') +
+      ' Coordinate: [' +
+      String(ToStr(g.X) + ',' + ToStr(g.Y) + ']').PadRight(12, ' ') +
+      ' Path Count: ' +
+      ToStr(Self.Graph.Paths[Self.Selected].Length).PadRight(2, ' ') +
+      ' Paths: ' + ToStr(Self.Graph.Paths[Self.Selected]);
+  end
+  else
+  begin
+    Self.Selected := -1;
+    Self.SelectedInfo.Caption := 'Selected Node: None';
+  end;
+
+  WriteLn('Clicked: ' + Self.Coordinate.Caption);
+end;
+{$H+}
+
+procedure TMapDebugger.ImgBoxMouseMove(sender: TImageBox; shift: ELazShiftStates; x, y: Integer);
+var
+  i: Integer;
+begin
+  Self.Local := TPoint.Create(x,y);
+  if Self.Normalize then
+    Self.Global := Self.GetGlobal([Self.Local.X div 4 * 4, Self.Local.Y div 4 * 4])
+  else
+    Self.Global := Self.GetGlobal([Self.Local.X, Self.Local.Y]);
+
+  Self.Coordinate.Caption := Format('[%d, %d]', [Self.Global.X, Self.Global.Y]);
+
+  Self.Path := [];
+  if (ELazShiftStates.Shift in shift) and (Self.Selected > -1) then
+  begin
+    i := Self.Graph.Nodes.NearestIndex(Self.Local);
+
+    if (Self.Selected <> i) and Self.Local.InRange(Self.Graph.Nodes[i], 12) then
+    try
+      Self.Path := Self.Graph.PathBetween(Self.Graph.Nodes[Self.Selected], Self.Graph.Nodes[i], 0.33);
+    except
+      WriteLn GetExceptionMessage();
+    end;
+  end;
+
+  sender.Repaint();
+end;
+
+
+procedure TMapDebugger.GraphOnChange(sender: TLazObject);
+begin
+  Self.ShowGraph := TLazCheckBox(sender).Checked;
+  Self.ImageBox.Repaint();
+end;
+
+procedure TMapDebugger.WalkableSpaceOnChange(sender: TLazObject);
+begin
+  Self.ShowWalkableSpace := TLazCheckBox(sender).Checked;
+  Self.ImageBox.Repaint();
+end;
+
+procedure TMapDebugger.WalkableClustersOnChange(sender: TLazObject);
+begin
+  Self.ShowWalkableClusters := TLazCheckBox(sender).Checked;
+  Self.ImageBox.Repaint();
+end;
+
+procedure TMapDebugger.ObjectClustersOnChange(sender: TLazObject);
+begin
+  Self.ShowObjectClusters := TLazCheckBox(sender).Checked;
+  Self.ImageBox.Repaint();
+end;
+
+procedure TMapDebugger.NormalizeCoordinatesOnChange(sender: TLazObject);
+begin
+  Self.Normalize := TLazCheckBox(sender).Checked;
+end;
+
+
+(*
+## MapDebugger.Show
+```pascal
+procedure TMapDebugger.Show();
+```
+Shows the `MapDebugger` form. You must first call {ref}`TMapDebugger.Setup`
+before calling this.
+
+Example:
+```pascal
+MapDebugger.Show();
+```
+*)
+procedure TMapDebugger.Show();
+var
+  form: TLazForm;
+  panel: TLazPanel;
+  lbl: TLazLabel;
+  combobox: TLazComboBox;
+  checkbox: TLazCheckBox;
+begin
+  form := TLazForm.Create();
+  form.Caption := 'TMap Debugger';
+  form.Width := 1280;
+  form.Height := 800;
+  form.Position := ELazFormPosition.ScreenCenter;
+  form.Color := $242322;
+  form.BorderStyle := ELazFormBorderStyle.Sizeable;
+
+  panel := TLazPanel.CreateEx(form);
+  panel.SetBounds(0, 0, form.Width, 30);
+  panel.BevelOuter := ELazPanelBevel.None;
+  panel.Align := ELazAlign.Top;
+
+  Self.SelectedInfo := TLazLabel.CreateEx(panel);
+  Self.SelectedInfo.Font.Color := $FFFFFF;
+  Self.SelectedInfo.Align := ELazAlign.Left;
+  Self.SelectedInfo.Font.Name := 'Courier New';
+  Self.SelectedInfo.BorderSpacing.Around := 5;
+
+  lbl := TLazLabel.CreateEx(panel, 'Total nodes: ' + ToStr(Length(Self.Graph.Nodes)) + ' ');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.Font.Name := 'Courier New';
+  lbl.BorderSpacing.Around := 5;
+
+  panel := TLazPanel.CreateEx(form);
+  panel.SetBounds(0, 0, form.Width, 30);
+  panel.BevelOuter := ELazPanelBevel.None;
+  panel.Align := ELazAlign.Top;
+
+  lbl := TLazLabel.CreateEx(panel, 'Normalize Coordinates');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  checkbox := TLazCheckBox.CreateEx(panel);
+  checkbox.Align := ELazAlign.Left;
+  checkbox.BorderSpacing.Left  := 10;
+  checkbox.BorderSpacing.Right := 4;
+  checkbox.OnChange := @Self.NormalizeCoordinatesOnChange;
+  checkbox.Checked := True;
+  lbl.AnchorSideTop.Control := checkbox;
+  lbl.OnClick := @FormUtils.OnCheckboxAnchorClick;
+
+  lbl := TLazLabel.CreateEx(panel, 'Show ObjectClusters');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  checkbox := TLazCheckBox.CreateEx(panel);
+  checkbox.Align := ELazAlign.Left;
+  checkbox.BorderSpacing.Left  := 10;
+  checkbox.BorderSpacing.Right := 4;
+  checkbox.OnChange := @Self.ObjectClustersOnChange;
+  lbl.AnchorSideTop.Control := checkbox;
+  lbl.OnClick := @FormUtils.OnCheckboxAnchorClick;
+
+  lbl := TLazLabel.CreateEx(panel, 'Show WalkableClusters');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  checkbox := TLazCheckBox.CreateEx(panel);
+  checkbox.Align := ELazAlign.Left;
+  checkbox.BorderSpacing.Left  := 10;
+  checkbox.BorderSpacing.Right := 4;
+  checkbox.OnChange := @Self.WalkableClustersOnChange;
+  lbl.AnchorSideTop.Control := checkbox;
+  lbl.OnClick := @FormUtils.OnCheckboxAnchorClick;
+
+
+  lbl := TLazLabel.CreateEx(panel, 'Show WalkableSpace');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  checkbox := TLazCheckBox.CreateEx(panel);
+  checkbox.Align := ELazAlign.Left;
+  checkbox.BorderSpacing.Left  := 10;
+  checkbox.BorderSpacing.Right := 4;
+  checkbox.OnChange := @Self.WalkableSpaceOnChange;
+  lbl.AnchorSideTop.Control := checkbox;
+  lbl.OnClick := @FormUtils.OnCheckboxAnchorClick;
+
+  lbl := TLazLabel.CreateEx(panel, 'Show webgraph');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  checkbox := TLazCheckBox.CreateEx(panel);
+  checkbox.Align := ELazAlign.Left;
+  checkbox.State := ELazCheckBoxState.Checked;
+  checkbox.BorderSpacing.Left  := 10;
+  checkbox.BorderSpacing.Right := 4;
+  checkbox.OnChange := @Self.GraphOnChange;
+  lbl.AnchorSideTop.Control := checkbox;
+  lbl.OnClick := @FormUtils.OnCheckboxAnchorClick;
+
+
+  combobox := TLazComboBox.CreateEx(panel);
+  combobox.Items.Add('Map');
+  combobox.Items.Add('Height');
+  combobox.Items.Add('Collision');
+  combobox.ItemIndex := 0;
+  combobox.Align := ELazAlign.Left;
+  combobox.BorderSpacing.Left  := 10;
+  combobox.BorderSpacing.Right := 10;
+  combobox.OnChange := @Self.OnChange;
+
+  lbl := TLazLabel.CreateEx(panel, 'Map:');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 5;
+
+  lbl := TLazLabel.CreateEx(panel, 'Coordinate: ');
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Right;
+  lbl.BorderSpacing.Around := 5;
+
+  Self.Coordinate := TLazLabel.CreateEx(panel);
+  Self.Coordinate.Align := ELazAlign.Right;
+  Self.Coordinate.BorderSpacing.Around := 5;
+  Self.Coordinate.Font.Color := $FFFFFF;
+
+  Self.ImageBox := TImageBox.CreateEx(form);
+  Self.ImageBox.Align := ELazAlign.Client;
+  Self.ImageBox.SetImage(Self.Images[0]);
+  Self.ImageBox.OnImgPaint := @Self.ImgBoxPaint;
+  Self.ImageBox.OnImgMouseMove := @Self.ImgBoxMouseMove;
+  Self.ImageBox.OnImgMouseDown := @Self.ImgBoxMouseDown;
+  Self.ImageBox.OnImgKeyDown := @Self.OnKeyDown;
+
+  form.ShowOnTop();
+  while form.Showing do
+    Sleep(100);
+end;
+
+(*
+## MapDebugger.Setup
+```pascal
+procedure TMapDebugger.Setup(var loader: TMapLoader);
+```
+Setup method for the `MapDebugger` form.
+A {ref}`TMapLoader` must be passed into this as `loader`.
+
+Example:
+```pascal
+MapDebugger.Setup(@Map.Loader);
+```
+*)
+procedure TMapDebugger.Setup(var loader: TMapLoader);
+var
+  collision: TImage;
+  pt: TPoint;
+  x, y, i: Int32;
+begin
+  Self.Target := new TTarget();
+  Self.Target.SetDesktop();
+
+  collision := loader.Collision.Copy();
+
+  for pt in collision.FindColor($FFFFFF, 0) do
+  begin
+    x := (pt.X div 4) mod 2;
+    y := (pt.Y div 4) mod 2;
+    if x = y then Continue;
+    collision.Pixel[pt.X, pt.Y] := $F5F5F5;
+  end;
+
+  Self.Images := [loader.Map.Copy(), loader.Heightmap.Copy(), collision];
+
+  Self.GetGlobal := @loader.GetGlobal;
+
+  Self.Graph.Nodes := loader.Graph.Nodes;
+  Self.Graph.Paths := loader.Graph.Paths;
+
+  Self.Graph.WalkableSpace := loader.Graph.WalkableSpace;
+  Self.Graph.WalkableClusters := loader.Graph.WalkableClusters;
+  Self.Graph.ObjectClusters := loader.Graph.ObjectClusters;
+
+  for i := 0 to Max(Length(Self.Graph.WalkableClusters), Length(Self.Graph.ObjectClusters)) do
+    Self.ColorArray += TColor.Random();
+
+  Self.Graph.KDTree := loader.Graph.KDTree;
+  Self.ShowGraph := True;
+
+  Self.Show();
+end;
+{$R+}
+
+var
+(*
+## MapDebugger variable
+Global {ref}`TMapDebugger` variable.
+*)
+  MapDebugger: TMapDebugger;
+
+procedure TMap.Debug();
+begin
+  MapDebugger.Setup(Self.Loader);
+end;

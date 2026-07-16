@@ -1,0 +1,113 @@
+(*
+# SpellFinder
+Methods to find and compare spell images
+*)
+
+{$DEFINE WL_SPELLFINDER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  ESpell = enum(
+    UNKNOWN,
+    //Standard
+    LUMBRIDGE_HOME_TELEPORT, WIND_STRIKE, CONFUSE, ENCHANT_CROSSBOW_BOLT, WATER_STRIKE, JEWELLERY_ENCHANTMENTS, BACK, LVL1_ENCHANT, LVL2_ENCHANT, LVL3_ENCHANT, LVL4_ENCHANT, LVL5_ENCHANT, LVL6_ENCHANT, LVL7_ENCHANT, EARTH_STRIKE, WEAKEN, FIRE_STRIKE, BONES_TO_BANANAS, WIND_BOLT, CURSE, BIND, LOW_LEVEL_ALCHEMY, WATER_BOLT, VARROCK_TELEPORT, EARTH_BOLT, LUMBRIDGE_TELEPORT, TELEKINETIC_GRAB, FIRE_BOLT, FALADOR_TELEPORT, CRUMBLE_UNDEAD, TELEPORT_TO_HOUSE, WIND_BLAST, SUPERHEAT_ITEM, CAMELOT_TELEPORT, WATER_BLAST, IBAN_BLAST, SNARE, MAGIC_DART, ARDOUGNE_TELEPORT, EARTH_BLAST, CIVITAS_ILLA_FORTIS_TELEPORT, HIGH_LEVEL_ALCHEMY, CHARGE_WATER_ORB, WATCHTOWER_TELEPORT, FIRE_BLAST, CHARGE_EARTH_ORB, BONES_TO_PEACHES, SARADOMIN_STRIKE, CLAWS_OF_GUTHIX, FLAMES_OF_ZAMORAK, TROLLHEIM_TELEPORT, WIND_WAVE, CHARGE_FIRE_ORB, APE_ATOLL_TELEPORT, WATER_WAVE, CHARGE_AIR_ORB, VULNERABILITY, TELEPORT_TO_KOUREND, EARTH_WAVE, ENFEEBLE, TELEOTHER_LUMBRIDGE, FIRE_WAVE, ENTANGLE, STUN, CHARGE, WIND_SURGE, TELEOTHER_FALADOR, WATER_SURGE, TELE_BLOCK, STANDARD_TARGET_TELEPORT, TELEOTHER_CAMELOT, EARTH_SURGE, FIRE_SURGE,
+    //Ancient
+    EDGEVILLE_HOME_TELEPORT, SMOKE_RUSH, SHADOW_RUSH, PADDEWWA_TELEPORT, BLOOD_RUSH, ICE_RUSH, SENNTISTEN_TELEPORT, SMOKE_BURST, SHADOW_BURST, KHARYRLL_TELEPORT, BLOOD_BURST, ICE_BURST, LASSAR_TELEPORT, SMOKE_BLITZ, SHADOW_BLITZ, DAREEYAK_TELEPORT, BLOOD_BLITZ, ICE_BLITZ, CARRALLANGAR_TELEPORT, ANCIENT_TARGET_TELEPORT, SMOKE_BARRAGE, SHADOW_BARRAGE, ANNAKARL_TELEPORT, BLOOD_BARRAGE, ICE_BARRAGE, GHORROCK_TELEPORT,
+    //Lunar
+    LUNAR_HOME_TELEPORT, BAKE_PIE, GEOMANCY, CURE_PLANT, MONSTER_EXAMINE, NPC_CONTACT, CURE_OTHER, HUMIDIFY, MOONCLAN_TELEPORT, TELE_GROUP_MOONCLAN, CURE_ME, OURANIA_TELEPORT, HUNTER_KIT, WATERBIRTH_TELEPORT, TELE_GROUP_WATERBIRTH, CURE_GROUP, STAT_SPY, BARBARIAN_TELEPORT, TELE_GROUP_BARBARIAN, SPIN_FLAX, SUPERGLASS_MAKE, TAN_LEATHER, KHAZARD_TELEPORT, TELE_GROUP_KHAZARD, DREAM, STRING_JEWELLERY, STAT_RESTORE_POT_SHARE, MAGIC_IMBUE, FERTILE_SOIL, BOOST_POTION_SHARE, FISHING_GUILD_TELEPORT, BOUNTY_TELEPORT, TELE_GROUP_FISHING_GUILD, PLANK_MAKE, CATHERBY_TELEPORT, TELE_GROUP_CATHERBY, RECHARGE_DRAGONSTONE, ICE_PLATEU_TELEPORT, TELE_GROUP_ICE_PLATEU, ENERGY_TRANSFER, HEAL_OTHER, VENGEANCE_OTHER, VENGEANCE, HEAL_GROUP, SPELLBOOK_SWAP,
+    //Arceuus
+    ARCEUUS_HOME_TELEPORT, ARCEUUS_LIBRARY_TELEPORT, BASIC_REANIMATION, DRAYNOR_MANOR_TELEPORT, BATTLEFRONT_TELEPORT, MIND_ALTAR_TELEPORT, RESPAWN_TELEPORT, GHOSTLY_GRASP, RESURRECT_LESSER_GHOST, RESURRECT_LESSER_SKELETON, RESURRECT_LESSER_ZOMBIE, SALVE_GRAVEYARD_TELEPORT, ADEPT_REANIMATION, INFERIOR_DEMONBANE, SHADOW_VEIL, FENKENSTRAINS_CASTLE_TELEPORT, DARK_LURE, SKELETAL_GRASP, RESURRECT_SUPERIOR_GHOST, RESURRECT_SUPERIOR_SKELETON, RESURRECT_SUPERIOR_ZOMBIE, MARK_OF_DARKNESS, WEST_ARDOUGNE_TELEPORT, SUPERIOR_DEMONBANE, LESSER_CORRUPTION, HARMONY_ISLAND_TELEPORT, VILE_VIGOUR, DEGRIME, CEMETERY_TELEPORT, EXPERT_REANIMATION, WARD_OF_ARCEUUS, RESURRECT_GREATER_GHOST, RESURRECT_GREATER_SKELETON, RESURRECT_GREATER_ZOMBIE, RESURRECT_CROPS, UNDEAD_GRASP, DEATH_CHARGE, DARK_DEMONBANE, BARROWS_TELEPORT, DEMONIC_OFFERING, GREATER_CORRUPTION, MASTER_REANIMATION, APE_ATOLL_DUNGEON_TELEPORT, SINISTER_OFFERING
+  );
+
+  TSpellFinder = record
+    SpellImages: array [ESpell] of array [0..1] of TImage;
+    Similarity: Single;
+    ImageCompare: TImageCompareUtils;
+    Version, CacheDir: String;
+  end;
+
+procedure TSpellFinder.Setup();
+var
+  path, tmp: String;
+begin
+  Self.Version := WLAssets.JSON.Item['finders/spells.zip'].AsString;
+  Self.CacheDir := WLEnv.CacheDir + 'spellfinder' + PATH_SEP;
+
+  //Delete old cache files if they exist
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
+    if tmp = Self.Version then Continue;
+    DirDelete(path, False);
+  end;
+
+  Self.CacheDir += Self.Version + PATH_SEP;
+
+  if not DirCreate(Self.CacheDir) then
+    raise GetDebugLn('SpellFinder', 'Failed to create cache directory: ' + Self.CacheDir);
+
+  //only set similarity if the user didn't set it already
+  if Self.Similarity = 0 then
+    Self.Similarity := 0.85;
+end;
+
+function TSpellFinder.GetImages(spell: ESpell): array [0..1] of TImage;
+const
+  SIZES: TStringArray = ['_large.png', '_small.png'];
+var
+  name, path: String;
+  i: Integer;
+begin
+  if Self.SpellImages[spell][0] <> nil then
+    Exit(Self.SpellImages[spell]);
+
+  for i := 0 to 1 do
+  begin
+    name := LowerCase(ToStr(spell).After('.')) + SIZES[i];
+    path := Self.CacheDir + name;
+
+    if not FileExists(path) then
+      ZipExtract(WLEnv.AssetsDir + 'finders' + PATH_SEP + 'spells.zip', Self.CacheDir, [name]);
+
+    Self.SpellImages[spell][i] := new TImage(path);
+  end;
+
+  Result := Self.SpellImages[spell];
+end;
+
+
+function TSpellFinder.FindAll(spells: array of ESpell; bounds: TBox; maxToFind: Integer = 0): TImageMatchArray;
+var
+  spell: ESpell;
+  img: TImage;
+  match: TImageMatch;
+begin
+  for spell in spells do
+    for img in Self.GetImages(spell) do
+    begin
+      match.Match := Self.Similarity;
+      if Self.ImageCompare.FindMatch(img, bounds, match) then
+      begin
+        Result += match;
+        if (maxToFind > 0) and (Length(Result) > maxToFind) then
+          Exit;
+      end;
+    end;
+end;
+
+function TSpellFinder.Find(spells: array of ESpell; bounds: TBox; out match: TImageMatch): Boolean;
+var
+  spell: ESpell;
+  img: TImage;
+begin
+  for spell in spells do
+    for img in Self.GetImages(spell) do
+    begin
+      match.Match := Self.Similarity;
+      if Self.ImageCompare.FindMatch(img, bounds, match) then
+        Exit(True);
+    end;
+end;
+
+var
+  SpellFinder: TSpellFinder;

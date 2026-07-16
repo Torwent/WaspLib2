@@ -1,0 +1,220 @@
+(*
+# Transporter
+Responsible for transporting you from one place to another.
+This is not meant to be used directly but through {ref}`TWalker` WebWalking.
+*)
+
+{$DEFINE WL_TRANSPORTER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_TRANSPORTER}
+{.$DEFINE WL_DEBUG_TRANSPORTER}
+
+type
+  ESpellTeleport = enum(
+    HOUSE_INSIDE,
+    HOUSE_OUTSIDE,
+    KOUREND,
+    LASSAR,
+    OURANIA,
+    RESPAWN,
+    VARROCK,
+    GRAND_EXCHANGE,
+    CAMELOT,
+    SEERS,
+    KHAZARD,
+    FALADOR,
+    BARROWS,
+    MOONCLAN,
+    CEMETERY,
+    GHORROCK,
+    ARDOUGNE,
+    PADDEWWA,
+    KHARYRLL,
+    ANNAKARL,
+    CATHERBY,
+    APE_ATOLL_DUNGEON,
+    LUMBRIDGE,
+    BARBARIAN,
+    APE_ATOLL,
+    TROLLHEIM,
+    MIND_ALTAR,
+    WATCHTOWER,
+    YANILLE,
+    ICE_PLATEU,
+    LUNAR_HOME,
+    FENKENSTRAINS_CASTLE,
+    SALVE_GRAVEYARD,
+    ARCEUUS_LIBRARY,
+    HARMONY_ISLAND,
+    EDGEVILLE_HOME,
+    DRAYNOR_MANOR,
+    FISHING_GUILD,
+    LUMBRIDGE_HOME,
+    WEST_ARDOUGNE,
+    CARRALLANGAR,
+    ARCEUUS_HOME,
+    WATERBIRTH,
+    SENNTISTEN
+  );
+
+  EItemTeleport = enum(
+    DUELING_RING, GAMES_NECKLACE, DIGSITE_PENDANT, MYSTIC_CAPE
+  );
+
+const
+  TELEPORT_COORDINATES: array [ESpellTeleport] of TPoint = [
+    [], //HOUSE_INSIDE
+    [], //HOUSE_OUTSIDE
+    [], //KOUREND
+    [], //LASSAR
+    [], //OURANIA
+    [], //RESPAWN
+    [], //VARROCK
+    [], //GRAND EXCHANGE
+    [], //CAMELOT
+    [], //SEERS
+    [], //KHAZARD
+    [], //FALADOR
+    [], //BARROWS
+    [], //MOONCLAN
+    [], //CEMETERY
+    [], //GHORROCK
+    [], //ARDOUGNE
+    [], //PADDEWWA
+    [], //KHARYRLL
+    [], //ANNAKARL
+    [], //CATHERBY
+    [], //APE_ATOLL_DUNGEON
+    [], //LUMBRIDGE
+    [], //BARBARIAN
+    [], //APE_ATOLL
+    [], //TROLLHEIM
+    [], //MIND_ALTAR
+    [], //WATCHTOWER
+    [], //YANILLE
+    [], //ICE_PLATEU
+    [], //LUNAR_HOME
+    [], //FENKENSTRAINS_CASTLE
+    [], //SALVE_GRAVEYARD
+    [], //ARCEUUS_LIBRARY
+    [], //HARMONY_ISLAND
+    [], //EDGEVILLE_HOME
+    [], //DRAYNOR_MANOR
+    [], //FISHING_GUILD
+    [], //LUMBRIDGE_HOME
+    [], //WEST_ARDOUGNE
+    [], //CARRALLANGAR
+    [], //ARCEUUS_HOME
+    [], //WATERBIRTH
+    [] //SENNTISTEN
+  ];
+
+type
+(*
+(TTransporter)=
+## TTransporter type
+Main record responsible for transporting the player from one place to another.
+*)
+  TTransporter = record
+    HomeTeleportTimer: TCountDown;
+  end;
+
+function TTransporter.Teleport(spell: ESpellTeleport; pos: TWalkerPositionFunction = nil): Boolean;
+var
+  t: UInt64;
+  option: String;
+  magicSpell: ESpell;
+  hasTimer: Boolean;
+begin
+  if pos = nil then
+    pos := @Map.Position;
+
+  case spell of
+    ESpellTeleport.LUMBRIDGE_HOME, ESpellTeleport.EDGEVILLE_HOME,
+    ESpellTeleport.LUNAR_HOME, ESpellTeleport.ARCEUUS_HOME:
+    begin
+      t := 22*TICK;
+      hasTimer := True;
+    end;
+    else t := 6*TICK;
+  end;
+
+  case spell of
+    ESpellTeleport.HOUSE_INSIDE, ESpellTeleport.HOUSE_OUTSIDE:
+      magicSpell := ESpell.TELEPORT_TO_HOUSE;
+    ESpellTeleport.KOUREND: magicSpell := ESpell.TELEPORT_TO_KOUREND;
+    ESpellTeleport.LASSAR: magicSpell := ESpell.LASSAR_TELEPORT;
+    ESpellTeleport.OURANIA: magicSpell := ESpell.OURANIA_TELEPORT;
+    ESpellTeleport.RESPAWN: magicSpell := ESpell.RESPAWN_TELEPORT;
+    ESpellTeleport.VARROCK, ESpellTeleport.GRAND_EXCHANGE:
+      magicSpell := ESpell.VARROCK_TELEPORT;
+    ESpellTeleport.CAMELOT, ESpellTeleport.SEERS:
+      magicSpell := ESpell.CAMELOT_TELEPORT;
+    ESpellTeleport.KHAZARD: magicSpell := ESpell.KHAZARD_TELEPORT;
+    ESpellTeleport.FALADOR: magicSpell := ESpell.FALADOR_TELEPORT;
+    ESpellTeleport.BARROWS: magicSpell := ESpell.BARROWS_TELEPORT;
+    ESpellTeleport.MOONCLAN: magicSpell := ESpell.MOONCLAN_TELEPORT;
+    ESpellTeleport.CEMETERY: magicSpell := ESpell.CEMETERY_TELEPORT;
+    ESpellTeleport.GHORROCK: magicSpell := ESpell.GHORROCK_TELEPORT;
+    ESpellTeleport.ARDOUGNE: magicSpell := ESpell.ARDOUGNE_TELEPORT;
+    ESpellTeleport.PADDEWWA: magicSpell := ESpell.PADDEWWA_TELEPORT;
+    ESpellTeleport.KHARYRLL: magicSpell := ESpell.KHARYRLL_TELEPORT;
+    ESpellTeleport.ANNAKARL: magicSpell := ESpell.ANNAKARL_TELEPORT;
+    ESpellTeleport.CATHERBY: magicSpell := ESpell.CATHERBY_TELEPORT;
+    ESpellTeleport.APE_ATOLL_DUNGEON:
+      magicSpell := ESpell.APE_ATOLL_DUNGEON_TELEPORT;
+    ESpellTeleport.LUMBRIDGE: magicSpell := ESpell.LUMBRIDGE_TELEPORT;
+    ESpellTeleport.BARBARIAN: magicSpell := ESpell.BARBARIAN_TELEPORT;
+    ESpellTeleport.APE_ATOLL: magicSpell := ESpell.APE_ATOLL_TELEPORT;
+    ESpellTeleport.TROLLHEIM: magicSpell := ESpell.TROLLHEIM_TELEPORT;
+    ESpellTeleport.MIND_ALTAR: magicSpell := ESpell.MIND_ALTAR_TELEPORT;
+    ESpellTeleport.WATCHTOWER, ESpellTeleport.YANILLE:
+      magicSpell := ESpell.WATCHTOWER_TELEPORT;
+    ESpellTeleport.ICE_PLATEU: magicSpell := ESpell.ICE_PLATEU_TELEPORT;
+    ESpellTeleport.LUNAR_HOME: magicSpell := ESpell.LUNAR_HOME_TELEPORT;
+    ESpellTeleport.FENKENSTRAINS_CASTLE:
+      magicSpell := ESpell.FENKENSTRAINS_CASTLE_TELEPORT;
+    ESpellTeleport.SALVE_GRAVEYARD:
+      magicSpell := ESpell.SALVE_GRAVEYARD_TELEPORT;
+    ESpellTeleport.ARCEUUS_LIBRARY:
+      magicSpell := ESpell.ARCEUUS_LIBRARY_TELEPORT;
+    ESpellTeleport.HARMONY_ISLAND:
+      magicSpell := ESpell.HARMONY_ISLAND_TELEPORT;
+    ESpellTeleport.EDGEVILLE_HOME:
+      magicSpell := ESpell.EDGEVILLE_HOME_TELEPORT;
+    ESpellTeleport.DRAYNOR_MANOR: magicSpell := ESpell.DRAYNOR_MANOR_TELEPORT;
+    ESpellTeleport.FISHING_GUILD: magicSpell := ESpell.FISHING_GUILD_TELEPORT;
+    ESpellTeleport.LUMBRIDGE_HOME:
+      magicSpell := ESpell.LUMBRIDGE_HOME_TELEPORT;
+    ESpellTeleport.WEST_ARDOUGNE: magicSpell := ESpell.WEST_ARDOUGNE_TELEPORT;
+    ESpellTeleport.CARRALLANGAR: magicSpell := ESpell.CARRALLANGAR_TELEPORT;
+    ESpellTeleport.ARCEUUS_HOME: magicSpell := ESpell.ARCEUUS_HOME_TELEPORT;
+    ESpellTeleport.WATERBIRTH: magicSpell := ESpell.WATERBIRTH_TELEPORT;
+    ESpellTeleport.SENNTISTEN: magicSpell := ESpell.SENNTISTEN_TELEPORT;
+  end;
+
+  case spell of
+    ESpellTeleport.HOUSE_OUTSIDE: option:= 'Outside';
+    ESpellTeleport.GRAND_EXCHANGE: option:= 'Grand Exchange';
+    ESpellTeleport.SEERS: option:= 'Seers';
+    ESpellTeleport.YANILLE: option:= 'Yanille';
+    else option:= 'Cast';
+  end;
+
+  if Magic.Cast(magicSpell, option) then
+    if SleepUntil(pos().InRange(TELEPORT_COORDINATES[spell], 30), 300, t) then
+    begin
+      Biometrics.Sleep(0, 4*TICK);
+      Exit(True);
+    end;
+end;
+
+{$H-}
+var
+(*
+## Transporter variable
+Global {ref}`TTransporter` variable.
+*)
+  Transporter: TTransporter;
+{$H+}

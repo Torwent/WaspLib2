@@ -1,0 +1,17 @@
+{$DEFINE WL_DISABLE_FAKE_INPUT}
+
+{$DEFINE WASP_LOCAL_DEVELOPMENT}
+
+{$DEFINE WASP_REFRESH_TOKEN := 'REFRESH_TOKEN'}
+
+{$DEFINE SCRIPT_ID := 'SCRIPT_UUID'}
+{$DEFINE SCRIPT_REVISION := 'SCRIPT_REVISION'}
+
+{$I WaspLib/main.simba}
+
+begin
+  Sleep(1500);
+  WaspClient.UpdatePayload(1500, 1500);
+  WaspClient.SubmitStats();
+  Sleep(2500);
+end.

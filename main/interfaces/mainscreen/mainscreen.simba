@@ -1,0 +1,633 @@
+(*
+# MainScreen
+Methods to interact with the mainscreen.
+*)
+
+{$DEFINE WL_MAINSCREEN_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_UPTEXT}
+{.$DEFINE WL_DEBUG_UPTEXT}
+
+type
+(*
+## TMainScreen
+Main record to handle the mainscreen and methods relating to it.
+*)
+  TMainScreen = record
+    Bounds: TBox;
+    Center: TPoint;
+    TopLeft, TopRight, BottomRight, BottomLeft: TPoint;
+
+    UpTextImageBuffer: TImage;
+    UptextBounds, ServerMsgBounds: TBox;
+    UptextOCR: TPixelOCR;
+
+    HighestPitch: Boolean;
+
+    Mask: TImage;
+  end;
+
+(*
+## MainScreen.SetupInterface
+```pascal
+procedure TMainScreen.SetupInterface();
+```
+Internal setup method responsible for setting up the {ref}`TMainScreen` interface
+coordinates.
+
+This is called automatically for you on the {ref}`MainScreen variable`.
+*)
+procedure TMainScreen.SetupInterface();
+begin
+  case Client.Mode of
+    EMode.FIXED:
+      with Client.Bounds do
+        Self.Bounds := TBox.Create(X1+4,4,X1+515,337);
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Bounds := Client.Bounds;
+  end;
+
+  Self.Center := Self.Bounds.Center;
+
+  Self.TopLeft     := Self.Bounds.TopLeft;
+  Self.TopRight    := Self.Bounds.TopRight;
+  Self.BottomRight := Self.Bounds.BottomRight;
+  Self.BottomLeft  := Self.Bounds.BottomLeft;
+
+  if Client.Client = EClient.OFFICIAL then
+  begin
+    Self.UptextBounds.X1 := Self.Bounds.X1;
+    Self.UptextBounds.Y1 := Self.Bounds.Y1 + 1;
+    Self.UptextBounds.X2 := Self.Bounds.X1 + 497;
+    Self.UptextBounds.Y2 := Self.Bounds.Y1 + 19;
+  end
+  else
+  begin
+    Self.UptextBounds.X1 := Self.Bounds.X1 + 3;
+    Self.UptextBounds.Y1 := Self.Bounds.Y1 + 3;
+    Self.UptextBounds.X2 := Self.Bounds.X1 + 500;
+    Self.UptextBounds.Y2 := Self.Bounds.Y1 + 21;
+  end;
+
+  Self.ServerMsgBounds.X1 := Self.Bounds.X1 + 2;
+  Self.ServerMsgBounds.Y1 := Self.Bounds.Y1 + 2;
+  Self.ServerMsgBounds.X2 := Self.ServerMsgBounds.X1 + 129;
+  Self.ServerMsgBounds.Y2 := Self.ServerMsgBounds.Y1 + 20;
+
+  Self.Mask := new TImage(Target.Width+1, Target.Height+1);
+  Self.Mask.Fill($FFFFFF);
+  Self.Mask.DrawColor := $0;
+  Self.Mask.DrawBoxFilled(Self.Bounds);
+  Self.Mask.SetAlphas(TPointArray.CreateFromBox(Self.Bounds, True), $0);
+  Self.Mask.DrawColor := $FFFFFF;
+  Self.Mask.DrawAlpha := $FF;
+end;
+
+(*
+## UpText
+`UpText` refers to the text that shows up on the top left corner of the
+mainscreen describing what action you will perform if you click.
+
+The game uptext is one of the few texts that has a lot of randomization to
+combat bots and therefore you shouldn't rely on being able to read it 100%
+accurately because many times you won't.
+
+To debug uptext when uptext methods are used add the following compiler directive
+to your script **before** you include WaspLib:
+```pascal
+{$DEFINE WL_DEBUG_UPTEXT}
+```
+*)
+
+(*
+### MainScreen.UpText
+```pascal
+property TMainScreen.UpText: String;
+```
+Returns the {ref}`uptext` on the mainscreen.
+
+Example:
+```pascal
+WriteLn MainScreen.UpText;
+```
+*)
+property TMainScreen.UpText: String;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(Self.UptextBounds);
+  Result := Self.UptextOCR.Recognize(img, Fonts.BOLD_SHADOW, [0,0]);
+  {$IFDEF WL_DEBUG_UPTEXT}
+  DebugLn('MainScreen', 'UpText: ' + Result);
+  {$ENDIF}
+end;
+
+
+(*
+### MainScreen._IsUpText
+```pascal
+function TMainScreen._IsUpText(
+  out upText: String;
+  strings: TStringArray;
+  matchCase: Boolean;
+  similarity: Single
+): Boolean;
+```
+Internal helper method used in {ref}`MainScreen.IsUpText`.
+
+`strings` casing must be lower case if `matchCase` is `False`.
+
+You probably won't ever need to call this method directly.
+*)
+function TMainScreen._IsUpText(
+  out upText: String;
+  strings: TStringArray;
+  matchCase: Boolean;
+  similarity: Single
+): Boolean;
+var
+  str: String;
+  i, len0, len1: Integer;
+  match: Double;
+begin
+  if matchCase then
+    upText := Self.UpText
+  else
+    upText := LowerCase(Self.UpText);
+
+  len0 := Length(upText);
+
+  for str in strings do
+  begin
+    len1 := Length(str);
+
+    if len0 = len1 then
+    begin
+      match := str.Similarity(upText);
+      Result := match >= similarity;
+    end
+    else
+    begin
+      for i := 1 to len0 - len1 do //shift string until best match is found.
+      begin
+        match := str.Similarity(Copy(upText, i, len1));
+        Result := match >= similarity;
+        if Result then
+          Break;
+      end;
+    end;
+
+    if Result then
+    begin
+      {$IFDEF WL_DEBUG_UPTEXT}
+      DebugLn('MainScreen', 'IsUpText Similarity: ' + ToStr(match));
+      {$ENDIF}
+      Break;
+    end;
+  end;
+end;
+
+(*
+### MainScreen.IsUpText
+```pascal
+function TMainScreen.IsUpText(
+  strings: TStringArray;
+  matchCase: Boolean = True;
+  similarity: Single = 0.85;
+  time: Integer = -1
+): Boolean;
+
+function TMainScreen.IsUpText(
+  text: String;
+  matchCase: Boolean = True;
+  similarity: Single = 0.85;
+  time: Integer = -1
+): Boolean; overload;
+```
+Compares `text` or `strings` with the {ref}`uptext` on the mainscreen.
+Returns True if the match above the threshold `similarity`.
+
+UpText is delayed by at least one frame, so this only returns true if the uptext
+doesn't change within 50ms. It also wait 25ms between each loop.
+By default it can wait anywhere from 85ms to 250ms total.
+
+If you cannot afford this delay on your script set a your own `timeout`.
+
+Example:
+```pascal
+if MainScreen.IsUpText('Walk here') then
+  Mouse.Click(EMouseButton.LEFT);
+```
+*)
+function TMainScreen.IsUpText(
+  strings: TStringArray;
+  matchCase: Boolean = True;
+  similarity: Single = 0.85;
+  time: Integer = 0
+): Boolean;
+var
+  timeout: TCountDown;
+  sT: TStringArray;
+  txt, str: String;
+begin
+  if time <= 0 then
+    timeout.Start(RandomMode(100, 85, 250))
+  else
+    timeout.Start(time);
+
+  if matchCase then
+    sT := Copy(strings)
+  else
+  begin
+    for str in strings do
+      sT += LowerCase(str);
+  end;
+
+  repeat
+    if Self._IsUpText(txt, strings, matchCase, similarity) then
+    begin
+      Sleep(50);
+      if Self._IsUpText(txt, strings, matchCase, similarity) then
+        Exit(True);
+    end;
+
+    Sleep(25);
+  until timeout.IsFinished;
+end;
+
+function TMainScreen.IsUpText(
+  text: String;
+  matchCase: Boolean = True;
+  similarity: Single = 0.85;
+  time: Integer = 0
+): Boolean; overload;
+begin
+  Result := Self.IsUpText([text], matchCase, similarity, time);
+end;
+
+
+(*
+(server message)=
+## Server Messages
+"Server Messages" refers to the text that shows up on the top left corner of the
+mainscreen inside of a black box.
+These can only be seen when there's a message. An easy way to see this is to
+simply attempt to switch worlds.
+*)
+
+(*
+### MainScreen.ServerMessage
+```pascal
+property TMainScreen.ServerMessage: String;
+```
+Returns the {ref}`server message` if it's visible.
+
+Example:
+```pascal
+WriteLn MainScreen.GetServerMessage;
+```
+*)
+property TMainScreen.ServerMessage: String;
+var
+  black: TPointArray;
+begin
+  black := Target.FindColor($0, 0, Self.ServerMsgBounds);
+  if Length(black) < 500 then Exit;
+  Result := OCR.Recognize(black.Bounds(), Fonts.PLAIN_12, [$FFFFFF], 0);
+end;
+
+(*
+### MainScreen.IsServerMessage
+```pascal
+function TMainScreen.IsServerMessage(
+  text: String; matchCase: Boolean = True; similarity: Single = 0.85
+): Boolean; overload;
+```
+Compares `text` with the {ref}`server message` visible if any.
+Returns True if the match above the threshold `similarity`.
+
+Example:
+```pascal
+if MainScreen.IsServerMessage('Loading...') then
+  Sleep(2000, 4000);
+```
+*)
+function TMainScreen.IsServerMessage(
+  text: String; matchCase: Boolean = True; similarity: Single = 0.85
+): Boolean; overload;
+var
+  msg: String;
+begin
+  if matchCase then
+    msg := Self.ServerMessage
+  else
+  begin
+    text := LowerCase(text);
+    msg := LowerCase(Self.ServerMessage);
+  end;
+
+  if msg = '' then Exit;
+
+  msg := Copy(msg, 1, Length(text));
+  Result := text.Similarity(msg) >= similarity;
+end;
+
+
+{$R-}
+procedure TMainScreen._ConditionalMaskEx(outter, inner: TBox);
+begin
+  Self.Mask.DrawColor := $0;
+  Self.Mask.DrawBoxFilled(outter);
+  Self.Mask.SetAlphas(TPointArray.CreateFromBox(outter, True), $0);
+  Self.Mask.DrawColor := $FF00FF;
+  Self.Mask.DrawBoxFilled(inner);
+end;
+
+procedure TMainScreen._ConditionalMask(bounds: TBox);
+begin
+  Self.Mask.DrawColor := $FF00FF;
+  Self.Mask.DrawBoxFilled(bounds);
+end;
+
+function TMainScreen._Contains(
+  pt: TPoint; tabNone, xpbarClosed, chatClose, msInterfaceClosed: Boolean
+): Boolean;
+var
+  color: TColor;
+begin
+  if not Self.Bounds.Contains(pt) then
+    Exit;
+  color := Self.Mask.Pixel[pt.X, pt.Y];
+
+  case color of
+    $0: Exit(True);
+    $00FFFF: Exit(tabNone);
+    $00FF00: Exit(xpbarClosed);
+    $0000FF: Exit(chatClose);
+    $FF00FF: Exit(msInterfaceClosed);
+    $FFFFFF: Exit;
+    else Exit;
+  end;
+end;
+
+
+(*
+## MainScreen.Contains
+```pascal
+function TMainScreen.Contains(const pt: TPoint): Boolean;
+function TMainScreen.AnyVisible(const tpa: TPointArray): Boolean;
+function TMainScreen.ContainsAll(const tpa: TPointArray): Boolean;
+```
+Returns `True` if a point `pt` is visible on the mainscreen.
+This also checks for open interfaces to check if the point is not behind them.
+
+Example:
+```pascal
+WriteLn MainScreen.Contains([100,100]);
+```
+*)
+function TMainScreen.Contains(const pt: TPoint): Boolean;
+begin
+  Result := pt <> pt; //overriden, check overrides.
+end;
+
+function TMainScreen.ContainsAny(const tpa: TPointArray): Boolean;
+begin
+  Result := tpa <> tpa; //overriden, check overrides.
+end;
+
+function TMainScreen.ContainsAll(const tpa: TPointArray): Boolean;
+begin
+  Result := tpa <> tpa; //overriden, check overrides.
+end;
+
+
+(*
+## MainScreen.Filter
+```pascal
+function TMainScreen.Filter(const tpa: TPointArray): TPointArray;
+```
+Filters a TPA returning only the points visible on the mainscreens.
+This also checks for open interfaces to check if the points are not behind them.
+*)
+function TMainScreen.Filter(const tpa: TPointArray): TPointArray;
+begin
+  Result := tpa.Copy(); //overriden, check overrides.
+end;
+{$R+}
+
+
+function TMainScreen._RedClicked(const area: TBox): Boolean;
+var
+  img: TImage;
+  trgt: TTarget;
+begin
+  //create a temp target so this thread doesn't hold `Target` for multiple operations.
+  img := Target.GetImage(area);
+  trgt := new TTarget();
+  trgt.SetImage(img);
+  Result := trgt.HasColor($0000FF, 0, 1) or trgt.HasColor($0401C8, 0, 1);
+end;
+
+(*
+## MainScreen.RedClicked
+```pascal
+function TMainScreen.RedClicked(): Boolean;
+```
+Returns `True` if a the red cross from clicking an entity is visible on the
+mainscreen.
+
+Example:
+```pascal
+WriteLn MainScreen.RedClicked();
+```
+*)
+function TMainScreen.RedClicked(): Boolean;
+var
+  area: TBox;
+begin
+  area := TBox.Create(Target.MouseXY, 10, 10).Clip(Self.Bounds);
+  Result := Self._RedClicked(area);
+end;
+
+(*
+## MainScreen.WaitRedClick
+```pascal
+function TMainScreen.WaitRedClick(time: Integer = 250): Boolean;
+```
+Returns `True` if a the red cross from clicking an entity is visible on the
+mainscreen within `time` milliseconds.
+
+Example:
+```pascal
+WriteLn MainScreen.WaitRedClick();
+```
+*)
+function TMainScreen.WaitRedClick(time: Integer = 250): Boolean;
+var
+  area: TBox;
+begin
+  area := TBox.Create(Target.MouseXY, 10, 10).Clip(Self.Bounds);
+  Result := SleepUntil(Self._RedClicked(area), 50, time);
+end;
+
+function TMainScreen._YellowClicked(const area: TBox): Boolean;
+begin
+  Result := Target.HasColor($00FFFF, 0, 1, area);
+end;
+
+(*
+## MainScreen.YellowClicked
+```pascal
+function TMainScreen.YellowClicked(): Boolean;
+```
+Returns `True` if a the yellow cross from click to "walk here" is visible on the
+mainscreen.
+
+Example:
+```pascal
+WriteLn MainScreen.YellowClicked();
+```
+*)
+function TMainScreen.YellowClicked(): Boolean;
+var
+  area: TBox;
+begin
+  area := TBox.Create(Target.MouseXY, 10, 10).Clip(Self.Bounds);
+  Result := Self._YellowClicked(area);
+end;
+
+(*
+## MainScreen.WaitYellowClick
+```pascal
+function TMainScreen.WaitYellowClick(time: Integer = 250): Boolean;
+```
+Returns `True` if a the yellow cross from clicking to "walk here" is visible on the
+mainscreen within `time` milliseconds.
+
+Example:
+```pascal
+WriteLn MainScreen.WaitYellowClick();
+```
+*)
+function TMainScreen.WaitYellowClick(time: Integer = 250): Boolean;
+var
+  area: TBox;
+begin
+  area := TBox.Create(Target.MouseXY, 10, 10).Clip(Self.Bounds);
+  Result := SleepUntil(Self._YellowClicked(area), 50, time);
+end;
+
+(*
+## MainScreen.Interact
+```pascal
+function TMainScreen.Interact(strings: TStringArray): Boolean;
+function TMainScreen.Interact(pt: TPoint; strings: TStringArray): Boolean; overload;
+```
+Attempts to interact with something on the mainscreen.
+If the uptext matches `strings` wasplib will left click, otherwise it will use
+{ref}`ChooseOption`.
+
+Example:
+```pascal
+WriteLn MainScreen.Interact('Pick-up');
+```
+*)
+function TMainScreen.Interact(strings: TStringArray): Boolean;
+begin
+  if Self.IsUpText(strings) then
+  begin
+    Mouse.Click(EMouseButton.LEFT);
+    if Self.RedClicked() then
+      Exit(True);
+  end;
+
+  if ChooseOption.Select(strings) then
+    Exit(Self.RedClicked());
+end;
+
+function TMainScreen.Interact(
+  pt: TPoint; strings: TStringArray
+): Boolean; overload;
+begin
+  Mouse.Move(pt);
+  Result := Self.Interact(strings);
+end;
+
+var
+(*
+## MainScreen variable
+Global {ref}`TMainScreen` variable.
+*)
+  MainScreen: TMainScreen;
+
+(*
+## Biometrics.YellowClick
+```pascal
+function TBiometrics.YellowClick(
+  button: EMouseButton; clicks: UInt32 = 3
+): Boolean;
+```
+Basically the same as {ref}`Biometrics.Click` but returns true if we yellow clicked.
+
+Example:
+```pascal
+Biometrics.YellowClick(EMouseButton.LEFT);
+```
+*)
+function TBiometrics.YellowClick(
+  button: EMouseButton; clicks: UInt32 = 3
+): Boolean;
+var
+  i: Integer;
+begin
+  Mouse.Click(button);
+  Result := MainScreen.YellowClicked();
+
+  if Random() > Self.RandomModeDouble(0.08, 0.05, 0.1) then
+    Exit;
+
+  for i := 1 to Self.RandomModeInteger(clicks div 2, 1, clicks) do
+  begin
+    Mouse.Click(Mouse.Position.Random(5), button);
+    Sleep(0, 100, ERandomDir.LEFT);
+  end;
+
+  Result := MainScreen.YellowClicked() and not MainScreen.RedClicked();
+end;
+
+(*
+## Biometrics.RedClick
+```pascal
+function TBiometrics.RedClick(
+  button: EMouseButton; clicks: UInt32 = 3
+): Boolean;
+```
+Basically the same as {ref}`Biometrics.Click` but returns true if we red clicked.
+
+Example:
+```pascal
+Biometrics.RedClick(EMouseButton.LEFT);
+```
+*)
+function TBiometrics.RedClick(
+  button: EMouseButton; clicks: UInt32 = 3
+): Boolean;
+var
+  i: Integer;
+begin
+  Mouse.Click(button);
+  Result := MainScreen.RedClicked();
+
+  if Random() > Self.RandomModeDouble(0.08, 0.05, 0.1) then
+    Exit;
+
+  for i := 1 to Self.RandomModeInteger(clicks div 2, 1, clicks) do
+  begin
+    Mouse.Click(Mouse.Position.Random(5), button);
+    Sleep(0, 100, ERandomDir.LEFT);
+  end;
+
+  Result := MainScreen.RedClicked() and not MainScreen.YellowClicked();
+end;

@@ -1,0 +1,524 @@
+(*
+# Models
+Types and methods that allows you to load and project 3D models.
+
+This is mostly for internal use for {ref}`RSObjects` and {ref}`RSEntities` but
+you may use this directly if you need and know what you are doing.
+
+If you are curious about how the projection works you should read about
+{ref}`Projection`.
+
+```{figure} ../../images/modeldraw.png
+```
+*)
+{$DEFINE WL_MODEL_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('Models', 'Range checks are enabled for TModel, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+(*
+(TModelFace)=
+# TModelFace type
+Type that represents a model face.
+
+A model face consists of 3 vertices indices making a triangle and a
+"material" index to give the face a color.
+
+A 3D model will have several of these.
+*)
+  TModelFace = record
+    Vertices: array [0..2] of Int32;
+    Material: Int32;
+  end;
+
+  TModelFaceArray = array of TModelFace;
+
+(*
+(TModel)=
+# TModel type
+Type that represents a 3D model.
+
+A model in it's basic form confists of several `Vertices` (`TVector3Array`) and
+faces that represent triangles among those vertices
+(array of {ref}`TModelFace`).
+*)
+  TModel = object
+    Vertices: TVector3Array;
+    Faces: TModelFaceArray;
+    Materials: TColorArray;
+    Alphas: TByteArray;
+    Width, Depth, Height: Single;
+    Center: TVector3;
+  end;
+
+(*
+# Model.LoadMTL
+```pascal
+procedure TModel.LoadMTL(fileName: string);
+```
+Read and parses a material .mtl file and loads it's data into the `TModel`.
+
+This is used to load materials (colors) into the `TModel`.
+*)
+procedure TModel.LoadMTL(fileName: string);
+var
+  strings: TLazStringList;
+  line: string;
+  parts: TStringArray;
+  color: TColorRGB;
+  i: Integer;
+begin
+  strings := TLazStringList.Create();
+
+  try
+    strings.LoadFromFile(fileName);
+    for i := 0 to strings.Count - 1 do
+    begin
+      line := strings.Strings[i].Trim();
+      if (line = '') or (line[1] = '#') then Continue;
+
+      if line.StartsWith('Kd ', False) then
+      begin
+        parts := line.Split(' ', True);
+        if Length(parts) >= 4 then
+        begin
+          color.R := Round(StrToFloat(parts[1]) * 255);
+          color.G := Round(StrToFloat(parts[2]) * 255);
+          color.B := Round(StrToFloat(parts[3]) * 255);
+
+          Self.Materials += color.ToColor();
+          Self.Alphas += $FF;
+        end;
+      end;
+
+      if line.StartsWith('d ', False) then
+      begin
+        parts := line.Split(' ', True);
+        if Length(parts) = 2 then
+          Self.Alphas[High(Self.Alphas)] := Round(StrToFloat(parts[1], 1.0) * 255);
+      end;
+    end;
+  finally
+    strings.Free();
+  end;
+end;
+
+(*
+# Model.LoadOBJ
+```pascal
+procedure TModel.LoadOBJ(fileName: string);
+```
+Read and parses a model .obj file and loads it's data into the `TModel`.
+
+This is used load vertices and faces information into the `TModel`.
+*)
+procedure TModel.LoadOBJ(fileName: String);
+var
+  strings: TLazStringList;
+  parts: TStringArray;
+  line: String;
+  vertex: TVector3;
+  face: TModelFace;
+  i, j: Integer;
+  idx: Integer = -1;
+  x1, y1, x2, y2, z1, z2: Single;
+begin
+  strings := TLazStringList.Create();
+  try
+    strings.LoadFromFile(fileName);
+
+    x1 := $FFFFFF;
+    y1 := $FFFFFF;
+    z1 := $FFFFFF;
+
+    for i := 0 to strings.Count-1 do
+    begin
+      line := strings.Strings[i].Trim();
+      if (line = '') or (line[1] = '#') then Continue;
+
+      if line.StartsWith('usemtl ', False) then  //which material to use line
+      begin
+        idx := line.ExtractInteger(-1);
+        Continue;
+      end;
+
+      if line.StartsWith('v ', False) then //vertices line
+      begin
+        parts := line.Split(' ', False);
+        if Length(parts) >= 4 then
+        begin
+          vertex.X := StrToFloat(parts[1])*4/128;
+          vertex.Y := StrToFloat(parts[3])*4/128;
+          vertex.Z := StrToFloat(parts[2])*4/128;
+          Self.Vertices += vertex;
+
+          x1 := Min(vertex.X, x1); x2 := Max(vertex.X, x2);
+          y1 := Min(vertex.Y, y1); y2 := Max(vertex.Y, y2);
+          z1 := Min(vertex.Z, z1); z2 := Max(vertex.Z, z2);
+        end;
+        Continue;
+      end;
+
+      if line.StartsWith('f ', False) then //face line
+      begin
+        parts := line.Split(' ', True);
+        if Length(parts) >= 4 then
+        begin
+          for j := 0 to 2 do
+            face.Vertices[j] := StrToInt64(parts[j+1].Split('/')[0], 0) - 1;
+
+          if InRange(idx, 0, High(Self.Materials)) then
+            face.Material := idx
+          else
+            face.Material := 0;
+          Self.Faces += face;
+        end;
+      end;
+    end;
+  finally
+    strings.Free();
+  end;
+
+  Self.Width := x2-x1;
+  Self.Depth := y2-y1;
+  Self.Height := z2-z1;
+  Self.Center := [x1+Self.Width/2, y1+Self.Depth/2, z1+Self.Height/2];
+end;
+
+
+(*
+# Model.Construct
+```pascal
+function TModel.Construct(objFile: String; mtlFile: String = ''): TModel; static;
+```
+Creates a new `TModel` out of the `objFile` and `mtlFile` passed in.
+
+If `mtlFile` is left empty no material data is loaded.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  model: TModel;
+begin
+  model := new TModel('path/to/my/model.obj');
+end.
+```
+*)
+function TModel.Construct(objFile: String; mtlFile: String = ''): TModel; static;
+begin
+  if mtlFile <> '' then
+    Result.LoadMTL(mtlFile);
+  Result.LoadOBJ(objFile);
+end;
+
+
+(*
+# Model.Scale
+```pascal
+procedure TModel.Scale(factor: Single);
+```
+Scales a model by the `factor`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  img: TImage;
+  model: TModel;
+  tpa: TPointArray;
+  i: Integer;
+begin
+  model := new TModel('path/to/my/model.obj');
+
+  while True do
+  begin
+    for i := 0 to 100 do
+    begin
+      img := Target.GetImage(MainScreen.Bounds);
+      model.Scale(0.99);
+      tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+      model.DrawModel(img, tpa, True);
+      img.Show();
+    end;
+
+    for i := 0 to 100 do
+    begin
+      img := Target.GetImage(MainScreen.Bounds);
+      model.Scale(1.01);
+      tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+      model.DrawModel(img, tpa, True);
+      img.Show();
+    end;
+  end;
+end.
+```
+
+```{figure} ../../images/modelscale.gif
+```
+*)
+procedure TModel.Scale(factor: Single);
+var
+  i: Integer;
+begin
+  for i := 0 to High(Self.Vertices) do
+  begin
+    Self.Vertices[i].X := Self.Vertices[i].X * factor;
+    Self.Vertices[i].Y := Self.Vertices[i].Y * factor;
+    Self.Vertices[i].Z := Self.Vertices[i].Z * factor;
+  end;
+
+  Self.Width := Self.Width * factor;
+  Self.Depth := Self.Depth * factor;
+  Self.Height := Self.Height * factor;
+
+  Self.Center.X := Self.Center.X * factor;
+  Self.Center.Y := Self.Center.Y * factor;
+  Self.Center.Z := Self.Center.Z * factor;
+end;
+
+(*
+# Model.Rotate
+```pascal
+procedure TModel.Rotate(radians: Single);
+```
+Rotates a model in the X axis by `radians`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  img: TImage;
+  model: TModel;
+  tpa: TPointArray;
+begin
+  model := new TModel('path/to/my/model.obj');
+  while True do
+  begin
+    img := Target.GetImage(MainScreen.Bounds);
+    model.Rotate(0.005);
+    tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+    model.DrawModel(img, tpa, True);
+    img.Show();
+  end;
+end.
+```
+
+```{figure} ../../images/modelrotate.gif
+```
+*)
+procedure TModel.Rotate(radians: Single);
+var
+  i: Integer;
+  center: TVector2;
+begin
+  center := Self.Center.ToVec2();
+  for i := 0 to High(Self.Vertices) do
+    Self.Vertices[i] := Self.Vertices[i].Rotate(radians, center);
+end;
+
+(*
+# Model.Offset
+```pascal
+procedure TModel.Offset(value: TVector3);
+```
+Offsets a model in the 3D space by `value`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  img: TImage;
+  model: TModel;
+  tpa: TPointArray;
+  i: Integer;
+begin
+  model := new TModel('path/to/my/model.obj');
+  while True do
+  begin
+    for i := 1 to 600 do
+    begin
+      img := Target.GetImage(MainScreen.Bounds);
+      case i of
+        1..100:   model.Offset([0,0,0.1]);
+        101..200: model.Offset([0,0,-0.1]);
+        201..300: model.Offset([0.1,0,0]);
+        301..400: model.Offset([-0.1,0,0]);
+        401..500: model.Offset([0,0.1,0]);
+        501..600: model.Offset([0,-0.1,0]);
+      end;
+      tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+      model.DrawModel(img, tpa, True);
+      img.Show();
+    end;
+  end;
+end.
+```
+
+```{figure} ../../images/modeloffset.gif
+```
+*)
+procedure TModel.Offset(value: TVector3);
+var
+  i: Integer;
+begin
+  for i := 0 to High(Self.Vertices) do
+  begin
+    Self.Vertices[i].X += value.X;
+    Self.Vertices[i].Y += value.Y;
+    Self.Vertices[i].Z += value.Z;
+  end;
+end;
+
+
+(*
+# Model.GetArea
+```pascal
+function TModel.GetArea(projection: TPointArray): TPointArray;
+```
+Takes a model projection as a `TPointArray` which you can get with
+{ref}`Model.Project` and returns it's area filled as a `TPointArray` with the
+"faces" information.
+
+It's very useful to get clickboxes of models.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  model: TModel;
+  tpa: TPointArray;
+begin
+  model := new TModel('path/to/my/model.obj');
+  tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+  ShowOnTarget(model.GetArea(tpa));
+end.
+```
+
+```{figure} ../../images/modelgetarea.png
+```
+*)
+function TModel.GetArea(projection: TPointArray): TPointArray;
+var
+  i, j: Integer;
+  polygon: TPolygon;
+begin
+  for i := High(Self.Faces) downto 0 do
+  begin
+    for j := 0 to 2 do
+      polygon += projection[Self.Faces[i].Vertices[j]];
+    Result += polygon.Connect().ShapeFill();
+    polygon := [];
+  end;
+end;
+
+(*
+# Model.GetEdges
+```pascal
+function TModel.GetEdges(projection: TPointArray): TPointArray;
+```
+Takes a model projection as a `TPointArray` which you can get with
+{ref}`Model.Project` and returns it's area edges as a `TPointArray` with the
+"faces" information.
+
+Essentially gives you the model outline.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  model: TModel;
+  tpa: TPointArray;
+begin
+  model := new TModel('path/to/my/model.obj');
+  tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+  ShowOnTarget(model.GetEdges(tpa));
+end.
+```
+
+```{figure} ../../images/modelgetedges.png
+```
+*)
+function TModel.GetEdges(projection: TPointArray): TPointArray;
+begin
+  Result := Self.GetArea(projection).Edges();
+end;
+
+(*
+# Model.DrawModel
+```pascal
+procedure TModel.DrawModel(img: TImage; projection: TPointArray; outline: Boolean = True);
+```
+Draws a model `projection` into a `img`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  img: TImage;
+  model: TModel;
+  tpa: TPointArray;
+begin
+  img := Target.GetImage(MainScreen.Bounds);
+  model := new TModel('path/to/my/model.obj');
+  tpa := Projection.ProjectModel(model, Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+  model.DrawModel(img, tpa, True);
+  img.Show();
+end.
+```
+
+```{figure} ../../images/modeldraw.png
+```
+*)
+procedure TModel.DrawModel(img: TImage; projection: TPointArray; outline: Boolean = True);
+var
+  i, j: Integer;
+  polygon: TPolygon;
+  triangle, triangles, edge: TPointArray;
+begin
+  if Self.Materials <> [] then
+  begin
+    for i := High(Self.Faces) downto 0 do
+    begin
+      for j := 0 to High(Self.Faces[i].Vertices) do
+        polygon += projection[Self.Faces[i].Vertices[j]];
+      img.DrawAlpha := Self.Alphas[Self.Faces[i].Material];
+      img.DrawColor := Self.Materials[Self.Faces[i].Material];
+      img.DrawPolygonFilled(polygon);
+      edge += polygon.Connect().ShapeFill();
+      polygon := [];
+    end;
+    if outline then
+    begin
+      img.DrawColor := $FFFFFF;
+      img.DrawTPA(edge.Edges());
+    end;
+    Exit;
+  end;
+
+  for i := High(Self.Faces) downto 0 do
+    begin
+      for j := 0 to High(Self.Faces[i].Vertices) do
+        polygon += projection[Self.Faces[i].Vertices[j]];
+      triangle := polygon.Connect();
+      triangles += triangle;
+      edge += triangle.ShapeFill();
+      polygon := [];
+    end;
+
+  img.DrawColor := $00FFFF;
+  img.DrawTPA(triangles);
+  if outline then
+  begin
+    img.DrawColor := $FFFFFF;
+    img.DrawTPA(edge.Edges());
+  end;
+end;
+{$R+}

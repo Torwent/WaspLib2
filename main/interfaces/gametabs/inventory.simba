@@ -1,0 +1,499 @@
+(*
+# Inventory
+Methods to interact with the inventory gametab.
+```{figure} ../../images/inventory.png
+```
+*)
+
+{$DEFINE WL_INVENTORY_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TInventory
+Main record responsible with handling the inventory gametab.
+*)
+  TInventory = record
+    Slots: TSlotInterface;
+    Items: TItemInterface;
+    ShiftEnabled: Boolean;
+    const PATTERNS: T2DIntegerArray = [
+    //Column wise and "reversed" column wise - normal pattern
+    [0..27], [3,2,1,0, 7,6,5,4, 11,10,9,8, 15,14,13,12, 19,18,17,16, 23,22,21,20, 27,26,25,24],
+
+    //Column wise snake and "reversed" version
+    [0,1,2,3, 7,6,5,4, 8,9,10,11, 15,14,13,12, 16,17,18,19, 23,22,21,20, 24,25,26,27],
+    [3,2,1,0, 4,5,6,7, 11,10,9,8, 12,13,14,15, 19,18,17,16, 20,21,22,23, 27,26,25,24],
+
+    //by row (and "reversed")
+    [0,4,8,12,16,20,24,  1,5,9,13,17,21,25,  2,6,10,14,18,22,26, 3,7,11,15,19,23,27],
+    [3,7,11,15,19,23,27, 2,6,10,14,18,22,26, 1,5,9,13,17,21,25,  0,4,8,12,16,20,24],
+
+    //Spiral pattern: Starts in slot 0(top left corner of invy) and circles in a clockwise spiral
+    [0,1,2,3, 7,11,15,19,23, 27,26,25,24, 20,16,12,8,4, 5, 6,10,14,18,22, 21,17,13,9],
+
+    //Vertical 2 by 2 columns pattern. Normal and "reversed"
+    [0,4,1,5,2,6,3,7,8,12,9,13,10,14,11,15,16,20,17,21,18,22,19,23,20,24,25,26,27],
+    [0,4,1,5,2,6,3,7,11,15,10,14,9,13,8,12,16,20,17,21,18,22,19,23,20,24,27,26,25]
+  ];
+  end;
+
+(*
+## Inventory.SetupGameTab
+```pascal
+procedure TInventory.SetupGameTab();
+```
+Internal method used to setup the {ref}`TInventory` coordinates.
+
+This is automatically called for you on the {ref}`Inventory variable`.
+*)
+function TInventory.Open(): Boolean; forward;
+
+procedure TInventory.SetupGameTab();
+begin
+  Self.Slots.Setup('Inventory.Slots', TBoxArray.Create(GameTab.TopLeft.Offset(13,9), 4, 7, 31, 31, [11, 5]), nil, @Self.Open);
+  Self.Items.Setup('Inventory.Items', @Self.Slots, [0, 0], @Self.Open);
+  Self.ShiftEnabled := True;
+end;
+
+(*
+## Inventory.IsOpen
+```pascal
+function TInventory.IsOpen(): Boolean;
+```
+Returns true/false if the inventory is open.
+
+Example:
+```pascal
+WriteLn Inventory.IsOpen();
+```
+*)
+function TInventory.IsOpen(): Boolean;
+begin
+  Result := GameTabs.IsOpen(EGameTab.INVENTORY);
+end;
+
+(*
+## Inventory.Open
+```pascal
+function TInventory.Open(): Boolean;
+```
+Attempts to open the inventory gametab.
+
+Example:
+```pascal
+WriteLn Inventory.Open();
+```
+*)
+function TInventory.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.INVENTORY);
+end;
+
+
+(*
+## Inventory.IsFull
+```pascal
+function TInventory.IsFull(): Boolean;
+```
+Returns true/false if the inventory is full.
+
+Example:
+```pascal
+WriteLn Inventory.IsFull();
+```
+*)
+function TInventory.IsFull(): Boolean;
+begin
+  Result := Self.Slots.Count() > 27;
+end;
+
+
+(*
+## Inventory.IsSelected
+```pascal
+function TInventory.IsSelected(slot: TBox): Boolean;
+function TInventory.IsSelected(slot: Integer): Boolean; overload;
+```
+Returns true/false if the specified `slot` or `item` is currently selected.
+
+Example:
+```pascal
+WriteLn Inventory.IsSelected('Vial');
+```
+*)
+function TInventory.IsSelected(slot: TBox): Boolean;
+begin
+  if not Self.Open() then Exit;
+  slot.Y1 += 8;
+  Result := Target.HasColor(ITEM_BORDER_WHITE, 1, 1, slot);
+end;
+
+function TInventory.IsSelected(slot: Integer): Boolean; overload;
+begin
+  Result := Self.IsSelected(Self.Slots.Box(slot));
+end;
+
+(*
+## Inventory.GetSelected
+```pascal
+function TInventory.GetSelected(): Integer;
+```
+Returns the selected slot number if any. -1 is returned if no selected slot is found.
+
+Example:
+```pascal
+WriteLn Inventory.GetSelected();
+```
+*)
+function TInventory.GetSelected(): Integer;
+var
+  slots: TBoxArray;
+begin
+  if not Self.Open() then Exit(-1);
+  slots := Self.Slots.Boxes();
+  for Result := 0 to High(slots) do
+    if Self.IsSelected(slots[Result]) then
+      Exit;
+  Result := -1;
+end;
+
+
+(*
+## Inventory.Select
+```pascal
+function TInventory.Select(slot: Integer; wait: Boolean = False): Boolean;
+function TInventory.Select(item: TItem; wait: Boolean = False): Boolean; overload;
+```
+Attempts to select the specified `slot` or `item`.
+If `wait` is set to true we wait for confirmation that we succeeded.
+
+Example:
+```pascal
+WriteLn Inventory.Select('Coins');
+```
+*)
+function TInventory.Select(slot: Integer; wait: Boolean = False): Boolean;
+var
+  boxes: TBoxArray;
+  b, tmp: TBox;
+begin
+  if not Self.Open() then
+    Exit;
+  boxes := Self.Slots.Boxes();
+  if slot > -1 then
+  begin
+    b := boxes[slot];
+    if Self.IsSelected(b) then
+      Exit(True);
+    Delete(boxes, slot, 1);
+  end;
+
+  for tmp in boxes do
+    if Self.IsSelected(tmp) then
+    begin
+      Mouse.Click(tmp, EMouseButton.LEFT);
+      Break;
+    end;
+
+  if slot = -1 then
+    Exit(True);
+
+  Result := Self.Items.Interact(slot, 'Use');
+  if Result and wait then
+    Result := SleepUntil(Self.IsSelected(b), 50, RandomMode(800, 600, 1400));
+end;
+
+function TInventory.Select(item: TItem; wait: Boolean = False): Boolean; overload;
+var
+  selected: Integer;
+  slots: TIntegerArray;
+begin
+  if not Self.Open() then Exit;
+  selected := Self.GetSelected();
+  slots := Self.Items.IndicesOf([item]);
+
+  if slots = [] then Exit;
+  if (selected > -1) and slots.Contains(selected) then
+    Exit(True);
+
+  Result := Self.Select(slots.Random(), wait);
+end;
+
+
+(*
+## Inventory.Combine
+```pascal
+function TInventory.Combine(slotA, slotB: Integer): Boolean;
+function TInventory.Combine(itemA, itemB: TItem): Boolean; overload;
+```
+Attempts to combine 2 slots or 2 items.
+
+Example:
+```pascal
+WriteLn Inventory.Combine('Coins', 'Asgarnian ale');
+```
+*)
+function TInventory.Combine(slotA, slotB: Integer): Boolean;
+begin
+  if not Self.Open() then
+    Exit;
+
+  if not Self.Select(slotA) then
+    Exit;
+
+  Sleep(0, TICK, ERandomDir.LEFT);
+  Self.Slots.Click(slotB, EMouseButton.LEFT);
+
+  Result := SleepUntil(Self.GetSelected() = -1, 200, TICK);
+end;
+
+function TInventory.Combine(itemA, itemB: TItem): Boolean; overload;
+var
+  slotsA, slotsB: TIntegerArray;
+  a, b, selected, bestA, bestB: Integer;
+  dist, best: Double;
+  centers: TPointArray;
+  centerA: TPoint;
+begin
+  if not Self.Open() then
+    Exit;
+
+  selected := Self.GetSelected();
+  if selected > -1 then
+  begin
+    Mouse.Click(Self.Slots.Box(selected), EMouseButton.LEFT);
+    if not SleepUntil(
+      Target.HasColor(ITEM_BORDER, 0, 1, Self.Slots.Box(selected)) and
+      not Target.HasColor(ITEM_BORDER_WHITE, 0, 1, Self.Slots.Box(selected)), 200, 2*TICK
+    ) then
+      Exit;
+  end;
+
+  slotsA := Self.Items.IndicesOf([itemA]);
+  if slotsA = [] then Exit;
+
+  slotsB := Self.Items.IndicesOf([itemB]);
+  if slotsB = [] then Exit;
+
+  best := $FFFFFF;
+  centers := Self.Slots.Boxes().Centers();
+
+  for a in slotsA do
+  begin
+    centerA := centers[a];
+    for b in slotsB do
+    begin
+      dist := centerA.DistanceTo(centers[b]);
+      if dist < best then
+      begin
+        best := dist;
+        bestA := a;
+        bestB := b;
+      end;
+    end;
+  end;
+
+  Result := Self.Combine(bestA, bestB);
+end;
+
+
+(*
+## Slots.RandomPattern
+```pascal
+function TInventory.RandomPattern(): TIntegerArray;
+```
+Returns a random pattern of inventory slots.
+
+Here is example code to generate and visually debug patterns:
+```pascal
+{$I WaspLib/main.simba}
+var
+  img, pimg: TImage;
+  slots: TBoxArray;
+  tpa: TPointArray;
+  pattern: TIntegerArray;
+  i: Integer;
+  a, b: TPoint;
+begin
+  img := Target.GetImage();
+  img.DrawColor := $00FFFF;
+
+  slots := Inventory.Slots.Boxes();
+  for i := 0 to High(slots) do
+    img.DrawBox(slots[i]);
+
+  while True do
+  begin
+    pimg := img.Copy();
+    pimg.DrawColor := $0000FF;
+    pattern := Inventory.RandomPattern();
+
+    b := slots[pattern[0]].RandomPointCenter();
+    for i := 0 to High(pattern)-1 do
+    begin
+      a := b;
+      b := slots[pattern[i+1]].RandomPointCenter();
+
+      pimg.DrawLine(a, b);
+      pimg.Show();
+      Sleep(50);
+    end;
+  end;
+end.
+```
+```{figure} ../../images/inventoryrandompattern.gif
+```
+*)
+function TInventory.RandomPattern(): TIntegerArray;
+var
+  i: Integer;
+begin
+  i := Biometrics.RandomModeInteger(High(Self.PATTERNS) div 2, 0, High(Self.PATTERNS));
+
+  if Biometrics.RandomBoolean(0.7) then
+    Result := Self.PATTERNS[i]
+  else
+    Result := Self.PATTERNS[i].Reversed();
+end;
+
+
+(*
+## Inventory.Drop
+```pascal
+function TInventory.Drop(slots: TIntegerArray; attempts: Integer = 5): Boolean;
+function TInventory.Drop(items: TItemArray; pattern: TIntegerArray = []): Boolean; overload;
+```
+Attempts to drop the specified `slots` or `items`.
+
+Example:
+```pascal
+WriteLn Inventory.Drop('Oak logs');
+```
+*)
+function TInventory.Drop(slots: TIntegerArray; attempts: Integer = 5): Boolean;
+var
+  boxes: TBoxArray;
+  b: TBox;
+  i: Integer;
+begin
+  if not Self.Open() then Exit;
+  if Length(slots) = 0 then Exit(True);
+
+  boxes := Self.Slots.Boxes();
+  for 1 to attempts do
+  begin
+    for i := 0 to High(slots) do
+    begin
+      if Self.GetSelected() > -1 then
+      begin
+        Self.Select(-1);
+        Continue(2);
+      end;
+
+      b := boxes[slots[i]];
+      if not Self.Slots.IsUsed(b) then Continue;
+
+      Mouse.Move(b);
+      ChooseOption.Select('Drop');
+      Sleep(0, 250, ERandomDir.LEFT);
+    end;
+
+    Exit(True);
+  end;
+end;
+
+function TInventory.Drop(items: TItemArray; pattern: TIntegerArray = []): Boolean; overload;
+var
+  slots: TIntegerArray;
+begin
+  if not Self.Open() then Exit;
+  if pattern = [] then pattern := Self.RandomPattern();
+  slots := Self.Items.IndicesOf(items);
+  Result := (slots <> []) and Self.Drop(pattern.Intersection(slots));
+end;
+
+
+(*
+## Inventory.ShiftDrop
+```pascal
+function TInventory.ShiftDrop(slots: TIntegerArray; attempts: Integer = 5): Boolean;
+function TInventory.ShiftDrop(slots, pattern: TIntegerArray): Boolean; overload;
+function TInventory.ShiftDrop(items: TItemArray; pattern: TIntegerArray): Boolean; overload;
+```
+Attempts to shift drop the specified `slots` or `items`.  You can optionally specify a "drop" pattern.
+If we determine that we can't shift drop because the setting is off, `TInventory.Drop()` is used as a fallback.
+
+Example:
+```pascal
+WriteLn Inventory.ShiftDrop('Maple logs');
+```
+*)
+function TInventory.ShiftDrop(slots: TIntegerArray; attempts: Integer = 5): Boolean;
+var
+  boxes: TBoxArray;
+  b: TBox;
+  i: Integer;
+begin
+  if Length(slots) = 0 then Exit(True);
+  if not Self.Open() then Exit;
+
+  if not Self.ShiftEnabled then Exit(Self.Drop(slots));
+
+  boxes := Self.Slots.Boxes();
+  for 1 to attempts do
+  begin
+    for i := 0 to High(slots) do
+    begin
+      if Self.GetSelected() > -1 then
+      begin
+        Self.Select(-1);
+        Continue(2);
+      end;
+
+      b := boxes[slots[i]];
+      if not Self.Slots.IsUsed(b) then Continue;
+
+      if not Keyboard.IsKeyDown(EKeyCode.SHIFT) then
+      begin
+        Keyboard.KeyDown(EKeyCode.SHIFT);
+        Sleep(95, 170, ERandomDir.LEFT); //Wait for SHIFT to be registered before the click (important).
+      end;
+
+      Mouse.Move(b);
+      Biometrics.Click(EMouseButton.LEFT, 3, 0.03);
+      Sleep(0, 250, ERandomDir.LEFT);
+    end;
+
+    if Keyboard.IsKeyDown(EKeyCode.SHIFT) then
+      Keyboard.KeyUp(EKeyCode.SHIFT);
+    Exit(True);
+  end;
+
+  if Keyboard.IsKeyDown(EKeyCode.SHIFT) then
+      Keyboard.KeyUp(EKeyCode.SHIFT);
+
+  DebugLn('Inventory', 'Shift drop is not enabled, consider enabling it for better performance.' , ELogLevel.WARN);
+  Self.ShiftEnabled := False;
+end;
+
+function TInventory.ShiftDrop(slots, pattern: TIntegerArray): Boolean; overload;
+begin
+  Result := Self.ShiftDrop(pattern.Intersection(slots));
+end;
+
+function TInventory.ShiftDrop(items: TItemArray; pattern: TIntegerArray): Boolean; overload;
+var
+  slots: TIntegerArray;
+begin
+  if not Self.Open() then Exit;
+  slots := Self.Items.IndicesOf(items);
+  Result := (slots <> []) and Self.ShiftDrop(pattern.Intersection(slots));
+end;
+
+var
+(*
+## Inventory variable
+Global {ref}`TInventory` variable.
+*)
+  Inventory: TInventory;

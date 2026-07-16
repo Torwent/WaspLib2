@@ -1,0 +1,915 @@
+(*
+# Projection
+The core for our minimap to mainscreen projection.
+
+Supports rotation, and zoom, and resizable client.
+In the case of `TCamera` it also supports different pitch levels.
+
+Projection extends the {ref}`Minimap` and {ref}`MainScreen` interfaces with
+functionality to convert coordinates to & from one to the other, usually refered
+to as `MM2MS` or `MS2MM`.
+
+There's 2 systems of projection:
+- MM2MS, original work done by [slacky](https://slacky.one/).
+- RSCamera, a reverse engineered projection from the client itself.
+
+It's thanks to these that we can project the following grid, in this example
+{ref}`MM2MS` is being used:
+```{figure} ../../images/mm2ms.png
+```
+
+Projection by itself is just a 3D space, sort of like a grid with infinite cross
+sections in all axis (read {ref}`MM2MS Projector` for more information).
+
+It's up to you to give it coordinates you want to be converted, for example:
+```pascal
+{$I WaspLib/main.simba}
+
+begin
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    Minimap.DebugTiles();
+  end;
+end.
+```
+
+```{figure} ../../images/mm2ms_flat.gif
+```
+
+But you can for example, use it with a {ref}`TMap` heightmap data for more
+advanced projections:
+```pascal
+{$I WaspLib/main.simba}
+
+begin
+  Map.Setup([EChunk.VARROCK]);
+
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    Map.DebugHeight();
+  end;
+end.
+```
+
+```{figure} ../../images/mm2ms_height.gif
+```
+*)
+
+{$DEFINE WL_PROJECTION_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('Projection', 'Range checks are enabled for Projection, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+  EProjector = enum(CAMERA, MM2MS);
+(*
+## TProjection
+Main record responsible for projection.
+*)
+  TProjection = record
+    System: EProjector;
+    ZoomQuads: array [0..100] of TQuad;
+    PlayerBoxes: array [0..100] of TBox;
+    Normalizer: TMM2MS;
+    RENDER_DISTANCE: Integer;
+  end;
+
+procedure TProjection.Setup();
+begin
+  RSCamera.Setup();
+  MM2MS.Setup(Client.Mode);
+  Self.Normalizer.Setup(EMode.FIXED);
+  Self.Normalizer.Update(50, 0);
+
+  if Self.RENDER_DISTANCE = 0 then
+    Self.RENDER_DISTANCE := 90;
+end;
+
+(*
+## Projection.Run
+```pascal
+function TProjection.Run(arr: TVector3Array; roll: Single): TPointArray;
+```
+Core method that will run the `TMM2MSProjector` to convert points from the
+minimap to the mainscreen.
+
+You will likely not need to use this directly and will only interact with the
+`TMinimap` and `TMainScreen` extensions below.
+*)
+function TProjection.Run(arr: TVector3Array; roll: Single): TPointArray;
+begin
+  case Self.System of
+    EProjector.CAMERA:
+    begin
+      RSCamera.Update(Options.GetZoomLevel(True), roll);
+      Result := RSCamera.Run(arr);
+    end;
+    EProjector.MM2MS:
+    begin
+      MM2MS.Update(Options.GetZoomLevel(True), roll);
+      Result := MM2MS.Run(arr);
+    end;
+  end;
+end;
+
+function TProjection.ReverseRun(arr: TVector3Array): TPointArray;
+begin
+  MM2MS.Update(Options.GetZoomLevel(True), 0);
+  Result := MM2MS.ReverseRun(arr);
+end;
+
+
+(*
+## Projection.ProjectModel
+```pascal
+function TProjection.ProjectModelEx(model: TModel; minimapCoord: TVector3; heights: array [0..3] of Single; rotation, radians: Single): TPointArray;
+function TProjection.ProjectModel(model: TModel; minimapCoord: TVector3; rotation, radians: Single): TPointArray;
+```
+Projects a model from a `Minimap Coordinate` to the `MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  model: TModel;
+  tpa: TPointArray;
+begin
+  model := new TModel('path/to/my/model.obj');
+  tpa := Projection.ProjectModel(Minimap.Center.ToVec3(), Minimap.CompassRadians, 0);
+  ShowOnTarget(tpa);
+end.
+```
+
+```{figure} ../../images/modelproject.png
+```
+*)
+function TProjection.ProjectModelEx(model: TModel; minimapCoord: TVector3; heights: array [0..3] of Single; rotation, radians: Single): TPointArray;
+var
+  i: Integer;
+  vertices: TVector3Array;
+  width, depth: Single;
+begin
+  width := model.Width/2;
+  depth := model.Depth/2;
+
+  for i := 0 to High(model.Vertices) do
+  begin
+    vertices += model.Vertices[i].Rotate(rotation, minimapCoord.X, minimapCoord.Y);
+
+    if vertices[i].X < width then
+    begin
+      if vertices[i].Y < depth then vertices[i].Z += heights[0]
+      else if vertices[i].Y > depth then vertices[i].Z += heights[2]
+      else vertices[i].Z += (heights[0] + heights[2]) / 2;
+    end
+    else if vertices[i].X > width then
+    begin
+      if vertices[i].Y < depth then vertices[i].Z += heights[1]
+      else if vertices[i].Y > depth then vertices[i].Z += heights[3]
+      else vertices[i].Z += (heights[1] + heights[3]) / 2;
+    end
+    else
+    begin
+      if vertices[i].Y < depth then vertices[i].Z += (heights[0]+heights[1]) / 2
+      else if vertices[i].Y > depth then vertices[i].Z += (heights[2]+heights[3]) / 2
+      else vertices[i].Z += (heights[0] + heights[1] + heights[2] + heights[3]) / 4;
+    end;
+
+    vertices[i].X += minimapCoord.X;
+    vertices[i].Y += minimapCoord.Y;
+    vertices[i].Z += minimapCoord.Z;
+  end;
+
+  Result := Self.Run(vertices, radians);
+end;
+
+function TProjection.ProjectModel(model: TModel; minimapCoord: TVector3; rotation, radians: Single): TPointArray;
+begin
+  with minimapCoord do
+    Result := Self.Run(model.Vertices.Offset([X,Y,Z]).Rotate(rotation,X,Y), radians);
+end;
+
+
+var
+(*
+## Projection variable
+Global {ref}`TProjection` variable.
+
+It's unlikely you need to use this directly.
+
+You usually only need the `TMinimap` and `TMainScreen` extensions below.
+*)
+  Projection: TProjection;
+
+(*
+## Minimap Projection Extensions
+This section contains multiple extensiosn to {ref}`TMinimap` related to
+{ref}`Projection`.
+*)
+
+(*
+### Minimap Vectors To MainScreen
+```pascal
+function TMinimap.Vectors2MS(vectors: TVector3Array; radians: Single): TPointArray;
+function TMinimap.Vector2MS(vector: TVector3; radians: Single): TPoint;
+```
+Converts a minimap `vector` or `vectors` to the mainscreen with the help of `MM2MS`.
+*)
+function TMinimap.Vectors2MS(vectors: TVector3Array; radians: Single): TPointArray;
+var
+  i: Integer;
+begin
+  for i := 0 to High(vectors) do
+    with Self.NormalizeEx([vectors[i].X, vectors[i].Y], radians) do
+    begin
+      vectors[i].X := X;
+      vectors[i].Y := Y;
+    end;
+
+  Result := Projection.Run(vectors, radians);
+end;
+
+function TMinimap.Vector2MS(vector: TVector3; radians: Single): TPoint;
+begin
+  with Self.NormalizeEx([vector.X, vector.Y], radians) do
+    Result := Projection.Run([[X, Y, vector.Z]], radians)[0];
+end;
+
+
+(*
+### Minimap Points To MainScreen
+```pascal
+function TMinimap.Points2MS(points: TPointArray; radians: Single = $FFFF): TPointArray;
+function TMinimap.Point2MS(pt: TPoint; radians: Single = $FFFF): TPoint;
+function TMinimap.ATPA2MS(atpa: T2DPointArray; radians: Single = $FFFF): T2DPointArray; overload;
+```
+Converts minimap `points` to the mainscreen with the help of `MM2MS`.
+*)
+function TMinimap.Points2MS(points: TPointArray; radians: Single = $FFFF): TPointArray;
+var
+  vectors: TVector3Array;
+  i: Integer;
+begin
+  if radians = $FFFF then
+    radians := Self.CompassRadians;
+
+  SetLength(vectors, Length(points));
+
+  for i := 0 to High(points) do
+    with Self.Normalize(points[i], radians) do
+    begin
+      vectors[i].X := X;
+      vectors[i].Y := Y;
+    end;
+
+  Result := Projection.Run(vectors, radians);
+end;
+
+function TMinimap.Point2MS(pt: TPoint; radians: Single = $FFFF): TPoint;
+begin
+  if radians = $FFFF then
+    radians := Self.CompassRadians;
+  with Self.Normalize(pt, radians) do
+    Result := Projection.Run([[X, Y, 0]], radians)[0];
+end;
+
+function TMinimap.ATPA2MS(atpa: T2DPointArray; radians: Single = $FFFF): T2DPointArray; overload;
+var
+  tpa: TPointArray;
+begin
+  if radians = $FFFF then
+    radians := Self.CompassRadians;
+  for tpa in atpa do
+    Result += Self.Points2MS(tpa, radians);
+end;
+
+
+(*
+### Minimap Points To MainScreen Quads
+```pascal
+function TMinimap.Vector2MSQuad(vector: TVector3; radians: Single; size: TVector2 = [1,1]; offset: TVector3 = [0,0,0]): TQuad;
+function TMinimap.Point2MSQuad(pt: TPoint; size: TVector2 = [1,1]; radians: Single = $FFFF): TQuad;
+```
+Converts a minimap point `pt` or `vector` to a mainscreen `TQuad` with the help of `MM2MS`.
+
+Example:
+```pascal
+while True do
+begin
+  quad := Minimap.Point2MSQuad(Minimap.Center);
+  ShowOnTarget(quad);
+end;
+```
+*)
+function TMinimap.Vector2MSQuad(vector: TVector3; radians: Single; size: TVector2 = [1,1]; offset: TVector3 = [0,0,0]): TQuad;
+var
+  v1, v2: TVector2;
+  arr: TPointArray;
+begin
+  size.X := 2 * size.X; size.Y := 2 * size.Y;
+  vector.X += offset.X; vector.Y += offset.Y; vector.Z += offset.Z;
+
+  with Self.NormalizeEx([vector.X, vector.Y], radians) do
+  begin
+    vector.X := X;
+    vector.Y := Y;
+  end;
+
+  v1 := [vector.X-size.X, vector.Y-size.Y];
+  v2 := [vector.X+size.X, vector.Y+size.Y];
+
+  arr := Projection.Run([[v1.X, v1.Y, vector.Z],
+                        [v2.X, v1.Y, vector.Z],
+                        [v2.X, v2.Y, vector.Z],
+                        [v1.X, v2.Y, vector.Z]], radians);
+
+  Result := [arr[0], arr[1], arr[2], arr[3]];
+end;
+
+function TMinimap.Point2MSQuad(pt: TPoint; size: TVector2 = [1,1]; radians: Single = $FFFF): TQuad;
+begin
+  if radians = $FFFF then
+    radians := Self.CompassRadians;
+  Result := Self.Vector2MSQuad(pt.ToVec3(), radians, size);
+end;
+
+
+(*
+### Minimap Points To MainScreen Cuboids
+```pascal
+function TMinimap.Vector2MSCuboid(vector, size: TVector3; radians: Single; offset: TVector3 = [0,0,0]): TCuboid;
+function TMinimap.Point2MSCuboid(pt: TPoint; size: TVector3; radians: Single = $FFFF): TCuboid;
+```
+Converts a minimap point `pt` or `vector` to a mainscreen `TCuboid` with the help of `MM2MS`.
+
+Example:
+```pascal
+while True do
+begin
+  cuboid := Minimap.Point2MSCuboid(Minimap.Center, [2,2,6]);
+  ShowOnTarget(cuboid);
+end;
+```
+*)
+function TMinimap.Vector2MSCuboid(vector, size: TVector3; radians: Single; offset: TVector3 = [0,0,0]): TCuboid;
+var
+  v1, v2: TVector2;
+  arr: TPointArray;
+begin
+  size.X := 2 * size.X;
+  size.Y := 2 * size.Y;
+
+  vector.X += offset.X;
+  vector.Y += offset.Y;
+  vector.Z += offset.Z;
+
+  with Self.NormalizeEx([vector.X, vector.Y], radians) do
+  begin
+    vector.X := X;
+    vector.Y := Y;
+  end;
+
+  v1 := [vector.X-size.X, vector.Y-size.Y];
+  v2 := [vector.X+size.X, vector.Y+size.Y];
+
+  arr := Projection.Run([
+                [v1.X, v1.Y, vector.Z+size.Z], [v2.X, v1.Y, vector.Z+size.Z],
+                [v2.X, v2.Y, vector.Z+size.Z], [v1.X, v2.Y, vector.Z+size.Z],
+
+                [v1.X, v1.Y, vector.Z], [v2.X, v1.Y, vector.Z],
+                [v2.X, v2.Y, vector.Z], [v1.X, v2.Y, vector.Z]
+         ], radians);
+
+  Result.Top := [arr[0], arr[1], arr[2], arr[3]];
+  Result.Bottom := [arr[4], arr[5], arr[6], arr[7]];
+end;
+
+function TMinimap.Point2MSCuboid(pt: TPoint; size: TVector3; radians: Single = $FFFF): TCuboid;
+begin
+  if radians = $FFFF then
+    radians := Self.CompassRadians;
+  Result := Self.Vector2MSCuboid(pt.ToVec3(), size, radians);
+end;
+
+(*
+### Minimap.ZoomQuad
+```pascal
+property TMinimap.ZoomQuad: TQuad;
+```
+Returns a `TQuad` on the minimap of what's visible on the mainscreen at the current zoom level.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+
+begin
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    ShowOnTarget(Minimap.ZoomQuad);
+  end;
+end.
+```
+
+```{figure} ../../images/zoomquad.gif
+```
+*)
+property TMinimap.ZoomQuad: TQuad;
+var
+  tpa: TPointArray;
+begin
+  if Projection.ZoomQuads[Options.GetZoomLevel(True)] <> Default(TQuad) then
+    Exit(Projection.ZoomQuads[Options.ZoomLevel]);
+
+  tpa := Projection.ReverseRun([
+           MainScreen.TopLeft.ToVec3(),
+           MainScreen.TopRight.ToVec3(),
+           MainScreen.BottomRight.ToVec3(),
+           MainScreen.BottomLeft.ToVec3()
+         ]);
+
+  Result := [tpa[0],tpa[1],tpa[2],tpa[3]];
+
+  Projection.ZoomQuads[Options.ZoomLevel] := Result;
+end;
+
+(*
+### Minimap.PointOnZoomQuad
+```pascal
+function TMinimap.PointOnZoomQuad(pt: TPoint): Boolean;
+```
+Returns True/False if a point `pt` is within our "zoom quad".
+Read `Minimap.ZoomQuad` for more information.
+
+Example:
+```pascal
+WriteLn Minimap.PointOnZoomQuad(pt);
+```
+*)
+function TMinimap.PointOnZoomQuad(pt: TPoint): Boolean;
+begin
+  Result := Self.ZoomQuad.Contains(pt);
+end;
+
+(*
+### Minimap.RandomPointOnZoomQuad
+```pascal
+function TMinimap.RandomPointOnZoomQuad(pt: TPoint; randomness: Integer): TPoint;
+```
+Creates a random point within the zoom quad that is within `randomness` distance from `pt`.
+*)
+function TMinimap.RandomPointOnZoomQuad(pt: TPoint; randomness: Integer): TPoint;
+var
+  quad: TQuad;
+  img: TImage;
+begin
+  quad := Self.ZoomQuad;
+  if not quad.Contains(pt) then
+  begin
+    img := Target.GetImage();
+    img.DrawColor := $FFFFFF;
+    img.DrawQuad(quad);
+    img.DrawColor := $0000FF;
+    img.DrawCross(pt, 4);
+    img.Show();
+    raise GetDebugLn('MM2MS', ToStr(pt) + ' is not a valid point to generate a random point on the zoom quad: ' + ToStr(quad) + '.');
+  end;
+
+  repeat
+    Result := pt.Random(-randomness, randomness);
+  until quad.Contains(Result);
+end;
+
+
+(*
+### Minimap.FacePoint
+```pascal
+function TMinimap.FacePoint(pt: TPoint; randomness: Integer = 0): Boolean;
+```
+This method will rotate the camera so that `pt` is within the zoom rectangle without adjusting the zoom level.
+
+Example:
+```pascal
+WriteLn Minimap.FacePoint([620, 100]); //keep in mind this example uses a static point, you will probably never do this.
+```
+*)
+function TMinimap.FacePointEx(pt, a, b: TPoint; randomness: Integer): Boolean;
+var
+  deltaA, deltaB: Double;
+  angle, angleA, angleB, trgt: Single;
+begin
+  angle  := Self.Center.AngleBetween(pt);
+  angleA := Self.Center.AngleBetween(a);
+  angleB := Self.Center.AngleBetween(b);
+
+  deltaA := DeltaAngle(angle, angleA);
+  deltaB := DeltaAngle(angle, angleB);
+
+  if Abs(deltaA) < Abs(deltaB) then
+    trgt := Self.CompassDegrees-deltaA
+  else
+    trgt := Self.CompassDegrees-deltaB;
+
+  Result := Self.CompassDegrees[trgt + Random(-randomness, randomness)];
+end;
+
+function TMinimap.FacePoint(pt: TPoint; randomness: Integer = 20): Boolean;
+var
+  quad: TQuad;
+begin
+  quad := Self.ZoomQuad;
+  if quad.Contains(pt) then
+    Exit(True);
+
+  Result := Self.FacePointEx(pt, quad.Top, quad.Right, randomness);
+end;
+
+
+(*
+### Minimap.InZoomRange
+```pascal
+function TMinimap.InZoomRangeEx(pt: TPoint; out corner: TPoint): Boolean;
+function TMinimap.InZoomRange(pt: TPoint): Boolean;
+function TMinimap.AnyInZoomRange(tpa: TPointArray): Boolean; overload;
+```
+Method used to know if a point `pt`is within reach of the Zoom rectangle without adjusting the zoom level.
+Check `TMinimap.ZoomQuad` for information on the zoom quad.
+
+Example:
+```pascal
+WriteLn Minimap.InZoomRange([620, 100]);
+```
+*)
+function TMinimap.InZoomRangeEx(pt: TPoint; out corner: TPoint): Boolean;
+var
+  quad: TPointArray;
+begin
+  if not Self.Contains(pt) then Exit;
+
+  quad := Self.ZoomQuad.Corners.SortFrom(Self.Center);
+  corner := quad[High(quad)];
+
+  Result := Self.Center.DistanceTo(pt) <= Self.Center.DistanceTo(corner);
+end;
+
+function TMinimap.InZoomRange(pt: TPoint): Boolean;
+var
+  corner: TPoint;
+begin
+  Result := Self.InZoomRangeEx(pt, corner);
+end;
+
+function TMinimap.AnyInZoomRange(tpa: TPointArray): Boolean; overload;
+var
+  quad: TPointArray;
+  pt, corner: TPoint;
+  dist: Double;
+begin
+  quad := Self.ZoomQuad.Corners.SortFrom(Self.Center);
+  corner := quad[High(quad)];
+  dist := Self.Center.DistanceTo(corner);
+
+  for pt in tpa do
+    if Self.Center.DistanceTo(pt) <= dist then
+      Exit(True);
+end;
+
+
+(*
+### Minimap.GetZoomToPoint
+```pascal
+function TMinimap.GetZoomToPoint(pt: TPoint; randomness: Integer = 0): Integer;
+```
+This function gives us a zoom level where `pt` would be visible in the
+{ref}`MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  pt: TPoint;
+begin
+  pt := Minimap.GetDots(EDot.ITEM)[0]; //find an item dot and returns it's coodinates.
+  RSMouseZoom.SetZoomLevel(Minimap.GetZoomToPoint(pt));
+end.
+```
+*)
+function TMinimap.GetZoomToPoint(p: TPoint; randomness: Integer = 0): Integer;
+var
+  distance: Double;
+begin
+  distance := p.DistanceTo(Self.Center);
+
+  Result := Round((73 - distance) / 0.8);
+  Result := Result + Random(-randomness, randomness);
+end;
+
+(*
+### Minimap.SetZoomToPoint
+```pascal
+function TMinimap.SetZoomToPoint(pt: TPoint; randomness: Integer = 0): Boolean;
+```
+This function adjusts the zoom level so the point **pt** is true in
+{ref}`Minimap.InZoomRange`.
+*)
+function TMinimap.SetZoomToPoint(pt: TPoint; randomness: Integer = 0): Boolean;
+var
+  level: Integer;
+begin
+  if Self.InZoomRange(pt) then
+    Exit(True);
+
+  level := Self.GetZoomToPoint(pt, randomness);
+
+  if InRange(level, 0, 100) then
+  begin
+    if Abs(level-Options.GetZoomLevel(True)) < randomness then
+      Exit(True);
+    Result := RSMouseZoom.SetZoomLevel(level);
+  end;
+end;
+
+
+(*
+### Minimap.MakePointVisible
+```pascal
+function TMinimap.MakePointVisible(p: TPoint; randomness: Integer = 0): Boolean;
+```
+Uses both {ref}`Minimap.SetZoomToPoint` and {ref}`Minimap.FacePoint` to make a
+point visible on the {ref}`MainScreen`.
+*)
+function TMinimap.MakePointVisible(pt: TPoint; randomness: Integer = 5): Boolean;
+begin
+  Result := Self.SetZoomToPoint(pt, randomness) and Self.FacePoint(pt, randomness);
+end;
+
+
+(*
+### Minimap.DebugTiles
+```pascal
+procedure TMinimap.DebugTiles(img: TImage; dots: EDots);
+procedure TMinimap.DebugTiles(dots: EDots = [EDot.PLAYER..EDot.ITEM]); overload;
+```
+Simply meant for debugging purposes.
+Will draw a grid of tiles on the mainscreen with the help of `MM2MS`.
+
+You can optionally specify which minimap `EDot` you want to highlight.
+By default all are highlighted.
+
+Example:
+```pascal
+Minimap.DebugTiles();
+```
+*)
+procedure TMinimap.DebugTiles(img: TImage; dots: EDots);
+const
+  DOT_COLORS: TColorArray = [$FFFFFF, $00FFFF, $0000FF];
+var
+  pt: TPoint;
+  vector: TVector3;
+  quad: TQuad;
+  dot: EDot;
+  radians: Single;
+  tpa: TPointArray;
+begin
+  radians := Self.CompassRadians;
+  img.DrawColor := $00FF00;
+
+  for pt.X := Self.Center.X - 120 to Self.Center.X + 120 with 4 do
+    for pt.Y := Self.Center.Y - 120 to Self.Center.Y + 120 with 4 do
+    begin
+      if not Self.PointOnZoomQuad(pt) then
+        Continue;
+      vector := pt.ToVec3().Rotate(radians, Self.Center);
+      quad := Self.Vector2MSQuad(vector, radians, [1,1]);
+      tpa += quad.Corners.Connect();
+    end;
+
+  img.DrawTPA(MainScreen.Filter(tpa));
+
+  for dot in dots do
+  begin
+    tpa := [];
+    for pt in Self.GetDots(dot) do
+    begin
+      vector := pt.ToVec3();
+      if not Self.PointOnZoomQuad(vector.ToPoint()) then Continue;
+      quad := Self.Vector2MSQuad(vector, radians, [1,1]);
+      tpa += quad.Corners.Connect();
+    end;
+
+    img.DrawColor := DOT_COLORS[dot];
+    img.DrawTPA(MainScreen.Filter(tpa));
+  end;
+
+  img.DrawColor := $FF0000;
+  vector := Self.Center.ToVec3();
+  quad := Self.Vector2MSQuad(vector, radians, [1,1]);
+  tpa := quad.Corners.Connect();
+  img.DrawTPA(tpa);
+end;
+
+procedure TMinimap.DebugTiles(dots: EDots = ALL_DOTS); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  Self.DebugTiles(img, dots);
+  img.Show();
+end;
+
+
+(*
+## MainScreen Projection Extensions
+This section contains multiple extensiosn to {ref}`TMainScreen` related to
+{ref}`Projection`.
+*)
+
+(*
+### MainScreen.Point2MM
+```pascal
+function TMainScreen.Point2MM(pt: TPoint; height: Integer; radians: Single): TVector3;
+```
+Converts a mainscreen point `pt` to a minimap `TPoint` with the help of `MM2MS`.
+This is not an exact reversion of what `MM2MS` does but it's very accurate.
+*)
+function TMainScreen.Point2MM(pt: TPoint; height: Single): TPoint;
+begin
+  Result := Projection.ReverseRun([[pt.X, pt.Y, height]])[0];
+end;
+
+
+(*
+### MainScreen.FacePoint
+```pascal
+function TMainScreen.FacePoint(pt: TPoint; randomness: Integer = 0): Boolean; override;
+```
+Rotates the camera to face point `pt`.
+*)
+function TMainScreen.FacePoint(pt: TPoint; randomness: Integer = 0): Boolean;
+begin
+  Result := Minimap.FacePoint(Self.Point2MM(pt, 0.0), randomness);
+end;
+
+(*
+### MainScreen.NormalizeDistance
+```pascal
+function TMainScreen.NormalizeDistance(dist: Integer): Integer;
+```
+Converts a distance acquired from the **fixed client* and **default zoom** to the
+current mainscreen with help of {ref}`MM2MS`.
+
+For example, say you want to create a box with the same size regardless of the
+zoom level:
+```pascal
+{$I WaspLib/main.simba}
+
+var
+  b: TBox;
+  dist: Integer;
+begin
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    dist := MainScreen.NormalizeDistance(50);
+    b := TBox.Create(MainScreen.Center, dist, dist);
+    ShowOnTarget(b);
+  end;
+end.
+```
+
+It will look something like this:
+```{figure} ../../images/normalizedist.gif
+```
+*)
+function TMainScreen.NormalizeDistance(dist: Integer): Integer;
+var
+  arr: TVector2Array;
+begin
+  if dist = 0 then Exit;
+
+  MM2MS.Update(Options.GetZoomLevel(True), 0);
+
+  with MainScreen.Center do
+    arr := Projection.Normalizer.ReverseRun([[X,Y,0], [X,Y-dist,0]]);
+  arr := MM2MS.Run([arr[0].ToVec3(0), arr[1].ToVec3(0)]);
+  Result := Round(arr[0].Distance(arr[1]));
+end;
+
+(*
+### MainScreen.PlayerBox
+```pascal
+property TMainScreen.PlayerBox: TBox;
+```
+Returns a `TBox` on the mainscreen that tightly bounds the player.
+
+Results are cached per zoom level to avoid unnecessary recomputation.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+
+begin
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+    ShowOnTarget(MainScreen.PlayerBox);
+  end;
+end.
+```
+```{figure} ../../images/mm2ms_playerbox.gif
+```
+*)
+property TMainScreen.PlayerBox: TBox;
+var
+  radians: Double;
+  vectors: TVector3Array;
+begin
+  if Projection.PlayerBoxes[Options.GetZoomLevel()] <> [] then
+    Exit(Projection.PlayerBoxes[Options.GetZoomLevel()]);
+
+  radians := Minimap.CompassRadians;
+
+  vectors := [
+    Minimap.Center.Offset(-2,0).ToVec3(9).Rotate(-radians, Minimap.Center),
+    Minimap.Center.Offset(2,0).ToVec3(-3).Rotate(-radians, Minimap.Center)
+  ];
+
+  Result := Projection.Run(vectors, radians).Bounds();
+  Projection.PlayerBoxes[Options.GetZoomLevel()] := Result;
+end;
+
+
+(*
+### MainScreen.SetHighestPitch
+```pascal
+function TMainScreen.SetHighestPitch(): Boolean;
+```
+Attempts to set the camera pitch to the highest possible.
+
+Example:
+```pascal
+if not MainScreen.HighestPitch then
+  MainScreen.SetHighestPitch();
+```
+*)
+procedure TMainScreen.SetHighestPitch();
+var
+  i, shift: Integer;
+begin
+  Keyboard.KeyDown(EKeyCode.UP);
+  Sleep(30, 60);
+  for i := 1 to 10 do // 2500ms timeout
+  begin
+    shift := Target.GetPixelDifference(250, Self.Bounds).Length;
+    //less than 10% of the screen changed in 250ms
+    if (shift / Self.Bounds.Area * 100) < 10 then
+      Break;
+  end;
+  Keyboard.KeyUp(EKeyCode.UP);
+  Self.HighestPitch := True;
+  if Projection.System = EProjector.CAMERA then
+    RSCamera.SetPitch(RSCamera.MAX_PITCH);
+end;
+
+ (*
+### MainScreen.SetLowestPitch
+```pascal
+function TMainScreen.SetLowestPitch(): Boolean;
+```
+Attempts to set the camera pitch to the lowest possible.
+
+Example:
+```pascal
+if MainScreen.HighestPitch then
+  MainScreen.SetLowestPitch();
+```
+*)
+procedure TMainScreen.SetLowestPitch();
+var
+  i, shift: Integer;
+begin
+  Keyboard.KeyDown(EKeyCode.UP);
+  Sleep(30, 60);
+  for i := 1 to 10 do // 2500ms timeout
+  begin
+    shift := Target.GetPixelDifference(250, Self.Bounds).Length;
+    //less than 10% of the screen changed in 250ms
+    if (shift / Self.Bounds.Area * 100) < 10 then
+      Break;
+  end;
+  Keyboard.KeyUp(EKeyCode.UP);
+  Self.HighestPitch := False;
+
+  if Projection.System = EProjector.CAMERA then
+    RSCamera.SetPitch(RSCamera.MIN_PITCH);
+end;
+{$R+}

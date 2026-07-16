@@ -1,0 +1,306 @@
+(*
+# Sailing
+Methods to interact with the sailing gametab:
+```{figure} ../../images/sailingtab.png
+```
+*)
+{$DEFINE WL_SAILING_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  ESailingFacility = enum(HELM, REPAIR, WIND_CATCHER, CANNON, HOOK);
+
+  ECrewAsignee = enum(NONE, ME, CREW);
+
+  TSailingFacilitySlot = record
+    Bounds, InfoBox, AssigneeBox: TBox;
+    Buttons: TBoxArray;
+  end;
+
+  TSailingFacilitySlotArray = array of TSailingFacilitySlot;
+
+function TSailingFacilitySlot.Create(borders: TPointArray; area: TBox): TSailingFacilitySlot; static;
+var
+  b: TBox;
+  isHelm: Boolean;
+begin
+  b := borders.Bounds();
+
+  case b.Height of
+    30:
+    begin
+      b.Y1 := Max(b.Y1-2,area.Y1);
+      b.Y2 := Min(b.Y2+2, area.Y2);
+    end;
+    45, 61:
+    begin
+      b.Y2 := b.Y1+65;
+      b.Y1 := Max(b.Y1-4,area.Y1);
+      isHelm := True;
+    end;
+    else Exit;
+  end;
+
+  Result.Bounds := [area.X1, b.Y1, area.X2, b.Y2];
+
+  with Result.Bounds do
+  begin
+    Result.InfoBox := [X1, Y1, X2-41, Y2];
+    Result.AssigneeBox.X1 := X2 - 33;
+    if isHelm then
+      Result.AssigneeBox.Y1 := Y1 + 19
+    else
+      Result.AssigneeBox.Y1 := Y1 + 2;
+    Result.AssigneeBox.X2 := X2-4;
+  end;
+
+  Result.AssigneeBox.Y2 := Result.AssigneeBox.Y1+29;
+end;
+
+property TSailingFacilitySlot.Facility: ESailingFacility;
+var
+  count: Integer;
+begin
+  count := Target.CountColor(TInterface.BORDER, 0, Self.InfoBox);
+
+  case count of
+    372, 691: Result := ESailingFacility.HELM;
+    0: Result := ESailingFacility.REPAIR;
+    82: Result := ESailingFacility.HOOK;
+    else Result := ESailingFacility.CANNON;
+  end;
+end;
+
+property TSailingFacilitySlot.Assignee: ECrewAsignee;
+begin
+  case Target.CountColor(TInterface.BORDER, 0, Self.AssigneeBox) of
+    170: Result := ECrewAsignee.NONE;
+    174: Result := ECrewAsignee.ME;
+    else Result := ECrewAsignee.CREW;
+  end;
+end;
+
+type
+(*
+## ESailingTab
+```pascal
+ESailingTab = enum(FACILITIES, STATS, CREW);
+```
+Enum represinting the available sailing tabs.
+*)
+  ESailingTab = enum(UNKNOWN, FACILITIES, STATS, CREW);
+
+(*
+## TSailing
+Main record responsible with handling the Sailing gametab.
+*)
+  TSailing = record
+    CombatBox, BoatNameBox, BoatHealthBox, TabTitle: TBox;
+    Tabs: TBoxArray;
+    Scrolls: array [ESailingTab] of TScrollBar;
+  end;
+
+procedure TSailing.SetupGameTab();
+begin
+  with GameTab.Bounds do
+  begin
+    Self.CombatBox := [X1-3, Y1+1, X1+22, Y1+26];
+    Self.BoatNameBox := [X1+26, Y1+4, X2-2, Y1+26];
+    Self.BoatHealthBox := [X1+8, Y1+30, X2-6, Y1+42];
+
+    Self.Tabs := TBoxArray.Create([X1+2, Y1+46], 3, 1, 55, 20, [7,0]);
+    Self.TabTitle := [X1+32, Y1+68, X2-32, Y1+82];
+
+    Self.Scrolls[ESailingTab.FACILITIES].Area := [X1+3, Y1+88, X2-19, Y2-6];
+    Self.Scrolls[ESailingTab.STATS].Area := [X1+3, Y1+88, X2-19, Y2-6];
+    Self.Scrolls[ESailingTab.CREW].Area := [X1+3, Y1+108, X2-19, Y2-28];
+  end;
+
+  Self.Scrolls[ESailingTab.FACILITIES].Setup();
+  Self.Scrolls[ESailingTab.STATS].Setup();
+  Self.Scrolls[ESailingTab.CREW].Setup();
+end;
+
+(*
+## Sailing.IsOpen
+```pascal
+function TSailing.IsOpen(): Boolean;
+```
+Returns true/false if the sailing tab is open.
+
+Example:
+```pascal
+WriteLn Sailing.IsOpen();
+```
+*)
+function TSailing.IsOpen(): Boolean;
+begin
+  Result := Target.HasColor([$1ABD1A, 7, EColorSpace.RGB, [1.247, 0.507, 1.247]], 1, Self.BoatHealthBox);
+end;
+
+(*
+## Sailing.Open
+```pascal
+function TSailing.Open(): Boolean;
+```
+Attempts to open the sailing gametab.
+
+Example:
+```pascal
+WriteLn Sailing.Open();
+```
+*)
+function TSailing.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.COMBAT);
+  if Result and not Self.IsOpen() then
+  begin
+    Mouse.Click(Self.CombatBox, EMouseButton.LEFT);
+    Result := SleepUntil(Self.IsOpen(), RandomMode(100, 50, 1500), 4*TICK);
+  end;
+end;
+
+
+(*
+## Sailing.BoatName
+```pascal
+property TSailing.BoatName: String;
+```
+Returns the boat name
+
+Example:
+```pascal
+WriteLn Sailing.BoatName;
+```
+*)
+property TSailing.BoatName: String;
+begin
+  Result := OCR.Recognize(Self.BoatNameBox, Fonts.BOLD_SHADOW, [TFonts.ORANGE], 0);
+end;
+
+(*
+## Sailing.BoatHealth
+```pascal
+property TSailing.BoatHealth: Integer;
+```
+Returns the boat current health
+
+Example:
+```pascal
+WriteLn Sailing.BoatName;
+```
+*)
+property TSailing.BoatHealth: Integer;
+var
+  str: String;
+begin
+  str := OCR.Recognize(Self.BoatHealthBox, Fonts.PLAIN_11, [TFonts.WHITE], 0);
+  Result := str.Before('/').ExtractInteger();
+end;
+
+(*
+## Sailing.GetTab
+```pascal
+function TSailing.GetTab():  ESailingTab;
+```
+Returns the currently active {ref}`ESailingTab`.
+
+Example:
+```pascal
+WriteLn Sailing.GetTab();
+```
+*)
+function TSailing.GetTab(): ESailingTab;
+var
+  title: String;
+begin
+  title := OCR.Recognize(Self.TabTitle, Fonts.PLAIN_12, [TFonts.ORANGE], 0);
+
+  case title of
+    'Facilities': Result := ESailingTab.FACILITIES;
+    'Stats': Result := ESailingTab.STATS;
+    'Crew': Result := ESailingTab.CREW;
+    else
+    begin
+      if not title.EndsWith(')') then
+        Exit;
+      title := title.After('(');
+      if Length(title) > 1 then
+        case title[1] of
+          'H', 'P', 'D': Result := ESailingTab.FACILITIES;
+        end;
+    end;
+  end;
+end;
+
+(*
+## Sailing.OpenTab
+```pascal
+function TSailing.OpenTab(tab:  ESailingTab): Boolean;
+```
+Attempts to open the specified `tab` {ref}`ESailingTab`.
+
+Example:
+```pascal
+WriteLn Sailing.OpenTab(ESailingTab.CREW);
+```
+*)
+function TSailing.OpenTab(tab: ESailingTab): Boolean;
+var
+  b: TBox;
+begin
+  if not Self.Open() then
+    Exit;
+  if tab = Self.GetTab() then
+    Exit(True);
+
+  b := Self.Tabs[tab];
+
+  Mouse.Click(b, EMouseButton.LEFT);
+  Result := SleepUntil(Self.GetTab() = tab, RandomMode(100, 50, 1500), 4*TICK);
+end;
+
+
+(*
+## Sailing.GetFacilitySlots
+```pascal
+function TSailing.GetFacilitySlots(): TSailingFacilitySlotArray;
+```
+Returns a {ref}`TSailingFacilitySlotArray` of the facility slots that are
+currently visible.
+
+This will only return those that have their buttons and/or icons fully visible.
+
+Example:
+```pascal
+WriteLn Sailing.GetFacilitySlots();
+```
+*)
+function TSailing.GetFacilitySlots(): TSailingFacilitySlotArray;
+var
+  tpa: TPointArray;
+  atpa: T2DPointArray;
+  area: TBox;
+  slot: TSailingFacilitySlot;
+begin
+  if Self.GetTab() <> ESailingTab.FACILITIES then
+    Exit;
+
+  area := Self.Scrolls[ESailingTab.FACILITIES].Area;
+  tpa := Target.FindColor(TInterface.BORDER, 0, area);
+  atpa := tpa.Cluster(100, 4);
+
+  for tpa in atpa do
+  begin
+    slot := TSailingFacilitySlot.Create(tpa, area);
+    if slot <> Default(TSailingFacilitySlot) then
+      Result += slot;
+  end;
+end;
+
+var
+(*
+## Sailing variable
+Global {ref}`TSailing` variable.
+*)
+  Sailing: TSailing;

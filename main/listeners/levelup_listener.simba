@@ -1,0 +1,158 @@
+(*
+# Level Up Listener
+The {ref}`Level Up Listener` is a tool that allows you to listen for
+the level up messages and run `OnMessage` callbacks which should be thread safe.
+
+You can debug incoming level up messages by adding this compiler directive
+before you include WaspLib:
+```pascal
+{$DEFINE WL_DEBUG_LEVEL_UP_LISTENER}
+```
+
+For more information on listeners and how to run them check {ref}`Listeners`.
+*)
+{$DEFINE WL_LEVELUP_LISTENER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_LEVELUP_LISTENER}
+{.$DEFINE WL_DEBUG_LEVELUP_LISTENER}
+
+type
+  TLevelUpListener = record
+    Engine: TPixelOCR;
+    MessageLines: TBoxArray;
+    LastMessage: String;
+    Bounds, MessageBox, LevelBox: TBox;
+    SkillMap: TStringMap<ESkill>;
+    OnLevelUp: array of procedure (img: TImage; level: Integer; skill: ESkill) of object;
+    Target: TTarget;
+  end;
+
+{$H-}
+procedure TLevelUpListener.SaveScreenshot(img: TImage; level: Integer; skill: ESkill);
+var
+  path: String;
+begin
+  path := SimbaEnv.ScreenshotsPath + 'levelups' + PATH_SEP;
+  if not DirCreate(path) then
+    Exit;
+  path += TDateTime.CreateFromSystem().ToString(FILE_TIME_FORMAT);
+  img.Save(path + '.png', True);
+end;
+
+procedure TLevelUpListener.UpdateStats(img: TImage; level: Integer; skill: ESkill);
+begin
+  Stats.Levels[skill] := level;
+end;
+{$H+}
+
+procedure TLevelUpListener.Setup(trgt: TTarget);
+var
+  i: Integer;
+  key: String;
+begin
+  Self.Target := trgt;
+  Self.Bounds := Chat.Bounds;
+  Self.MessageBox := Box(0, 0, Self.Bounds.Width-1, 59);
+  Self.LevelBox := Box(0, 60, Self.Bounds.Width-1, Self.Bounds.Height-76);
+
+  for i := 0 to Ord(High(ESkill)) do
+  begin
+    key := ToStr(ESkill(i)).After('ESkill.').ToLower();
+    Self.SkillMap.Value[key] := ESkill(i);
+  end;
+
+  WriteLn(
+    GetTimeStamp(),
+    ':[LevelUpListener]: Setup and ready to start listening to new level up messages.'
+  );
+end;
+
+(*
+## LevelUpListener.LeveledUp
+```pascal
+function TLevelUpListener.LeveledUp(img: TImage): Boolean;
+```
+Very similar to the start of `Chat.LeveledUp`.
+
+Basically looks for a message containing "Congratulations" at the start and
+returns true if it's found.
+
+Example:
+```pascal
+WriteLn LevelUpListener.LeveledUp(Target.GetImage());
+```
+*)
+function TLevelUpListener.LeveledUp(img: TImage): Boolean;
+var
+  i: Integer;
+  trgt: TTarget;
+begin
+  img.Crop(Self.MessageBox);
+
+  trgt := new TTarget();
+  trgt.SetImage(img);
+  if not trgt.HasColor(TFonts.DARK_BLUE, 0, 1) then
+    Exit;
+
+  img.ReplaceColorBinary(False, [TFonts.DARK_BLUE], 0);
+  Self.Engine.RecognizeLines(img, Fonts.QUILL_8);
+  if Self.Engine.Matches = [] then
+    Exit;
+
+  for i := 0 to High(Self.Engine.Matches) do
+    if Self.Engine.Matches[i].Text.StartsWith('Congratulations') then
+      Exit(True);
+end;
+
+(*
+## LevelUpListener.Check
+```pascal
+function TLevelUpListener.Check(): Boolean;
+```
+Returns true if there's been new messages.
+
+Example:
+```pascal
+WriteLn LevelUpListener.Check();
+```
+*)
+function TLevelUpListener.Check(): Boolean;
+var
+  img, tmp: TImage;
+  i, level: Integer;
+  str, key: String;
+  skill: ESkill;
+begin
+  img := Self.Target.GetImage(Self.Bounds);
+  if not Self.LeveledUp(img.Copy()) then
+    Exit;
+
+  tmp := img.Copy();
+  tmp.Crop(Self.LevelBox);
+  tmp.ReplaceColorBinary(False, [TFonts.BLACK], 0);
+  str := Self.Engine.Recognize(tmp, Fonts.QUILL_8);
+
+  key := Trim(str.Between('Your ', ' level').ToLower());
+  skill := Self.SkillMap.Value[key];
+  level := StrToInt(str.Between('now ', '.'), 0);
+
+  if Stats.Levels[skill] >= level then
+    Exit;
+
+  Result := True;
+
+  {$IFDEF WL_DEBUG_LEVELUP_LISTENER}
+  WriteLn GetTimeStamp() + ':[LevelUpListener]: Leveled up ' + ToStr(skill) + ' to ' + ToStr(level) + '.';
+  {$ENDIF}
+
+  for i := 0 to High(Self.OnLevelUp) do
+    Self.OnLevelUp[i](img, level, skill);
+end;
+
+var
+(*
+## LevelUpListener variable
+Global {ref}`TLevelUpListener` variable.
+*)
+  LevelUpListener: TLevelUpListener;

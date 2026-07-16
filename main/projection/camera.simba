@@ -1,0 +1,197 @@
+(*
+# RSCamera
+RSCamera is a 3D engine similar to {ref}`MM2MS`.
+It differs from it in that it uses the exact same math as the game client for
+projection and therefore is more accurate when doing "Minimap to MainScreen"
+projections specifically, where `MM2MS` is unrivaled when doing
+"MainScreen to Minimap" ironically.
+*)
+{$DEFINE WL_CAMERA_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('RSCamera', 'Range checks are enabled for RSCamera, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+(*
+## TCamera
+Record responsible of handling projection, similar to {ref}`MM2MS`.
+*)
+  TCamera = record
+    X, Y, Z, Pitch, Yaw, Scale, MinScale, MaxScale,
+    ZOffset, MinZ, MaxZ, ReverseZ: Integer;
+    Player, Center, Camera, Offset, ViewportOffset, Origin: TPoint;
+    Sines, Cosines: array [0..2047] of Int32;
+    ZoomScale, Radians: Single;
+    Bounds: TBox;
+    const MIN_PITCH: Integer = 128;
+    const MAX_PITCH: Integer = 383;
+  end;
+
+procedure TCamera.Setup();
+var
+  i: Integer;
+  percent: Single;
+begin
+  Self.ZoomScale := -1;
+  Self.Radians := -1;
+
+  Self.Pitch := Self.MAX_PITCH;
+
+  for i := 0 to 2047 do
+  begin
+    Self.Sines[i]   := Round(65536*Sin(i*PI/1024));
+    Self.Cosines[i] := Round(65536*Cos(i*PI/1024));
+  end;
+
+  Self.Player.X := 0;
+  Self.Player.Y := 0;
+
+  Self.Center.X := Self.Player.X;
+  Self.Center.Y := Self.Player.Y;
+
+  Self.X := Self.Player.X;
+
+  case Client.Mode of
+    EMode.FIXED:
+    begin
+      Self.Y := Self.Player.Y - 674;
+      Self.ZOffset := -1650;
+      with Client.Bounds do
+        Self.Offset := [X1+4,Y1+4];
+      Self.MinScale := 181;
+      Self.MaxScale := 1448;
+      Self.MaxZ := 1851;
+      Self.MinZ := 1782;
+    end;
+    EMode.RESIZABLE..EMode.MODERN_WIDE:
+    begin
+      Self.Y := Self.Player.Y - 842;
+      Self.ZOffset := -2054;
+      with Client.Bounds do
+        Self.Offset := [X1,Y1];
+      //scale increases with client height between 272 and 574 for min and 2180 and 4599 for max
+      percent := (MainScreen.Bounds.Height - 503) / (1061-503);
+      Self.MinScale := 272+Round((574-272) * percent);
+      Self.MaxScale := 2180+Round((4599-2180) * percent);
+      Self.MaxZ := 2289;
+      Self.MinZ := 2219;
+    end;
+  end;
+
+  Self.Scale := Self.MinScale;
+
+  Self.ViewportOffset.X := MainScreen.Bounds.Width div 2 + Self.Offset.X;
+  Self.ViewportOffset.Y := MainScreen.Bounds.Height div 2 + Self.Offset.Y;
+end;
+
+(*
+## RSCamera.SetPitch
+```pascal
+procedure TCamera.SetPitch(value: Integer);
+```
+Allows you the set the camera pitch.
+*)
+procedure TCamera.SetPitch(value: Integer);
+begin
+  Self.Pitch := value;
+  Self.Y := Self.Player.Y - 674 - Round(235 * (Self.MAX_PITCH - value) / (Self.MAX_PITCH - Self.MIN_PITCH));
+end;
+
+(*
+## RSCamera.Update
+```pascal
+procedure TCamera.Update(zoom: Integer; rads: Single);
+```
+Updates current zoom and rotation.
+*)
+procedure TCamera.Update(zoom: Integer; rads: Single);
+begin
+  if Self.ZoomScale <> ZOOM2RSZOOM[zoom] then
+  begin
+    Self.Z := Self.ZOffset + Round(1237 * (Self.MAX_PITCH - Self.Pitch) / (Self.MAX_PITCH - Self.MIN_PITCH) - (zoom/100) * 75);
+    Self.ZoomScale := ZOOM2RSZOOM[zoom];
+    Self.Scale := Round(Self.MinScale + Self.ZoomScale * (Self.MaxScale-Self.MinScale));
+    Self.ReverseZ := Round(Self.MinZ + Self.ZoomScale * (Self.MaxZ-Self.MinZ));
+  end;
+
+  if Self.Radians <> rads then
+  begin
+    Self.Yaw := Trunc((rads / TAU) * 2047);
+    Self.Camera.X := Round(Self.Center.X + Cos(rads) * (Self.X - Self.Center.X) - Sin(rads) * (Self.Y - Self.Center.Y));
+    Self.Camera.Y := Round(Self.Center.Y + Sin(rads) * (Self.X - Self.Center.X) + Cos(rads) * (Self.Y - Self.Center.Y));
+    Self.Origin.X := Self.Camera.X - Self.Player.X;
+    Self.Origin.Y := Self.Camera.Y - Self.Player.Y;
+
+    Self.Bounds.X1 := ((-5120 + Self.Origin.X) div 128 * 4) + Minimap.Center.X;
+    Self.Bounds.Y1 := ((-5120 + Self.Origin.Y) div 128 * 4) + Minimap.Center.Y;
+    Self.Bounds.X2 := ((18432 + Self.Origin.X) div 128 * 4) + Minimap.Center.X;
+    Self.Bounds.Y2 := ((18432 + Self.Origin.Y) div 128 * 4) + Minimap.Center.Y;
+
+    Self.Radians := rads;
+  end;
+end;
+
+function TCamera.MinimapOffset(constref coordinate: TVector3): TVector3;
+begin
+  Result.X := (coordinate.X-Minimap.Center.X)/4*128 - Self.Origin.X;
+  Result.Y := -(coordinate.Y-Minimap.Center.Y)/4*128 - Self.Origin.Y;
+  Result.Z := -coordinate.Z/4*128 - Self.Z;
+end;
+
+function TCamera.Transform(constref coordinate: TVector3): TVector2;
+var
+  x1, y1, y2, z1, x, y, z: Int32;
+  scale: Single;
+begin
+  x := Round(coordinate.X);
+  y := Round(coordinate.Y);
+  z := Round(coordinate.Z);
+
+  y1 := Sar(y * Self.Cosines[Self.Yaw] - x * Self.Sines[Self.Yaw], 16);
+  z1 := Sar(y1 * Self.Cosines[Self.Pitch] + z * Self.Sines[Self.Pitch], 16);
+
+  if z1 = 0 then z1 := 1;
+
+  x1 := Sar(x * Self.Cosines[Self.Yaw] + y * Self.Sines[Self.Yaw], 16);
+  y2 := Sar(z * Self.Cosines[Self.Pitch] - y1 * Self.Sines[Self.Pitch], 16);
+
+  scale := Self.Scale / z1;
+  Result.X := Self.ViewportOffset.X + x1 * scale;
+  Result.Y := Self.ViewportOffset.Y + y2 * scale;
+end;
+
+function TCamera.RunEx(coordinates: TVector3Array): TVector2Array;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coordinates) do
+    Result += Self.Transform(Self.MinimapOffset(coordinates[i]));
+end;
+
+function TCamera.Run(coordinates: TVector3Array): TPointArray;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coordinates) do
+    Result += Self.Transform(Self.MinimapOffset(coordinates[i])).ToPoint();
+end;
+
+function TCamera.Run(coordinate: TVector3): TPoint; overload;
+begin
+  Result := Self.Run([coordinate]).First;
+end;
+
+{$R+}
+
+var
+(*
+## RSCamera variable
+Global {ref}`TCamera` variable.
+*)
+  RSCamera: TCamera;

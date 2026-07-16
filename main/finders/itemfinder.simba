@@ -1,0 +1,489 @@
+(*
+# ItemFinder
+Methods to find and compare item images
+*)
+
+{$DEFINE WL_ITEMFINDER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  TItemFinderFilter = record
+    Name: String;
+    Filter: TImageCompareFilter;
+  end;
+
+  TItemFinder = record
+    ItemImages: TStringMap<TImage>;
+    MaskImages: TStringMap<TImage>;
+    Filters: array of TItemFinderFilter;
+    Version: String;
+    Similarity: Single;
+    ImageCompare: TImageCompareUtils;
+    Database: TDatabase;
+    CacheDir: String;
+
+    ImageReader: TResourceReader;
+    Timeout: TCountDown;
+    Unzipping, IsSetup: Boolean;
+  end;
+
+
+function TItemFinder._AlignHelper(img: TImage; tBorder, border: TPointArray; out align: TPoint): Boolean;
+var
+  pt: TPoint;
+begin
+  if border = [] then Exit;
+
+  align := tBorder.Last - border.Last;
+  border := border.Offset(align);
+
+  for pt in border do
+  begin
+    if pt.Y <= 8 then
+      Continue; //stack number... Don't compare.
+    if not img.InImage(pt.X, pt.Y) then
+      Exit;
+    if img.Pixel[pt.X, pt.Y] <> $010000 then
+      Exit;
+  end;
+
+  Result := True;
+end;
+
+function TItemFinder.Align(image, template: TImage): Boolean;
+var
+  tBorder, bBorder: TPointArray;
+  bounds: TBox;
+  align: TPoint;
+begin
+  tBorder := image.FindColor($010000, 0).ExcludeBox([0,0,image.Width,8]);
+  bBorder := template.FindColor(ITEM_BORDER, 0).ExcludeBox([0,0,template.Width,8]);
+
+  if ITEM_BORDER <> $010000 then
+  begin
+    template.DrawColor := $010000;
+    template.DrawTPA(bBorder);
+  end;
+
+  if tBorder = [] then
+    Exit;
+
+  if not Self._AlignHelper(image, tBorder, bBorder, align) then
+    Exit;
+
+  bounds := tBorder.Bounds();
+  image.Crop(bounds);
+
+  bounds := bounds.Offset([-align.X, -align.Y]);
+  if (bounds.X1 < 0) or (bounds.Y1 < 0) then
+    Exit;
+  template.Crop(bounds);
+  Result := True;
+end;
+
+procedure TItemFinder.Clean(image, template: TImage);
+var
+  stack: EStack;
+  tpa: TPointArray;
+begin
+  image.DrawColor := $0;
+  template.DrawColor := $0;
+
+  template.DrawTPA(image.FindColor($0, 0));
+
+  tpa := image.FindColor($202030, 0);
+  for stack := Low(EStack) to High(EStack) do
+    tpa += template.FindColor(stack.Color, 0);
+
+  tpa += template.FindColor($010000, 0);
+  image.DrawTPA(tpa);
+  template.DrawTPA(tpa);
+end;
+
+procedure TItemFinder.AddItemFilter(item: String; filter: TImageCompareFilter);
+var
+  i: Integer;
+  tmp: TItemFinderFilter;
+begin
+  tmp := [item, @filter];
+  for i := 0 to High(Self.Filters) do
+    if Self.Filters[i].Name > item then
+    begin
+      Self.Filters.Insert(tmp, i);
+      Exit;
+    end;
+
+  Self.Filters += tmp;
+end;
+
+
+procedure TItemFinder.SetupReader();
+begin
+  Self.ImageReader := new TResourceReader(Self.CacheDir + 'items.bin');
+  Self.IsSetup := True;
+end;
+
+procedure TItemFinder._UnzipFinished(constref result: TASyncUnzipResult);
+begin
+  if not result.Success then
+  begin
+    DirDelete(Self.CacheDir, True);
+    raise GetDebugLn('ItemFinder', 'Failed to unzip images.bin: '  + result.Exception);
+  end;
+
+  Self.SetupReader();
+  Self.Unzipping := False;
+end;
+
+procedure TItemFinder.WaitUnzipping();
+begin
+  while Self.Unzipping do
+  begin
+    Sleep(100);
+    if not Self.Timeout.IsFinished then
+      Continue;
+    DirDelete(Self.CacheDir, True);
+    raise GetDebugLn('ItemFinder', 'Timed out unzipping items.');
+  end;
+end;
+
+procedure TItemFinder.Setup();
+var
+  path, tmp: String;
+begin
+  if Self.IsSetup then Exit;
+  Self.Version := WLAssets.JSON.Item['finders/items/items.zip'].AsString;
+  Self.Database.Setup(
+    'ItemFinder', ['id', 'item', 'hash'],
+    WLEnv.AssetsDir + 'finders' + PATH_SEP + 'items' + PATH_SEP + 'data' + PATH_SEP,
+    Self.Version
+  );
+
+  Self.CacheDir := WLEnv.CacheDir + 'itemfinder' + PATH_SEP;
+
+  //Delete old cache files if they exist
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
+    if tmp = Self.Version then Continue;
+    DirDelete(path, False);
+  end;
+
+  Self.CacheDir += Self.Version + PATH_SEP;
+
+  if not DirCreate(Self.CacheDir) then
+    raise GetDebugLn('ItemFinder', 'Failed to create cache directory: ' + Self.CacheDir);
+
+  //only set similarity if the user didn't set it already
+  if Self.Similarity = 0 then
+    Self.Similarity := 0.999;
+
+  Self.ItemImages.CaseSens := False;
+
+  Self.ImageCompare.Align := @Self.Align;
+  Self.ImageCompare.Clean := @Self.Clean;
+
+  if FileExists(Self.CacheDir + 'items.bin') then
+  begin
+    Self.SetupReader();
+    Exit;
+  end;
+
+  Self.Unzipping := True;
+  Self.Timeout.Start(60 * SECOND);
+  Async.FileUnZip(
+    WLEnv.AssetsDir + 'finders' + PATH_SEP + 'items' + PATH_SEP + 'items.zip',
+    Self.CacheDir, @Self._UnzipFinished
+  );
+end;
+
+
+function TItemFinder.GetIDs(item: String): TStringArray;
+begin
+  Result := Self.Database.GetAll(item, 'item', 'id');
+end;
+
+function TItemFinder.GetHashItems(hash: String): TItemArray;
+begin
+  Result := Self.Database.GetAll(hash, 'hash', 'item');
+end;
+
+procedure TItemFinder.MapItem(item, id: String);
+begin
+  Self.Database.Insert([id, item, '']);
+end;
+
+function TItemFinder.GetFilter(item: String): TImageCompareFilter;
+var
+  lo, hi, mid, cmp: Integer;
+begin
+  lo := 0;
+  hi := High(Self.Filters);
+
+  //binary search filter
+  while lo <= hi do
+  begin
+    mid := (lo + hi) div 2;
+    cmp := CompareStr(Self.Filters[mid].Name, item);
+
+    if cmp = 0 then
+      Exit(@Self.Filters[mid].Filter);
+
+    if cmp < 0 then
+      lo := mid + 1
+    else
+      hi := mid - 1;
+  end;
+
+  Result := nil;
+end;
+
+function TItemFinder.GetImage(id: String): TImage;
+var
+  i: Integer;
+begin
+  if not Self.ItemImages.Exists(id) or (Self.ItemImages.Value[id] = nil) then
+  begin
+    i := Self.ImageReader.Find(id + '.png');
+    if i = -1 then
+      raise GetDebugLn('ItemFinder', 'Item ID ' + id + ' doesn''t exist.');
+    Self.ItemImages.Value[id] := Self.ImageReader.LoadImage(i);
+  end;
+
+  Result := Self.ItemImages.Value[id];
+end;
+
+function TItemFinder.GetMask(id: String): TImage;
+var
+  i: Integer;
+begin
+  if not Self.MaskImages.Exists(id) or (Self.MaskImages.Value[id] = nil) then
+  begin
+    i := Self.ImageReader.Find(id + '.bmp');
+    if i = -1 then
+      raise GetDebugLn('ItemFinder', 'Mask ID ' + id + ' doesn''t exist.');
+    Self.MaskImages.Value[id] := Self.ImageReader.LoadImage(i);
+  end;
+
+  Result := Self.MaskImages.Value[id];
+end;
+
+
+function TItemFinder.GetImages(item: String): TImageArray;
+var
+  ids: TStringArray;
+  id: String;
+begin
+  if item.IsNumeric then ids := [item]
+  else ids := Self.GetIDs(item);
+
+  for id in ids do
+    Result += Self.GetImage(id);
+end;
+
+
+function TItemFinder.FindAll(items: TItemArray; boxes: TBoxArray; maxToFind: Integer = 0): TImageMatchArray;
+var
+  item: TItem;
+  spread: TItemArray;
+  img: TImage;
+  i: Integer;
+  skip: TBooleanArray;
+  match: Single;
+begin
+  SetLength(skip, Length(boxes));
+
+  for item in items do
+    spread += item.Spread();
+
+  Target.FreezeImage();
+
+  for item in spread do
+  begin
+    item := LowerCase(item);
+    Self.ImageCompare.Filter := @Self.GetFilter(item);
+
+    for img in Self.GetImages(item) do
+      for i := 0 to High(boxes) do
+      begin
+        if skip[i] then
+          Continue;
+        if not TItem.InBounds(boxes[i]) then
+        begin
+          skip[i] := True;
+          Continue;
+        end;
+
+        match := Self.Similarity;
+        if Self.ImageCompare.Compare(img, boxes[i], match) then
+        begin
+          Result += [i, boxes[i], match];
+          if (maxToFind > 0) and (Length(Result) >= maxToFind) then
+            Break(3);
+          skip[i] := True;
+        end;
+      end;
+  end;
+
+  Target.UnFreezeImage();
+end;
+
+function TItemFinder.FindAll(items: TItemArray; boxes: TBoxArray; out matches: TImageMatchArray): Boolean; overload;
+var
+  item: TItem;
+  spread: TItemArray;
+  results: TImageMatchArray;
+  i: Integer;
+  img: TImage;
+  match: Single;
+  skip: TBooleanArray;
+begin
+  SetLength(skip, Length(boxes));
+
+  for item in items do
+    spread += item.Spread();
+
+  Target.FreezeImage();
+
+  for item in spread do
+  begin
+    item := LowerCase(item);
+    Self.ImageCompare.Filter := @Self.GetFilter(item);
+
+    for img in Self.GetImages(item) do
+      for i := 0 to High(boxes) do
+      begin
+        if skip[i] then Continue;
+        if not TItem.InBounds(boxes[i]) then
+        begin
+          skip[i] := True;
+          Continue;
+        end;
+
+        match := Self.Similarity;
+        if Self.ImageCompare.Compare(img, boxes[i], match) then
+        begin
+          results += [i, boxes[i], match];
+          skip[i] := True;
+        end;
+      end;
+
+    if results = [] then
+    begin
+      Target.UnFreezeImage();
+      Exit;
+    end;
+
+    matches += results;
+    results := [];
+  end;
+
+  Target.UnFreezeImage();
+
+  Result := True;
+end;
+
+function TItemFinder.Find(items: TItemArray; boxes: TBoxArray; out match: TImageMatch): Boolean;
+var
+  item: TItem;
+  spread: TItemArray;
+  img: TImage;
+  i: Integer;
+  similarity: Single;
+  skip: TBooleanArray;
+begin
+  SetLength(skip, Length(boxes));
+  Target.FreezeImage();
+
+  for item in items do
+    spread += item.Spread();
+
+  for item in spread do
+  begin
+    item := LowerCase(item);
+    Self.ImageCompare.Filter := @Self.GetFilter(item);
+
+    for img in Self.GetImages(item) do
+    begin
+      for i := 0 to High(boxes) do
+      begin
+        if skip[i] then Continue;
+        if not TItem.InBounds(boxes[i]) then
+        begin
+          skip[i] := True;
+          Continue;
+        end;
+
+        similarity := Self.Similarity;
+        if Self.ImageCompare.Compare(img, boxes[i], similarity) then
+        begin
+          match := [i, boxes[i], similarity];
+          Target.UnFreezeImage();
+          Exit(True);
+        end;
+      end;
+    end;
+  end;
+
+  Target.UnFreezeImage();
+end;
+
+
+procedure TItemFinder.Show(item: TItem);
+var
+  display, img: TImage;
+  h, w, x: Integer;
+begin
+  display := new TImage();
+
+  for img in Self.GetImages(item) do
+  begin
+    if img.Height > h then h:= img.Height;
+    w := img.Width;
+    x := display.Width;
+    display.SetSize(x+w, h);
+    display.DrawImage(img,[x,0]);
+  end;
+
+  display.Show();
+end;
+
+function TItemFinder.GetBorderHash(img: TImage): String;
+var
+  tpa: TPointArray;
+  border: TImage;
+begin
+  tpa := img.FindColor(ITEM_BORDER, 0, [0, 9, 35, 31]);
+  if tpa = [] then Exit;
+  border := new TImage(36, 32);
+  border.DrawColor := $FFFFFF;
+  border.DrawTPA(tpa);
+                                           //h*w*4=4608
+  Result := HashData(EHashAlgo.CRC32, border.Data, 4608);
+end;
+
+function TItemFinder.GetHash(img: TImage): String;
+var
+  hash: String;
+  bg: TPointArray;
+begin
+  hash := Self.GetBorderHash(img);
+  if hash = '' then Exit;
+
+  bg := Self.GetMask(hash).FindColor(Colors.BLACK, 0);
+
+  if ITEM_BORDER <> $010000 then
+  begin
+    img.DrawColor := $010000;
+    img.DrawAlpha := $FF;
+    img.DrawTPA(img.FindColor(ITEM_BORDER, 0));
+  end;
+
+  img.DrawColor := Colors.BLACK;
+  img.DrawTPA(bg);
+
+  Result := HashData(EHashAlgo.CRC32, img.Data, 4608);
+end;
+
+var
+  ItemFinder: TItemFinder;

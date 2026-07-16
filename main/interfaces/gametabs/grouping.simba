@@ -1,0 +1,16 @@
+{$DEFINE WL_GROUPING_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  TGrouping = record
+    DropDown: TDropDown;
+    Scroll: TScrollBar;
+  end;
+
+procedure TGrouping.SetupGameTab();
+begin
+  //TODO...
+end;
+
+var
+  Grouping: TGrouping;

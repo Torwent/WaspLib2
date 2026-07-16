@@ -1,0 +1,28 @@
+{$DEFINE WL_VECTOR_INCLUDED}
+
+function TVector3Array.NearestVec(vec: TVector3 = [0,0,0]): TVector3;
+var
+  i, nearest: Int32;
+  dist: Double;
+begin
+  dist := $FFFFFF;
+  for i:=0 to High(Self) do
+  begin
+    if Self[i].Distance(vec) < dist then
+    begin
+      dist := Self[i].Distance(vec);
+      nearest := i;
+    end;
+  end;
+  Result := Self[nearest];
+end;
+
+function TVector2.Rotate(angle: Single; center: TVector2): TVector2; overload;
+begin
+  Result := Self.Rotate(angle, center.X, center.Y);
+end;
+
+function TVector3.Rotate(angle: Single; center: TVector2): TVector3; overload;
+begin
+  Result := Self.Rotate(angle, center.X, center.Y);
+end;

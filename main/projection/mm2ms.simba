@@ -1,0 +1,391 @@
+(*
+# MM2MS
+```{note}
+Originally created by [slacky](https://slacky.one/).
+This is basically the same thing with some pre-calculated math.
+```
+
+```{note}
+MM2MS inversion originally created by Bootje.
+```
+
+The MM2MS projector is usually used through {ref}`Projection`, but can be used
+by itself if you want and know what you are doing.
+
+By itself, the projector is basically a 3D engine, very similar to what the game
+uses:
+```{figure} ../../images/mm2ms_ape_rendered.png
+```
+
+It can be used to calculate the position of 3D coordinate and accurately display
+them in the right place in it's 3D space:
+```{figure} ../../images/mm2ms_ape.png
+```
+
+```{figure} ../../images/mm2ms_wireframes.gif
+```
+
+It's projection is so close to what the game uses that it can render it's models
+very accurately, for example, this is the model of the game cow being rendered
+without colors:
+```{figure} ../../images/rscow.gif
+```
+
+When playing with the projector it might be useful to image your head a 3D grid
+with infinity cross sections.
+
+Imagine a 2D grid like this:
+```{figure} ../../images/mm2ms.png
+```
+But imagine it with infinite crossings, so each pixel of the squares can have a
+X and Y crossing.
+
+Now imagine and infine amount of those grids stacked up on top of that one and
+below, with vertical lines creating Z axis intersections.
+
+That's what a 3D grid is.
+
+```{note}
+WaspLib also has {ref}`RSCamera`, an alternative projection engine which is more
+accurate for certain tasks.
+```
+*)
+{$DEFINE WL_MM2MS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('MM2MS', 'Range checks are enabled for MM2MS, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+(*
+## TMM2MS
+Main record responsible for {ref}`MM2MS` projection.
+*)
+  TMM2MS = record
+    Mode: EMode;
+    RSZoom, Radians, ScaleMin, ScaleMax: Single;
+    View, Projection, InvertedView, InvertedProjection,
+    TransformMatrix, InvertedTransformMatrix: TMatrix4;
+    Transformer: TVector3;
+
+    ViewEye, CustomEye, ViewTarget, ViewUp: TVector3;
+    ProjectionHeight, ProjectionWidth: Integer;
+    MinScaleMultiplier, MaxScaleMultiplier, FOV, ZNear, ZFar: Double;
+  end;
+
+(*
+If you want to play with this and understand it better, you may need to override
+some functions like `TMM2MS.UpdateViewMatrix` and
+`TMM2MS.SetupProjection`.
+
+A good strategy is to create overrides and/or link some of the fields availble
+to the keyboard so you can edit them and see how the projection is affected in
+real time, e.g.:
+```pascal
+{$DEFINE WL_DISABLE_FAKE_INPUT}
+{$I WaspLib/main.simba}
+
+begin
+  Map.Setup([Chunk(Box(44,58,46,56), 0)]);
+  Projection.System := EProjector.MM2MS;
+
+  while True do
+  begin
+    Options.GetZoomLevel(False);
+
+    if Keyboard.IsKeyDown(EKeyCode.Q) then
+      EYE_Y_RESIZABLE[Options.ZoomLevel] += 1;
+
+    if Keyboard.IsKeyDown(EKeyCode.W) then
+      EYE_Y_RESIZABLE[Options.ZoomLevel] -= 1;
+
+    if Keyboard.IsKeyDown(EKeyCode.A) then
+      EYE_Z_RESIZABLE[Options.ZoomLevel] += 1;
+
+    if Keyboard.IsKeyDown(EKeyCode.S) then
+      EYE_Z_RESIZABLE[Options.ZoomLevel] -= 1;
+
+    WriteLn('EYE_Y_RESIZABLE: array [0..100] of Single = ' + ToStr(EYE_Y_RESIZABLE) + ';');
+    WriteLn('EYE_Z_RESIZABLE: array [0..100] of Single = ' + ToStr(EYE_Z_RESIZABLE) + ';');
+
+    MM2MS.Update(Options.ZoomLevel, Minimap.CompassRadians);
+    Map.DebugHeight();
+  end;
+end.
+```
+
+```{figure} ../../images/mm2ms_tweaking.gif
+```
+*)
+
+var
+  ZOOM2RSZOOM:     array [0..100] of Single = [0.0000,0.0025,0.0065,0.0100,0.0130,0.0165,0.0205,0.0235,0.0280,0.0310,0.0350,0.0390,0.0430,0.0430,0.0465,0.0515,0.0555,0.0605,0.0645,0.0690,0.0740,0.0785,0.0835,0.0885,0.0935,0.0990,0.1045,0.1095,0.1150,0.1205,0.1260,0.1325,0.1385,0.1455,0.1505,0.1585,0.1635,0.1635,0.1705,0.1775,0.1845,0.1925,0.1995,0.2055,0.2145,0.2215,0.2305,0.2365,0.2465,0.2545,0.2635,0.2725,0.2825,0.2905,0.3005,0.3105,0.3195,0.3285,0.3405,0.3555,0.3615,0.3705,0.3825,0.3825,0.3945,0.4065,0.4185,0.4305,0.4425,0.4575,0.4695,0.4815,0.4980,0.5115,0.5265,0.5385,0.5535,0.5685,0.5835,0.5985,0.6165,0.6315,0.6495,0.6645,0.6825,0.7035,0.7215,0.7215,0.7395,0.7575,0.7815,0.7995,0.8175,0.8355,0.8595,0.8835,0.9015,0.9255,0.9495,0.9735,1.000];
+  EYE_Y_FIXED:     array [0..100] of Single = [-29,-28,-28,-29,-28,-28,-28,-28,-28,-28,-28,-27,-28,-26,-26,-26,-26,-26,-26,-26,-26,-26,-26,-26,-26.5,-27,-27,-27,-27,-27,-27,-28,-27,-27,-27,-27,-27,-26,-26,-26,-25,-26,-26,-25,-25,-26,-25,-25,-25,-25.5,-26,-27,-27,-27,-25,-27,-26,-26,-25,-25,-26,-26,-26,-26,-25,-25,-25,-26,-25,-26,-26,-25,-25,-26,-25,-24,-26,-25,-24,-24,-26,-24,-24,-25,-26,-24,-25,-24,-25,-25,-25,-25,-25,-25,-26,-25,-25,-26,-25,-25,-25];
+  EYE_Z_FIXED:     array [0..100] of Single = [58,58,58,58,58,58,59,58,59,58,58,58,58,57,57,57,57,57,57,57,57,58,57,57,57.5,58,58,58,58,59,58,58,59,58,58,59,58,57,57,57,57,56,58,57,57,57,57,57,58,58,58,57,59,58,59,58,58,59,59,59,59,59,59,57,58,58,57,56,57,56,56,58,59,57,58,59,58,60,59,60,59,59,59,60,58,59,61,58,57,58,58,57,58,56,56,58,56,56,58,59,60];
+  EYE_Y_RESIZABLE: array [0..100] of Single = [-18,-22,-22,-20,-22,-22,-22,-22,-22,-22,-22,-17,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-19,-15,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22,-22];
+  EYE_Z_RESIZABLE: array [0..100] of Single = [53,59,59,53,59,59,59,59,59,59,59,68,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,60,67,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59,59];
+
+function TMM2MS._InvertProjection(matrix: TMatrix4): TMatrix4;
+begin
+  // 1) undo X/Y scale
+  Result.M11 := 1.0 / matrix.M11;
+  Result.M22 := 1.0 / matrix.M22;
+
+  // 2) undo the z–w block:
+  Result.M33 := 0;
+  Result.M34 := 1.0 / matrix.M43;
+
+  Result.M43 := -1.0;
+  Result.M44 := matrix.M33 / matrix.M43;
+
+  Result.M12 := 0.0;
+  Result.M13 := 0.0;
+  Result.M14 := 0.0;
+  Result.M21 := 0.0;
+  Result.M23 := 0.0;
+  Result.M24 := 0.0;
+  Result.M31 := 0.0;
+  Result.M32 := 0.0;
+  Result.M41 := 0.0;
+  Result.M42 := 0.0;
+end;
+
+function TMM2MS._InvertView(matrix: TMatrix4): TMatrix4;
+var
+  t1,t2,t3: Single;
+begin
+  t1 := matrix.M41;
+  t2 := matrix.M42;
+  t3 := matrix.M43;
+
+  //Transpose the 3×3 into the upper‐left of Result
+  Result.M11 := matrix.M11;
+  Result.M12 := matrix.M21;
+  Result.M13 := matrix.M31;
+  Result.M14 := 0.0;
+  Result.M21 := matrix.M12;
+  Result.M22 := matrix.M22;
+  Result.M23 := matrix.M32;
+  Result.M24 := 0.0;
+  Result.M31 := matrix.M13;
+  Result.M32 := matrix.M23;
+  Result.M33 := matrix.M33;
+  Result.M34 := 0.0;
+
+  // Compute inverse translation row:  -T * R^T
+  // T_inv.x = -(t1*r11 + t2*r21 + t3*r31), etc.
+  Result.M41 := -(t1*Result.M11 + t2*Result.M21 + t3*Result.M31);
+  Result.M42 := -(t1*Result.M12 + t2*Result.M22 + t3*Result.M32);
+  Result.M43 := -(t1*Result.M13 + t2*Result.M23 + t3*Result.M33);
+
+  Result.M44 := 1.0;
+end;
+
+
+property TMM2MS.World(rotation: TVector3): TMatrix4;
+const
+  MATRIX_IDENTITY: TMatrix4 = [
+    1.0, 0.0, 0.0, 0.0,
+    0.0, 1.0, 0.0, 0.0,
+    0.0, 0.0, 1.0, 0.0,
+    0.0, 0.0, 0.0, 1.0
+  ];
+begin
+  Result := TMatrix4.RotationYawPitchRoll(rotation.Y, rotation.X, rotation.Z) * MATRIX_IDENTITY;
+end;
+
+property TMM2MS.InvertedWorld(constref world: TMatrix4): TMatrix4;
+var
+  vector: TVector3;
+begin
+  vector := [world.M41, world.M42, world.M43];
+
+  // Transpose rotation into the result’s upper‐left
+  Result.M11 := world.M11;
+  Result.M12 := world.M21;
+  Result.M13 := world.M31;
+  Result.M14 := 0.0;
+  Result.M21 := world.M12;
+  Result.M22 := world.M22;
+  Result.M23 := world.M32;
+  Result.M24 := 0.0;
+  Result.M31 := world.M13;
+  Result.M32 := world.M23;
+  Result.M33 := world.M33;
+  Result.M34 := 0.0;
+
+  // Compute inverse translation = -R^T * T
+  Result.M41 := -(world.M11*vector.X + world.M21*vector.Y + world.M31*vector.Z);
+  Result.M42 := -(world.M12*vector.X + world.M22*vector.Y + world.M32*vector.Z);
+  Result.M43 := -(world.M13*vector.X + world.M23*vector.Y + world.M33*vector.Z);
+
+  // Bottom‐right stays 1
+  Result.M44 := 1.0;
+end;
+
+procedure TMM2MS.Setup(mode: EMode);
+begin
+  Self.RSZoom := -1;
+  Self.Radians := -1;
+  // fixed client width & height
+  if Self.ProjectionWidth = 0 then Self.ProjectionWidth := 765;
+  if Self.ProjectionHeight = 0 then Self.ProjectionHeight := 503;
+
+  case mode of
+    EMode.FIXED:
+    begin
+      if Self.MinScaleMultiplier = 0 then Self.MinScaleMultiplier := 0.8;
+      if Self.MaxScaleMultiplier = 0 then Self.MaxScaleMultiplier := 6.32;
+    end;
+
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+    begin
+      if Self.MinScaleMultiplier = 0 then Self.MinScaleMultiplier := 0.635;
+      if Self.MaxScaleMultiplier = 0 then Self.MaxScaleMultiplier := 4.90;
+    end;
+  end;
+
+  Self.ScaleMin := Self.MinScaleMultiplier * MainScreen.Bounds.Height / Self.ProjectionHeight;
+  Self.ScaleMax := Self.MaxScaleMultiplier * MainScreen.Bounds.Height / Self.ProjectionHeight;
+
+  if Self.FOV = 0 then Self.FOV := Sqrt(2);
+  if Self.ZNear = 0 then Self.ZNear := 0.0;
+  if Self.ZFar = 0 then Self.ZFar := 1.0;
+
+  Self.Projection := TMatrix4.PerspectiveFovRH(Self.FOV, Self.ProjectionWidth / Self.ProjectionHeight, 0.01, 1.0);
+  Self.InvertedProjection := Self._InvertProjection(Self.Projection);
+
+  Self.ViewTarget := [0.0, 0.0, 1.0];
+  Self.ViewUp     := [0.0, 1.0, 0.0];
+end;
+
+procedure TMM2MS.UpdateViewMatrix(mode: EMode; zoom: Integer);
+begin
+  case mode of
+    EMode.FIXED: Self.ViewEye := [0, EYE_Y_FIXED[zoom], EYE_Z_FIXED[zoom]];
+
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.ViewEye := [0, EYE_Y_RESIZABLE[zoom], EYE_Z_RESIZABLE[zoom]];
+  end;
+
+  Self.Mode := mode;
+  Self.View := TMatrix4.LookAtRH(Self.ViewEye, Self.ViewTarget, Self.ViewUp);
+  Self.InvertedView := Self._InvertView(Self.View);
+end;
+
+
+procedure TMM2MS.Update(zoom: Integer; rads: Single);
+var
+  scale: Double;
+  world: TMatrix4;
+begin
+  if (Self.RSZoom <> ZOOM2RSZOOM[zoom]) or (Client.Mode <> Self.mode) then
+  begin
+    Self.RSZoom := ZOOM2RSZOOM[zoom];
+    scale := Self.ScaleMin + Self.RSZoom * (Self.ScaleMax - Self.ScaleMin);
+
+    Self.Transformer.X := 513 * scale;
+    Self.Transformer.Y := 335 * scale;
+    Self.Transformer.Z := MainScreen.Center.Y + (Self.RSZoom * 24);
+    Self.UpdateViewMatrix(Client.Mode, zoom);
+  end;
+
+  if (Self.Radians <> rads) or (Client.Mode <> Self.mode) then
+  begin
+    Self.Radians := rads;
+    world := Self.World[[0,0,TAU-rads]];
+    Self.TransformMatrix := world * Self.View * Self.Projection;
+    Self.InvertedTransformMatrix := Self.InvertedProjection * Self.InvertedView * Self.InvertedWorld[world];
+  end;
+end;
+
+function TMM2MS.MinimapOffset(constref coordinate: TVector3): TVector3;
+begin
+  with Minimap.Center do
+    Result := [coordinate.X - X, Y - coordinate.Y, coordinate.Z];
+end;
+
+function TMM2MS.Transform(constref coord: TVector3; constref matrix: TMatrix4): TVector3;
+begin
+  with coord.Transform(matrix) do
+  begin
+    Result.X := (+X * Self.Transformer.X) + MainScreen.Center.X;
+    Result.Y := (-Y * Self.Transformer.Y) + Self.Transformer.Z;
+  end;
+end;
+
+function TMM2MS.Run(constref coords: TVector3Array): TVector2Array;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coords) do
+    Result += Self.Transform(Self.MinimapOffset(coords[i]), Self.TransformMatrix).ToVec2();
+end;
+
+function TMM2MS.Run(constref coords: TVector3Array): TPointArray; overload;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coords) do
+    Result += Self.Transform(Self.MinimapOffset(coords[i]), Self.TransformMatrix).ToPoint();
+end;
+
+
+function TMM2MS.ReverseMinimapOffset(constref coordinate: TVector3): TVector2;
+begin
+  with Minimap.Center do
+    Result := [Round(coordinate.X) + X, Y - Round(coordinate.Y)];
+end;
+
+function TMM2MS.ReverseTransform(constref coord: TVector3; matrix: TMatrix4): TVector3;
+var
+  ndcX, ndcY, scale, yOff: Double;
+  nearNDC, farNDC, worldNear, worldFar: TVector3;
+  t: Double;
+begin
+  scale := Self.ScaleMin + Self.RSZoom * (Self.ScaleMax - Self.ScaleMin);
+  yOff  := Self.RSZoom * 24;
+
+  ndcX := (coord.X - MainScreen.Center.X) / (513 * scale);
+  ndcY := -(coord.Y - MainScreen.Center.Y - yOff) / (335 * scale);
+
+  nearNDC := [ndcX, ndcY, -1.0];
+  farNDC  := [ndcX, ndcY, +1.0];
+
+  worldNear := nearNDC.Transform(matrix);
+  worldFar := farNDC.Transform(matrix);
+
+  t := -worldNear.Z / (worldFar.Z - worldNear.Z);
+  Result.X := worldNear.X + (worldFar.X - worldNear.X) * t;
+  Result.Y := worldNear.Y + (worldFar.Y - worldNear.Y) * t;
+  Result.Z := 0.0;
+end;
+
+function TMM2MS.ReverseRun(constref coords: TVector3Array): TVector2Array;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coords) do
+    Result += Self.ReverseMinimapOffset(Self.ReverseTransform(coords[i], Self.InvertedTransformMatrix));
+end;
+
+function TMM2MS.ReverseRun(constref coords: TVector3Array): TPointArray; overload;
+var
+  i: Integer;
+begin
+  for i := 0 to High(coords) do
+    Result += Self.ReverseMinimapOffset(Self.ReverseTransform(coords[i], Self.InvertedTransformMatrix)).ToPoint();
+end;
+{$R+}
+
+var
+(*
+## MM2MS variable
+Global {ref}`TMM2MS` variable.
+*)
+  MM2MS: TMM2MS;

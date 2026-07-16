@@ -1,0 +1,220 @@
+(*
+# HitSplats
+Find and read hitsplats on the screen.
+
+```{figure} ../../images/hitsplats.png
+```
+
+At the moment only your hitsplats are supported, tinted ones by other players or
+NPCs are not.
+*)
+{$DEFINE WL_HITSPLATS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## EHitSplat
+```pascal
+EHitSplat = enum(BLUE, RED, MAX);
+```
+Enum representing the main hitsplat colors.
+*)
+  EHitSplat = enum(BLUE, RED, MAX);
+
+(*
+## THitSplat
+Hitsplat record that holds the methods used to find hitsplats.
+*)
+  THitsplat = record
+    Position: TPoint;
+    Value: Integer;
+    Color: EHitSplat;
+    const TEXT_WHITE: TColor = $E3E3E3;
+    const TEXT_TOLERANCE: Double = 10.981;
+  end;
+
+  THitSplatArray = array of THitsplat;
+
+
+function THitSplat._Find(area: TBox): THitSplat; static;
+var
+  blue, red, maxhit: TPointArray;
+begin
+  blue := Target.FindColor(ColorTolerance($E03E33, 0.600, EColorSpace.HSV, [1.435, 1.435, 0.131]), area);
+  if blue <> [] then
+  begin
+    Result.Position := area.TopLeft;
+    Result.Value := OCR.RecognizeNumber(area, Fonts.PLAIN_11, [Self.TEXT_WHITE], Self.TEXT_TOLERANCE);
+    Result.Color := EHitSplat.BLUE;
+    Exit;
+  end;
+
+  red := Target.FindColor(ColorTolerance($0000A3, 0.479, EColorSpace.RGB, [0.066, 1.468, 1.468]), area);
+  if red <> [] then
+  begin
+    Result.Position := area.TopLeft;
+    Result.Value := OCR.RecognizeNumber(area, Fonts.PLAIN_11, [Self.TEXT_WHITE], Self.TEXT_TOLERANCE);
+    Result.Color := EHitSplat.RED;
+    Exit;
+  end;
+
+  maxhit := Target.FindColor(ColorTolerance($0000D8, 0.488, EColorSpace.HSV, [1.433, 1.433, 0.136]), area);
+  if maxhit <> [] then
+  begin
+    Result.Position := area.TopLeft;
+    Result.Value := OCR.RecognizeNumber(area, Fonts.PLAIN_11, [Self.TEXT_WHITE], Self.TEXT_TOLERANCE);
+    Result.Color := EHitSplat.MAX;
+    Exit;
+  end;
+end;
+
+(*
+## THitSplat.Find
+```pascal
+function THitSplat.Find(out splats: THitSplatArray; areas: TBoxArray): Boolean; static;
+function THitSplat.Find(out splats: THitSplatArray; areas: TPolygonArray): Boolean; static; overload;
+function THitSplat.Find(out splats: THitSplatArray; areas: TCuboidArray): Boolean; static; overload;
+function THitSplat.Find(out splats: THitSplatArray): Boolean; static; overload;
+```
+Attempts to find hitsplats on the given `area` a {ref}`TColorFinder`.
+If `area` is not specified, {ref}`MainScreen` Bounds are used.
+The function returns true if we find at least one hitsplat and found splats are
+returned via `splats`.
+*)
+function THitSplat.Find(out splats: THitSplatArray; areas: TBoxArray): Boolean; static;
+var
+  area, b: TBox;
+  white, black, tpa: TPointArray;
+  clusters: T2DPointArray;
+  hit: THitSplat;
+begin
+  splats := [];
+  for area in areas do
+  begin
+    white := Target.FindColor($E3E3E3, 10.981, area);
+    white := white.ExcludeBox(Minimap.Bounds);
+    black := Target.FindColor($0, 0, area);
+    black := black.ExcludeBox(Minimap.Bounds);
+    clusters := white.PointsNearby(black, 1,3).Cluster(4);
+
+    if clusters = [] then Exit;
+
+    for tpa in clusters do
+    begin
+      with tpa.Bounds() do b := [X1-1, Y1-1, X2+2, Y2+3];
+
+      hit := THitsplat._Find(b);
+      if hit.Position <> Default(TPoint) then
+        splats += hit;
+    end;
+  end;
+  Result := splats <> [];
+end;
+
+function THitSplat.Find(out splats: THitSplatArray; areas: TPolygonArray): Boolean; static; overload;
+var
+  poly: TPolygon;
+  area, b: TBox;
+  white, black, tpa: TPointArray;
+  clusters: T2DPointArray;
+  hit: THitSplat;
+begin
+  splats := [];
+  for poly in areas do
+  begin
+    area  := poly.Bounds();
+    white := Target.FindColor($E3E3E3, 10.981, area);
+    white := white.ExcludeBox(Minimap.Bounds);
+    black := Target.FindColor($0, 0, area);
+    black := black.ExcludeBox(Minimap.Bounds);
+    clusters := white.PointsNearby(black, 1,3).Cluster(4);
+
+    if clusters = [] then Exit;
+
+    for tpa in clusters do
+    begin
+      with tpa.Bounds() do
+      begin
+        if not poly.Contains(Center) then Continue;
+        b := [X1-1, Y1-1, X2+2, Y2+3];
+      end;
+
+      hit := THitsplat._Find(b);
+      if hit.Position <> Default(TPoint) then
+        splats += hit;
+    end;
+  end;
+  Result := splats <> [];
+end;
+
+function THitSplat.Find(out splats: THitSplatArray; areas: TCuboidArray): Boolean; static; overload;
+var
+  poly: TPolygon;
+  area: TCuboid;
+  bounds, b: TBox;
+  white, black, tpa: TPointArray;
+  clusters: T2DPointArray;
+  hit: THitSplat;
+begin
+  splats := [];
+  for area in areas do
+  begin
+    bounds := area.Bounds;
+    white := Target.FindColor($E3E3E3, 10.981, bounds);
+    white := white.ExcludeBox(Minimap.Bounds);
+    black := Target.FindColor($0, 0, bounds);
+    black := black.ExcludeBox(Minimap.Bounds);
+    clusters := white.PointsNearby(black, 1,3).Cluster(4);
+
+    if clusters = [] then Exit;
+
+    poly := area.Polygon();
+
+    for tpa in clusters do
+    begin
+      with tpa.Bounds() do
+      begin
+        if not poly.Contains(Center) then Continue;
+        b := [X1-1, Y1-1, X2+2, Y2+3];
+      end;
+
+      hit := THitsplat._Find(b);
+      if hit.Position <> Default(TPoint) then
+        splats += hit;
+    end;
+  end;
+  Result := splats <> [];
+end;
+
+function THitSplat.Find(out splats: THitSplatArray): Boolean; static; overload;
+begin
+  Result := THitSplat.Find(splats, [MainScreen.Bounds]);
+end;
+
+
+
+procedure THitsplat.Draw(img: TImage);
+begin
+  case Self.Color of
+    EHitSplat.BLUE: img.DrawColor := $FF0000;
+    EHitSplat.RED:  img.DrawColor := $0000FF;
+    EHitSplat.MAX:  img.DrawColor := $00FFFF;
+  end;
+  img.DrawCircle(Self.Position, 10);
+end;
+
+procedure THitSplatArray.Draw(img: TImage);
+var
+  splat: THitSplat;
+begin
+  for splat in Self do splat.Draw(img);
+end;
+
+procedure ShowOnTarget(splats: THitSplatArray); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  splats.Draw(img);
+  img.Show();
+end;

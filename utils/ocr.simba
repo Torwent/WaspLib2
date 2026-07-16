@@ -1,0 +1,413 @@
+(*
+# OCR
+This page is about WaspLib's OCR.
+*)
+
+{$DEFINE WL_OCR_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+(*
+## TPixelFont
+`TPixelFont` is the built-in Simba record that holds a font data.
+It might be worth checking Simba documentation or source code for more
+information on them but all you need to know as far as WaspLib is concerned is
+that they "hold" you a font.
+
+WaspLib extends `TPixelFont` to make make handling glyphs that are equal but
+represent different characters easier, for example, `O` and `0` or `l` and `I`.
+
+Characters like these often share the same glyphs in some fonts so the following
+methods try to give you tools to handle those scenarios.
+*)
+
+(*
+### TPixelFont.SameGlyph
+```pascal
+function TPixelFont.SameGlyph(const a, b: Char): Boolean;
+```
+Compares `a` to `b` on the current `TPixelFont` and returns whether they share
+the same glyph or not.
+
+Example:
+```
+{$I WaspLib/main.simba}
+begin
+  WriteLn Fonts.PLAIN_11.SameGlyph('O', '0');
+  WriteLn Fonts.QUILL.SameGlyph('O', '0');
+end.
+```
+*)
+function TPixelFont.SameGlyph(const a, b: Char): Boolean;
+var
+  aN, bN: Integer;
+begin
+  if a = b then
+    Exit(True);
+  for aN := 0 to High(Self.Glyphs) do
+    if Self.Glyphs[aN].Value = a then
+      Break;
+  for bN := 0 to High(Self.Glyphs) do
+    if Self.Glyphs[bN].Value = b then
+      Break;
+
+  Result := Self.GlyphSimilarities[aN, bN] = $FF;
+end;
+
+(*
+### TPixelFont.SameText
+```pascal
+function TPixelFont.SameText(const s1, s2: String): Boolean;
+```
+Compares `s1` to `s2` on the current `TPixelFont` and returns whether their
+glyphs look the same.
+
+Example:
+```
+{$I WaspLib/main.simba}
+begin
+  WriteLn Fonts.PLAIN_11.SameText('I AM lOCO', 'l AM I0C0');
+  WriteLn Fonts.QUILL.SameText('I AM lOCO', 'l AM I0C0');
+end.
+```
+*)
+function TPixelFont.SameText(const s1, s2: String): Boolean;
+var
+  i: Integer;
+begin
+  if Length(s1) <> Length(s2) then
+     Exit(False);
+  for i := 1 to Length(s1) do
+     if not Self.SameGlyph(s1[i], s2[i]) then
+        Exit(False);
+  Result := True;
+end;
+
+(*
+### TPixelFont.ReplaceAlignedGlyphs
+```pascal
+function TPixelFont.ReplaceAlignedGlyphs(const s1, s2: String): String;
+```
+This will return a string with each character on `s1` replaced with the
+corresponding character of `s2` if the glyphs match.
+
+You can see this as a way to correct a string that may be read wrong if you
+know in advance what it should be.
+
+Example:
+```
+{$I WaspLib/main.simba}
+var
+  str: String;
+begin
+  str := 'l AM I0C0';
+  WriteLn Fonts.PLAIN_11.ReplaceAlignedGlyphs(str, 'I AM lOCO');
+  WriteLn Fonts.QUILL.ReplaceAlignedGlyphs(str, 'I AM lOCO');
+end.
+```
+This should give you this result:
+```
+Succesfully compiled in 822.91 milliseconds.
+[00:00:01:0262]:[Client]: Client was resized, updating coordinates.
+I AM lOCO
+l AM I0C0
+Succesfully executed in 537.23 milliseconds.
+```
+*)
+function TPixelFont.ReplaceAlignedGlyphs(const s1, s2: String): String;
+var
+  i: Integer;
+begin
+  if Length(s1) > Length(s2) then
+    raise GetDebugLn('TPixelFont', 's2 length should be equal or larger than s1');
+
+  SetLength(Result, Length(s1));
+  for i := 1 to Length(s1) do
+  begin
+    if Self.SameGlyph(s1[i], s2[i]) then
+      Result[i] := s2[i]
+    else
+      Result[i] := s1[i];
+  end;
+end;
+
+(*
+### TPixelFont.NormalizeGlyphs
+```pascal
+function TPixelFont.NormalizeGlyphs(const str, normalized: String): String;
+```
+This will replace each character on `str` with the first character that has a
+matching glyph on `normalized`.
+
+You can see this as a way to correct a string that may be read wrong if you
+don't know exactly what it should be.
+
+For example, here is a way you could use to correct numbers:
+```
+{$I WaspLib/main.simba}
+var
+  str: String;
+begin
+  str := '10O0-OOO0-9O092';
+  //2nd param has all the valid characters for numbers
+  WriteLn Fonts.PLAIN_11.NormalizeGlyphs(str, '0123456789');
+  WriteLn Fonts.QUILL.NormalizeGlyphs(str, '0123456789');
+end.
+```
+This should give you this result:
+```
+Succesfully compiled in 815.96 milliseconds.
+[00:00:01:0262]:[Client]: Client was resized, updating coordinates.
+1000-0000-90092
+10O0-OOO0-9O092
+Succesfully executed in 525.14 milliseconds.
+```
+*)
+function TPixelFont.NormalizeGlyphs(const str, normalized: String): String;
+var
+  i, j: Integer;
+begin
+  SetLength(Result, Length(str));
+  for i := 1 to Length(str) do
+  begin
+    for j := 1 to Length(normalized) do
+      if Self.SameGlyph(str[i], normalized[j]) then
+      begin
+        Result[i] := normalized[j];
+        Continue(2);
+      end;
+
+    Result[i] := str[i];
+  end;
+end;
+
+var
+  TEXT_SHADOW: TColor = $000000;
+
+type
+(*
+## TOCR
+Record wrapping TPixelOCR with convenience methods for text recognition.
+*)
+  TOCR = record
+    Engine: TPixelOCR;
+  end;
+
+(*
+### OCR.RecognizeStatic
+```pascal
+function TOCR.RecognizeStatic(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): String;
+```
+Recognizes static text (non-moving) within bounds using specified font and colors.
+*)
+function TOCR.RecognizeStatic(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): String;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(False, colors, tolerance);
+  Result := Self.Engine.Recognize(img, font, [0,0]);
+end;
+
+(*
+### OCR.RecognizeStaticInvert
+```pascal
+function TOCR.RecognizeStaticInvert(bounds: TBox; constref font: TPixelFont; colors: TColorArray): String;
+```
+Recognizes static text with inverted colors (background becomes text).
+*)
+function TOCR.RecognizeStaticInvert(bounds: TBox; constref font: TPixelFont; colors: TColorArray): String;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(True, colors);
+  Result := Self.Engine.Recognize(img, font, [0,0]);
+end;
+
+(*
+### OCR.Recognize
+```pascal
+function TOCR.Recognize(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): String;
+```
+Recognizes text within bounds using specified font and colors.
+*)
+function TOCR.Recognize(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): String;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(False, colors, tolerance);
+  Result := Self.Engine.Recognize(img, font);
+end;
+
+(*
+### OCR.RecognizeLines
+```pascal
+function TOCR.RecognizeLines(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): TStringArray;
+```
+Recognizes multiple lines of text, returning each line as a separate string.
+*)
+function TOCR.RecognizeLines(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): TStringArray;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(False, colors, tolerance);
+  Result := Self.Engine.RecognizeLines(img, font);
+end;
+
+(*
+### OCR.RecognizeShadow
+```pascal
+function TOCR.RecognizeShadow(bounds: TBox; constref font: TPixelFont; tolerance: Single): String;
+```
+Recognizes text by detecting shadow pixels and finding adjacent text colors.
+*)
+function TOCR.RecognizeShadow(bounds: TBox; constref font: TPixelFont; tolerance: Single): String;
+var
+  img: TImage;
+  shadows: TPointArray;
+  colors: TColorArray;
+begin
+  img := Target.GetImage(bounds);
+  shadows := img.FindColor(TEXT_SHADOW, 0, [1, 1, img.Width - 1, img.Height - 1]).Offset([-1,-1]);
+
+  colors := img.GetColors(shadows).Unique();
+  colors.Remove(TEXT_SHADOW);
+  img.ReplaceColorBinary(False, colors, tolerance);
+
+  Result := Self.Engine.Recognize(img, font);
+end;
+
+(*
+### OCR.RecognizeNumber
+```pascal
+function TOCR.RecognizeNumber(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): Integer;
+```
+Recognizes and extracts an integer from text within bounds.
+*)
+function TOCR.RecognizeNumber(bounds: TBox; constref font: TPixelFont; colors: TColorArray; tolerance: Single): Integer;
+begin
+  Result := Self.Recognize(bounds, font, colors, tolerance).ExtractInteger();
+end;
+
+function TOCR.Locate(bounds: TBox; Text: String; colors: TColorArray; tolerance: Single; constref font: TPixelFont): Single;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(False, colors, tolerance);
+  Result := Self.Engine.Locate(img, font, Text);
+end;
+
+function TOCR.LocateInvert(bounds: TBox; Text: String; colors: TColorArray; tolerance: Single; constref font: TPixelFont): Single;
+var
+  img: TImage;
+begin
+  img := Target.GetImage(bounds);
+  img.ReplaceColorBinary(True, colors, tolerance);
+  Result := Self.Engine.Locate(img, font, Text);
+end;
+
+
+var
+(*
+## OCR variable
+Global {ref}`TOCR` variable.
+*)
+  OCR: TOCR;
+
+type
+(*
+## TFonts
+Record containing pre-loaded game fonts and common text colors.
+*)
+  TFonts = record
+    SMALL,
+    PLAIN_11, PLAIN_12,
+    BOLD, BOLD_SHADOW,
+    QUILL_8, QUILL,
+    VERDANA_13, VERDANA_13_BOLD, VERDANA_15: TPixelFont;
+    Unzipping: Boolean;
+    Timeout: TCountDown;
+
+    const WHITE: TColor        = $FFFFFF;
+    const BLACK: TColor        = $000000;
+    const ORANGE: TColor       = $1F98FF;
+    const GREY: TColor         = $9F9F9F;
+    const GREEN: TColor        = $00FF00;
+    const LIGHT_GREEN: TColor  = $0DC10D;
+    const YELLOW: TColor       = $00FFFF;
+    const RED: TColor          = $0000FF;
+    const BLUE: TColor         = $FF0000;
+    const DARK_BLUE: TColor    = $800000;
+    const LIGHT_ORANGE: TColor = $3FB8FF;
+    const LIGHT_YELLOW: TColor = $A2D8E4;
+    const BROWN: TColor        = $002040;
+    const PATH = WLEnv.CacheDir + 'fonts' + PATH_SEP;
+  end;
+
+procedure TFonts.Load();
+begin
+  Self.SMALL := OCR.Engine.LoadFont(Self.PATH + 'Small', 4);
+
+  Self.PLAIN_11 := OCR.Engine.LoadFont(Self.PATH + 'Plain 11', 4);
+  Self.PLAIN_12 := OCR.Engine.LoadFont(Self.PATH + 'Plain 12', 4);
+
+  Self.BOLD        := OCR.Engine.LoadFont(Self.PATH + 'Bold 12', 4);
+  Self.BOLD_SHADOW := OCR.Engine.LoadFont(Self.PATH + 'Bold 12 Shadow', 4);
+
+  Self.QUILL_8 := OCR.Engine.LoadFont(Self.PATH + 'Quill 8', 4);
+  Self.QUILL   := OCR.Engine.LoadFont(Self.PATH + 'Quill', 4);
+
+  Self.VERDANA_13        := OCR.Engine.LoadFont(Self.PATH + 'Verdana 13', 4);
+  Self.VERDANA_13_Bold   := OCR.Engine.LoadFont(Self.PATH + 'Verdana 13 Bold', 4);
+  Self.VERDANA_15        := OCR.Engine.LoadFont(Self.PATH + 'Verdana 15', 4);
+end;
+
+procedure TFonts._UnzipFinished(constref result: TASyncUnzipResult);
+begin
+  if not result.Success then
+  begin
+    DirDelete(Self.PATH, True);
+    raise GetDebugLn('Fonts', 'Failed to unzip fonts: '  + result.Exception);
+  end;
+
+  Self.Load();
+  Self.Unzipping := False;
+end;
+
+procedure TFonts.WaitUnzipping();
+begin
+  while Self.Unzipping do
+  begin
+    Sleep(100);
+    if not Self.Timeout.IsFinished then
+      Continue;
+    DirDelete(Self.PATH, True);
+    raise GetDebugLn('Fonts', 'Timed out unzipping fonts.');
+  end;
+end;
+
+procedure TFonts.Setup();
+begin
+  if DirList(Self.PATH) <> [] then
+  begin
+    Self.Load();
+    Exit;
+  end;
+
+  if not DirCreate(Self.PATH) then
+    raise GetDebugLn('OCR', 'Failed to create path: ' + Self.PATH);
+
+  Self.Unzipping := True;
+  Self.Timeout.Start(MINUTE);
+  Async.FileUnZip(WLEnv.AssetsDir + 'fonts' + PATH_SEP + 'fonts.zip', Self.PATH, @Self._UnzipFinished);
+end;
+
+var
+(*
+## Fonts variable
+Global {ref}`TFonts` variable.
+*)
+  Fonts: TFonts;

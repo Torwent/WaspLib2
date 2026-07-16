@@ -1,0 +1,127 @@
+(*
+# Recorder Form
+This page is about {ref}`Recorder` dedicated `TLazForm` utilities.
+
+This is meant to be used with {ref}`TScriptForm` and you normally don't have to
+use this directly, you can just use {ref}`TScriptForm.CreateMiscTab` and it will
+setup both this with several {ref}`Misc` controls to configure:
+```{figure} ../../images/recorderform.png
+```
+*)
+{$DEFINE WL_RECORDER_FORM_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TRecorderFormHelper
+The `TRecorderFormHelper` type is, as it's name implies a helper type for the
+`Recorder Form`.
+
+It has a lot of methods and callbacks that are hidden by default and won't be
+mentioned on this page because they are internal methods you shouldn't touch.
+
+Do feel free to read the source code though if you so desire.
+*)
+  TRecorderFormHelper = record
+    Config: TConfigJSON;
+  end;
+
+procedure TRecorderFormHelper.OnEnabledChange(sender: TLazObject);
+var
+  checkbox: TLazCheckBox;
+  checked: Boolean;
+begin
+  FormUtils.OnCheckboxToggleParent(sender);
+
+  checkbox := TLazCheckBox(sender);
+  checked := checkbox.Checked;
+
+  SimbaRecorder.Enabled := checked;
+
+  if Self.Config.Data.Has('enabled') then
+    Self.Config.Data.Item['enabled'].AsBool := checked
+  else
+    Self.Config.Data.AddBool('enabled', checked);
+
+  Self.Config.Save();
+end;
+
+procedure TRecorderFormHelper.OnLengthChange(sender: TLazObject);
+begin
+  SimbaRecorder.BufferSeconds := TLazSpinEdit(sender).Value;
+  if Self.Config.Data.Has('length') then
+    Self.Config.Data.Item['length'].AsInt := SimbaRecorder.BufferSeconds
+  else
+    Self.Config.Data.AddInt('length', SimbaRecorder.BufferSeconds);
+  Self.Config.Save();
+end;
+
+procedure TRecorderFormHelper.Setup(parent: TLazWinControl);
+var
+  enabled: TLazCheckBox;
+  info, lbl: TLazLabel;
+  len: TLazSpinEdit;
+begin
+  Self.Config.Setup('recorder' + PATH_SEP + ToStr(ProfileIndex));
+
+  enabled := TLazCheckBox.CreateEx(
+    parent, 'Record crashes', 'Enabled/Disabled the built-in WaspLib recorder.',
+    20, 20
+  );
+  enabled.OnChange := @Self.OnEnabledChange;
+
+  info := TLazLabel.CreateEx(
+    parent, '', '',
+    Round(parent.Width * 0.1), enabled.Bottom + 40,
+    Round(parent.Width * 0.8), 80
+  );
+
+  info.Caption :=
+    'Recorder records the last X seconds of a script running.' + LINE_SEP +
+    LINE_SEP +
+    'This is a great to analyze issues that shut down scripts unexpectedly.' +
+    LINE_SEP +
+    'Keep in mind that this increases RAM usage and the longer you make' +
+    LINE_SEP +
+    'your videos the more RAM is required.';
+  info.Alignment := ELazAlignment.Center;
+  info.Font.Name := 'Courier New';
+  info.OptimalFill := True;
+
+  lbl := TLazLabel.CreateEx(
+    parent, 'Record last', '', parent.Width div 2 - 120, info.Bottom + 80
+  );
+  lbl.Font.Name := 'Courier New';
+  len := TLazSpinEdit.CreateEx(parent);
+  len.AnchorHorizontally(lbl, 4);
+  len.BorderSpacing.Top := -4;
+  len.Increment := 5;
+
+  if Self.Config.Data.Has('length') then
+  begin
+    SimbaRecorder.BufferSeconds := Self.Config.Data.Item['length'].AsInt;
+    len.Value := Self.Config.Data.Item['length'].AsInt;
+  end
+  else
+  begin
+    SimbaRecorder.BufferSeconds := 30;
+    len.Value := 30;
+  end;
+
+  len.MinValue := 10;
+  len.OnChange := @Self.OnLengthChange;
+
+  lbl := TLazLabel.CreateEx(parent, 'seconds');
+  lbl.AnchorHorizontally(len, 4);
+  lbl.BorderSpacing.Top := 4;
+  lbl.Font.Name := 'Courier New';
+
+  Self.OnEnabledChange(enabled);
+end;
+
+var
+(*
+## RecorderForm variable
+Global {ref}`TRecorderFormHelper` variable.
+*)
+  RecorderForm: TRecorderFormHelper;

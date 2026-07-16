@@ -1,0 +1,177 @@
+(*
+# Assets
+Responsible for managing assets that WaspLib requires to run.
+*)
+{$DEFINE WL_ASSETS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+type
+(*
+## TWLAssets
+Record for managing WaspLib asset downloads and updates.
+*)
+  TWLAssets = record
+    Config: TConfigJSON;
+    JSON: TJSONObject;
+    Queue: TStringArray;
+    URL: String;
+    Timeout: TCountDown;
+    Lock: TLock;
+  end;
+
+function TWLAssets.GetJSON(): TJSONObject;
+var
+  assets: String;
+  parser: TJSONParser;
+  response: String;
+begin
+  if not Self.Config.Data.Assert('url', EJSONType.STR) then
+  begin
+    assets := GetEnvVar('assets');
+    if assets = '' then
+    begin
+      DebugLn('WLAssets', 'You don''t have an assets URL setup. If you are not providing your own assets you can''t run scripts.', ELogLevel.WARN);
+      Exit(nil);
+    end;
+
+    Self.URL := assets;
+  end
+  else
+    Self.URL := Self.Config.Data.Item['url'].AsString;
+
+  parser := new TJSONParser();
+
+  try
+    response := HTTPClient.Get(Self.URL + 'hashes.json');
+  except
+    DebugLn('WLAssets', GetExceptionMessage(), ELogLevel.WARN);
+    Exit(nil);
+  end;
+
+  if not InRange(HTTPClient.ResponseStatus.AsInteger, 200, 299) then
+  begin
+    DebugLn('WLAssets', response, ELogLevel.WARN);
+    Exit(nil);
+  end;
+
+  try
+    parser.Parse(response);
+  except
+    DebugLn('WLAssets', GetExceptionMessage(), ELogLevel.WARN);
+    Exit(nil);
+  end;
+
+  Result := parser;
+end;
+
+function TWLAssets.LoadJSON(): TJSONObject;
+var
+  parser: TJSONParser;
+begin
+  DebugLn('WLAssets', 'Couldn''t get assets information. WaspLib will attempt to run with whatever it has available.', ELogLevel.WARN);
+  parser := new TJSONParser();
+
+  try
+    parser.Load(WLEnv.AssetsDir + 'hashes.json');
+  except
+    DebugLn('WLAssets', GetExceptionMessage(), ELogLevel.WARN);
+    Exit;
+  end;
+
+  Result := parser;
+end;
+
+
+procedure TWLAssets.DownloadFinished(constref result: TASyncHTTPResult);
+var
+  idx: Integer;
+begin
+  if not InRange(result.Response.AsInteger, 200, 299) then
+  begin
+    DebugLn('WLAssets', result.Exception, ELogLevel.ERROR);
+    raise GetDebugLn('WLAssets', 'If you keep having issues please delete your Assets and Cache folders.');
+  end;
+
+  Self.Lock.Enter();
+  idx := Self.Queue.IndexOf(result.Data);
+  if idx = -1 then
+    raise GetDebugLn('WLAssets', 'Can''t find ' + result.Data + ' in the download queue.');
+  Delete(Self.Queue, idx, 1);
+  Self.Timeout.Extend(-18 * SECOND);
+  Self.Lock.Leave();
+end;
+
+(*
+## TWLAssets.Update
+```pascal
+procedure TWLAssets.Update();
+```
+Internal method used to update WaspLib Assets.
+*)
+procedure TWLAssets.Update();
+var
+  i: Integer;
+  timer: TCountDown;
+  key, path: String;
+begin
+  Self.Config.Setup('assets.json');
+
+  Self.JSON := Self.GetJSON();
+
+  if Self.JSON = nil then
+  begin
+    Self.JSON := Self.LoadJSON();
+    Exit;
+  end;
+
+  FileDelete(WLEnv.AssetsDir + 'hashes.json');
+  TJSONParser(Self.JSON).Save(WLEnv.AssetsDir + 'hashes.json');
+
+  Self.Lock := TLock.Create();
+
+  try
+    Self.Timeout.Start(1);
+    for i := 0 to Self.JSON.Count-1 do
+    begin
+      key := Self.JSON.Key[i];
+      path := WLEnv.AssetsDir + key;
+      if HashFile(EHashAlgo.CRC32, path) <> Self.JSON.Item[i].AsString then
+      begin
+        key := key.Replace('\', '/');
+        DebugLn('WLAssets', 'Updating ' + key, ELogLevel.WARN);
+        FileDelete(path);
+        DirCreate(PathExtractDir(path));
+        Self.Queue += path;
+        Self.Timeout.Extend(20 * SECOND);
+        Async.HTTPGetFile(Self.URL + key, path, @Self.DownloadFinished);
+      end;
+    end;
+
+    timer.Start(8 * SECOND);
+    while Self.Queue <> [] do
+    begin
+      Sleep(100);
+
+      if timer.IsFinished then
+      begin
+        DebugLn('WLAssets', 'Downloading files. ' + ToStr(Length(Self.Queue)) + ' files left, please wait.');
+        DebugLn('WLAssets', 'Files left: ' + ToStr(Self.Queue).Replace(WLEnv.AssetsDir, ''));
+        timer.Restart();
+      end;
+
+      if Self.Timeout.IsFinished then
+      begin
+        if Self.Queue = [] then
+          Exit;
+        for i := 0 to High(Self.Queue) do
+          FileDelete(Self.Queue[i]);
+        raise GetDebugLn('WLAssets', 'Timed out downloading assets: ' + ToStr(Self.Queue));
+      end;
+    end;
+  finally
+    Self.Lock.Free();
+  end;
+end;
+
+var
+  WLAssets: TWLAssets;

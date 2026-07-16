@@ -1,0 +1,459 @@
+(*
+# Collection Box
+Methods to interact with the collection box interface.
+```{figure} ../../images/collectionbox_interface.png
+```
+*)
+
+{$DEFINE WL_COLLECTIONBOX_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+(ECollectButton)=
+## ECollectButton enum
+```pascal
+ECollectButton = enum(INVENTORY, BANK);
+```
+Enum representing the {ref}`Collection Box` buttons.
+*)
+  ECollectButton = enum(INVENTORY, BANK);
+
+(*
+(ECollectSlots)=
+## ECollectSlots enum
+```pascal
+ECollectSlots = enum(STATUS, OPERATION, THUMBNAIL, ITEM, CHANGE);
+```
+Enum representing the {ref}`Collection Box` slot slots.
+The {ref}`Collection Box`, like the {ref}`Grand Exchange` has 8 slots available,
+Each of those slots, has it's own 5 small slots which is what this represents:
+```{figure} ../../images/collectionbox_subslots.png
+```
+*)
+  ECollectSlots = enum(STATUS, OPERATION, THUMBNAIL, ITEM, CHANGE);
+
+(*
+(TCollectionBox)=
+## TCollectionBox type
+Main record to interact with the {ref}`Collection Box` interface.
+*)
+  TCollectionBox = record
+    Title: TInterfaceTitle;
+    Slots: TSlotInterface;
+    Items: TItemInterface;
+    Bounds: TBox;
+    ItemSlotBoxes: TBoxArray;
+    Buttons: array [ECollectButton] of TButton;
+    SlotBoxes: array of record
+      Bounds: TBox;
+      Slots: TBoxArray;
+    end;
+    Depleted: Boolean;
+  end;
+
+(*
+## CollectionBox.SetupInterface
+```pascal
+procedure TCollectionBox.SetupInterface();
+```
+Internal method used to setup the {ref}`TCollectionBox` coordinates.
+This is automatically called for you on the {ref}`CollectionBox variable`.
+*)
+procedure TCollectionBox.SetupInterface();
+var
+  boxes: TBoxArray;
+  i: Integer;
+  b: TBox;
+begin
+  case Client.Mode of
+    EMode.FIXED: Self.Bounds := MSInterface.CreateBounds([0, 1, 0, -1], 460, 247);
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Bounds := MSInterface.CreateBounds([0, 1, 0, -3], 460, 247);
+  end;
+
+  Self.Title.Setup(Self.Bounds);
+
+  with Self.Bounds do
+  begin
+    boxes := TBoxArray.Create([X1 + 15, Y1 + 44], 4, 2, 100, 74, [10, 10]);
+
+    Self.Buttons[ECollectButton.INVENTORY] :=
+      new TButton(
+        [X1+140, Y2-33, X1+223, Y2-15],
+        [
+          [$0F1043, 0, EColorSpace.RGB, [1,1,1]],
+          [$23269F, 0.227, EColorSpace.RGB, [1,1,1]]
+        ]
+      );
+    Self.Buttons[ECollectButton.BANK] :=
+      new TButton(
+        [X1+236, Y2-33, X1+318, Y2-15],
+        [
+          [$0F1043, 0, EColorSpace.RGB, [1,1,1]],
+          [$23269F, 0.227, EColorSpace.RGB, [1,1,1]]
+        ]
+      );
+  end;
+
+  SetLength(Self.SlotBoxes, 8);
+
+  for i := 0 to High(boxes) do
+  begin
+    b := boxes[i];
+    Self.SlotBoxes[i].Bounds := b;
+    Self.SlotBoxes[i].Slots := [
+      TBox.Create(b.X1 + 8,  b.Y1 + 8,  b.X1 + 47, b.Y1 + 25),
+      TBox.Create(b.X1 + 50, b.Y1 + 8,  b.X1 + 69, b.Y1 + 25),
+      TBox.Create(b.X1 + 72, b.Y1 + 8,  b.X1 + 91, b.Y1 + 25),
+      TBox.Create(b.X1 + 9,  b.Y1 + 31, b.X1 + 47, b.Y1 + 65),
+      TBox.Create(b.X1 + 53, b.Y1 + 31, b.X1 + 91, b.Y1 + 65)
+    ];
+
+    Self.ItemSlotBoxes += Self.SlotBoxes[i].Slots[ECollectSlots.ITEM];
+  end;
+
+  Self.Slots.Setup('CollectionBox.Slots', Self.ItemSlotBoxes);
+  Self.Items.Setup('CollectionBox.Items', @Self.Slots, [0, 10]);
+end;
+
+
+procedure TCollectionBox.AsyncTask();
+begin
+  Self.Depleted := False;
+end;
+
+procedure TCollectionBox.Free();
+begin
+  Async.ScheduleStop('CollectionBox.Timer');
+end;
+
+procedure TCollectionBox.Setup();
+begin
+  if Async.Schedules().Contains('CollectionBox.Timer') then Exit;
+  Async.ScheduleEvery('CollectionBox.Timer', @Self.AsyncTask, 10*MINUTE);
+  AddOnTerminate(@Self.Free);
+end;
+
+
+(*
+## CollectionBox.IsOpen
+```pascal
+function TCollectionBox.IsOpen(): Boolean;
+```
+Returns true if the collection box is open.
+
+Example:
+```pascal
+WriteLn CollectionBox.IsOpen();
+```
+*)
+function TCollectionBox.IsOpen(): Boolean;
+begin
+  if BankPin.IsOpen() then
+  begin
+    if not BankPin.WaitLoading(3000) then
+      raise GetDebugLn(
+        'BankPin', 'Bank pin buttons don''t seem to have loaded in 3 seconds.'
+      );
+
+    if not BankPin.Enter(Profiles.GetPin()) then
+      raise GetDebugLn('BankPin', 'Failed to enter bank pin.');
+  end;
+
+  Result := Self.Title.IsTitle('Collection Box');
+end;
+
+(*
+## CollectionBox.WaitOpen
+```pascal
+function TCollectionBox.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+```
+Returns true if the collection box opens within `time` milliseconds..
+
+Example:
+```pascal
+WriteLn CollectionBox.WaitOpen();
+```
+*)
+function TCollectionBox.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+
+(*
+## CollectionBox.HasChange
+```pascal
+function TCollectionBox.HasChange(slot: Integer): Boolean;
+```
+Returns true if the specified collection box `slot` has change.
+
+Example:
+```pascal
+WriteLn CollectionBox.HasChange(0);
+```
+*)
+function TCollectionBox.HasChange(slot: Integer): Boolean;
+begin
+  if not Self.IsOpen() then Exit;
+  Result := TItem.InBounds(Self.SlotBoxes[slot].Slots[ECollectSlots.CHANGE]);
+end;
+
+
+(*
+## CollectionBox.CollectSlot
+```pascal
+function TCollectionBox.CollectSlot(
+  slot: Integer; button: ECollectButton = ECollectButton.INVENTORY
+): Boolean;
+```
+Attempts to collect the item and change of  the specified collection box `slot`.
+By default it attempts to collect things to your inventory, you can change it to the bank with the `button` parameter.
+
+Example:
+```pascal
+WriteLn CollectionBox.CollectSlot(0);
+```
+*)
+function TCollectionBox.CollectSlot(
+  slot: Integer; button: ECollectButton = ECollectButton.INVENTORY
+): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit;
+
+  case button of
+    ECollectButton.INVENTORY:
+    begin
+      Self.Slots.Click(slot);
+
+      if Self.HasChange(slot) then
+        Mouse.Click(
+          Self.SlotBoxes[slot].Slots[ECollectSlots.CHANGE], EMouseButton.LEFT
+        );
+    end;
+    ECollectButton.BANK:
+    begin
+      Self.Slots.Interact(slot, 'Bank');
+
+      if Self.HasChange(slot) then
+      begin
+        Mouse.Move(Self.SlotBoxes[slot].Slots[ECollectSlots.CHANGE]);
+        ChooseOption.Select('Bank', True, True);
+      end;
+    end;
+  end;
+
+  Result := SleepUntil(
+    Self.Slots.IsEmpty(slot) and not Self.HasChange(slot),
+    RandomMode(100, 50, 1500),
+    2*TICK
+  );
+end;
+
+
+(*
+## CollectionBox.CollectToInventory
+```pascal
+function TCollectionBox.CollectToInventory(): Boolean;
+```
+Attempts to collect the items to the user {ref}`Inventory`.
+
+Example:
+```pascal
+WriteLn CollectionBox.CollectToInventory();
+```
+*)
+function TCollectionBox.CollectToInventory(): Boolean;
+begin
+  if Self.Slots.Count() = 0 then Exit(True);
+  Self.Buttons[ECollectButton.INVENTORY].Click();
+  Result := SleepUntil(Self.Slots.Count() = 0, RandomMode(100, 50, 1500), 2*TICK);
+end;
+
+(*
+## CollectionBox.CollectToBank
+```pascal
+function TCollectionBox.CollectToBank(): Boolean;
+```
+Attempts to collect the items to the user {ref}`Bank`.
+
+Example:
+```pascal
+WriteLn CollectionBox.CollectToBank();
+```
+*)
+function TCollectionBox.CollectToBank(): Boolean;
+begin
+  if Self.Slots.Count() = 0 then Exit(True);
+  Self.Buttons[ECollectButton.BANK].Click();
+  Result := SleepUntil(Self.Slots.Count() = 0, RandomMode(100, 50, 1500), 2*TICK);
+end;
+
+(*
+## CollectionBox.Collect
+```pascal
+function TCollectionBox.Collect(
+  items: TItemArray; buttonProbability: Single = -1
+): Boolean;
+```
+Attempts to collect the specified `items` to the user {ref}`Bank`.
+
+For antiban purposes there's a small chance we just collect all items to the bank.
+
+Example:
+```pascal
+WriteLn CollectionBox.Collect(['Molten glass']);
+```
+*)
+function TCollectionBox.Collect(
+  items: TItemArray; buttonProbability: Single = -1
+): Boolean;
+var
+  slots: TIntegerArray;
+  slot: Integer;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  if not Self.Items.FindAll(items, slots) and (slots = []) then
+  begin
+    Self.Depleted := True;
+    Exit;
+  end;
+
+  if buttonProbability < 0 then
+    buttonProbability := Biometrics.RandomDouble(0.5);
+
+  if RandomBoolean(buttonProbability) then
+    Exit(Self.CollectToBank());
+
+  for slot in slots do
+  begin
+    Self.Slots.Interact(slot, 'Bank');
+
+    if Self.HasChange(slot) then
+    begin
+      Mouse.Move(Self.SlotBoxes[slot].Slots[ECollectSlots.CHANGE]);
+      ChooseOption.Select('Bank', True, True);
+    end;
+  end;
+
+  Result := SleepUntil(
+    not Self.Items.FindAll(items, slots) and (slots = []),
+    RandomMode(100, 50, 1500), 2*TICK
+  );
+end;
+
+
+(*
+## CollectionBox.Hover
+```pascal
+function TCollectionBox.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Hover(
+  const npc: TEntity; walk: Boolean = True
+): Boolean; overload;
+function TCollectionBox.Hover(walk: Boolean = True): Boolean; overload;
+```
+Same as {ref}`Bank.Hover`.
+*)
+function TCollectionBox.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+begin
+  Result := Bank.Hover(obj, walk);
+end;
+
+function TCollectionBox.Hover(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+begin
+  Result := Bank.Hover(npc, walk);
+end;
+
+function TCollectionBox.Hover(walk: Boolean = True): Boolean; overload;
+begin
+  Result := Bank.Hover(walk);
+end;
+
+(*
+## CollectionBox.Open
+```pascal
+function TCollectionBox.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Open(
+  const npc: TEntity; walk: Boolean = True
+): Boolean; overload;
+function TCollectionBox.Open(walk: Boolean = True): Boolean; overload;
+```
+Almost identical to {ref}`Bank.Open`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  Map.Setup([EChunk.VARROCK]);
+  Bank.Open();
+end.
+```
+*)
+function TCollectionBox.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+begin
+  if walk then
+    Result := obj.WalkInteract(['Collect'])
+  else
+    Result := obj.Interact(['Collect']);
+
+  if not Result then
+    if not MainScreen.IsUpText('Bank') or not ChooseOption.Select(['Collect']) then
+      Exit;
+
+  obj.Walker^.WaitMoving();
+  Result := Self.WaitOpen(3000);
+end;
+
+function TCollectionBox.Open(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+begin
+  if walk then
+    Result := npc.WalkInteract(['Collect'])
+  else
+    Result := npc.Interact(['Collect']);
+
+  if not Result and not MainScreen.Interact(['Collect']) then
+    Exit;
+
+  npc.Walker^.WaitMoving();
+  Result := Self.WaitOpen(3000);
+end;
+
+function TCollectionBox.Open(walk: Boolean = True): Boolean; overload;
+var
+  obj: PRSObject;
+  npc: PRSEntity;
+  me: TPoint;
+begin
+  if MSInterface.IsOpen() then
+  begin
+    if Self.IsOpen() then
+      Exit(True);
+    MSInterface.Close(True);
+  end;
+
+  if (Bank.Banks = []) or (Bank.Bankers = []) then
+    Bank._SetupMapObjects();
+
+  me := Map.Position();
+  obj := @Bank.Banks[Bank.Banks.ClosestIndex(me)];
+  npc := @Bank.Bankers[Bank.Bankers.ClosestIndex(me)];
+
+  if obj^.DistanceTo(me) < npc^.DistanceTo(me) then
+    Exit(Self.Open(obj^, walk));
+  Result := Self.Open(npc^, walk);
+end;
+
+var
+(*
+## CollectionBox variable
+Global {ref}`TCollectionBox` variable.
+*)
+  CollectionBox: TCollectionBox;

@@ -1,0 +1,673 @@
+(*
+# Login
+The login screen is the first screen you see when you open a client and it
+finishes loading:
+```{figure} ../../images/loginscreen.png
+```
+
+WaspLib's {ref}`TLogin` can handle both resizable and fixed mode login screens.
+*)
+
+{$DEFINE WL_LOGIN_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+const
+(*
+(LOGIN_MESSAGES)=
+## Login Messages
+```pascal
+const
+  LOGIN_MESSAGES = [
+    'Welcome to ',
+    'Connecting to server',
+    ...,
+    'Authenticator'
+  ];
+```
+Constant of all the login messages the login screen can handle.
+*)
+  LOGIN_MESSAGES = [
+    'Welcome to ',
+    'Connecting to server',
+    'Invalid credentials',
+    'Incorrect username or password',
+    'You need a skill total of',
+    'your username/email',
+    'Error connecting to server',
+    'Your account has not logged out',
+    'Login server offline',
+    'The game servers are currently being updated',
+    ' has been updated!',
+    'Error loading your profile',
+    'Connection timed out',
+    'You were disconnected',
+    'Login limit exceeded',
+    'This world is full',
+    'Your account has been',
+    'You need a members'' account',
+    'You are standing in a members-only area',
+    'move your character to a non-members area',
+    'Authenticator'
+  ];
+
+type
+(*
+## Login Enums
+```pascal
+ELoginMode    = enum(UNKNOWN, LEGACY, LAUNCHER);
+ELoginButton  = enum(LAUNCHER, EXISTING_USER, LOGIN, RETRY, OKAY, CONTINUE);
+ELoginInput   = enum(USERNAME, PASSWORD);
+ELoginMessage = enum(UNKNOWN, WELCOME, ..., AUTHENTICATOR);
+```
+Enums representing various aspects of the login screen.
+
+`ELoginMessage` is a enum representation of {ref}`LOGIN_MESSAGES`.
+*)
+  ELoginMode    = enum(UNKNOWN, LEGACY, LAUNCHER);
+  ELoginButton  = enum(LAUNCHER, EXISTING_USER, LOGIN, RETRY, OKAY, CONTINUE);
+  ELoginInput   = enum(USERNAME, PASSWORD);
+  ELoginMessage = enum(
+    UNKNOWN,
+    WELCOME, CONNECTING, INVALID, INCORRECT, SKILL_TOTAL, ENTER_CREDENTIALS,
+    ERROR_CONNECTING, ACCOUNT_ONLINE, SERVER_OFFLINE, BEING_UPDATED,
+    GAME_UPDATED, ERROR_LOADING, TIMED_OUT, DISCONNECTED,
+
+    LIMIT_EXCEEDED, WORLD_FULL, BANNED, NOT_MEMBER, ON_MEMBER_AREA,
+    ON_MEMBER_AREA2,
+
+    AUTHENTICATOR
+  );
+
+(*
+## TLogin
+Main record responsible for handling the {ref}`Login` screen.
+
+```{figure} ../../images/Tlogin.png
+The login screen.
+```
+*)
+  TLogin = record
+    Bounds: TBox;
+
+    Inputs: array [ELoginInput] of TBox;
+    Buttons: array [ELoginButton] of record
+      Text: String;
+      Bounds: TBox;
+      Bold: Boolean;
+    end;
+
+    Mode: ELoginMode;
+    Attempts: Integer;
+    ClearInputs: Boolean;
+  end;
+
+(*
+## Login.Setup
+```pascal
+procedure TLogin.Setup();
+```
+Internal method responsible for setting up the {ref}`TLogin` coordinates.
+This is automatically called for you on the {ref}`Login variable`.
+*)
+procedure TLogin.Setup();
+begin
+  Self.Bounds.X1 := Target.Width div 2 - 176;
+  Self.Bounds.Y1 := Target.Bounds.Y1 + 172;
+  Self.Bounds.X2 := Target.Width div 2 + 176;
+  Self.Bounds.Y2 := Self.Bounds.Y1 + 194;
+
+  with Self.Inputs[ELoginInput.USERNAME] do
+  begin
+    X1 := Self.Bounds.X1 + 106;
+    Y1 := Self.Bounds.Y1 + 69;
+    X2 := X1 + 200;
+    Y2 := Y1 + 16;
+  end;
+
+  with Self.Inputs[ELoginInput.PASSWORD] do
+  begin
+    X1 := Self.Bounds.X1 + 138;
+    Y1 := Self.Bounds.Y1 + 86;
+    X2 := X1 + 204;
+    Y2 := Y1 + 13;
+  end;
+
+  with Self.Buttons[ELoginButton.LAUNCHER] do
+  begin
+    Bounds.X1 := Self.Bounds.X1 + 72;
+    Bounds.Y1 := Self.Bounds.Y1 + 62;
+    Bounds.X2 := Bounds.X1 + 207;
+    Bounds.Y2 := Bounds.Y1 + 57;
+    Text := '';
+  end;
+
+  with Self.Buttons[ELoginButton.EXISTING_USER] do
+  begin
+    Bold := True;
+    Bounds.X1 := Self.Bounds.X1 + 188;
+    Bounds.Y1 := Self.Bounds.Y1 + 103;
+    Bounds.X2 := Bounds.X1 + 134;
+    Bounds.Y2 := Bounds.Y1 + 32;
+    Text := 'Existing User';
+  end;
+
+  with Self.Buttons[ELoginButton.LOGIN] do
+  begin
+    Bold := True;
+    Bounds.X1 := Self.Bounds.X1 + 28;
+    Bounds.Y1 := Self.Bounds.Y1 + 133;
+    Bounds.X2 := Bounds.X1 + 134;
+    Bounds.Y2 := Bounds.Y1 + 32;
+    Text := 'Login';
+  end;
+
+  with Self.Buttons[ELoginButton.RETRY] do
+  begin
+    Bounds.X1 := Self.Bounds.X1 + 108;
+    Bounds.Y1 := Self.Bounds.Y1 + 88;
+    Bounds.X2 := Self.Bounds.X2 - 110;
+    Bounds.Y2 := Bounds.Y1 + 32;
+    Text := 'Try again';
+  end;
+
+  with Self.Buttons[ELoginButton.OKAY] do
+  begin
+    Bounds.X1 := Self.Bounds.X1 + 109;
+    Bounds.Y1 := Self.Bounds.Y1 + 113;
+    Bounds.X2 := Bounds.X1 + 134;
+    Bounds.Y2 := Bounds.Y1 + 32;
+    Text := 'Ok';
+    Bold := True;
+  end;
+end;
+
+
+(*
+## Login.FindButton
+```pascal
+function TLogin.FindButton(button: ELoginButton): Boolean;
+```
+Attempts to find the specified `ELoginButton`, returns `True` if we find it.
+*)
+function TLogin.FindButton(button: ELoginButton): Boolean;
+begin
+  if button = ELoginButton.LAUNCHER then
+  begin
+    if not InRange(Target.CountColor($FFFFFF, 0, Self.Buttons[ELoginButton.LAUNCHER].Bounds), 500, 550) then
+      Exit;
+
+    Exit(True);
+  end;
+
+  if Self.Buttons[button].Bold then
+    Exit(Self.Buttons[button].Text = OCR.Recognize(Self.Buttons[button].Bounds, Fonts.BOLD_SHADOW, [$FFFFFF], 0));
+
+  Result := Self.Buttons[button].Text = OCR.Recognize(Self.Buttons[button].Bounds, Fonts.PLAIN_12, [$FFFFFF], 0);
+end;
+
+(*
+## Login.ClickButton
+```pascal
+function TLogin.ClickButton(button: ELoginButton): Boolean;
+```
+Attempts to click the specified `ELoginButton`, returns `True` if we succeed.
+
+Example:
+```pascal
+WriteLn Login.ClickButton(ELoginButton.LOGIN);
+```
+*)
+function TLogin.ClickButton(button: ELoginButton): Boolean;
+begin
+  if not Self.FindButton(button) then Exit;
+  Result := True;
+  Mouse.Click(Self.Buttons[button].Bounds, EMouseButton.LEFT);
+end;
+
+
+(*
+## Login.SelectInput
+```pascal
+function TLogin.SelectInput(field: ELoginInput): Boolean;
+```
+Attempts to select the specified `ELoginInput`, returns `True` if we succeed.
+This waits a few milliseconds for the flashing yellow cursor for confirmation.
+
+Example:
+```pascal
+WriteLn Login.SelectInput(ELoginInput.USERNAME);
+```
+*)
+function TLogin.SelectInput(field: ELoginInput): Boolean;
+begin
+  if SleepUntil(Target.HasColor($00FFFF, 0, 8, Self.Inputs[field]), 30, 100) then
+    Exit(True);
+
+  if RandomBoolean(0.5) then
+    Keyboard.KeyPress(EKeyCode.TAB)
+  else
+    with Self.Inputs[field] do
+      Mouse.Click([X1, Y1, X2, Y2-3], EMouseButton.LEFT);
+
+  Result := SleepUntil(Target.HasColor($00FFFF, 0, 8, Self.Inputs[field]), 30, 600);
+end;
+
+(*
+## Login.InputIsFilled
+```pascal
+function TLogin.InputIsFilled(field: ELoginInput): Boolean;
+```
+Returns True/False if the specified `field` is filled.
+
+Example:
+```pascal
+WriteLn Login.InputIsFilled(ELoginInput.USERNAME);
+```
+*)
+function TLogin.InputIsFilled(field: ELoginInput): Boolean;
+begin
+  Result := Target.HasColor($FFFFFF, 0, 1, Self.Inputs[field]);
+end;
+
+(*
+## Login.ClearInput
+```pascal
+function TLogin.ClearInput(field: ELoginInput): Boolean;
+```
+Attempts to clear the  specified `field`.
+
+Example:
+```pascal
+WriteLn Login.ClearInput(ELoginInput.USERNAME);
+```
+*)
+function TLogin.ClearInput(field: ELoginInput): Boolean;
+var
+  timeout: TCountDown;
+begin
+  if not Self.InputIsFilled(field) then Exit(True);
+  if not Self.SelectInput(field) then Exit;
+
+  timeout.Start(6*SECOND);
+
+  repeat
+    Keyboard.KeyPress(EKeyCode.BACK);
+    if not Self.InputIsFilled(field) then
+      Exit(True);
+    Sleep(Random(Keyboard.IntervalMin, Keyboard.IntervalMax));
+  until timeout.IsFinished;
+end;
+
+(*
+## Login.FillInput
+```pascal
+function TLogin.FillInput(field: ELoginInput; details: String): Boolean;
+```
+Attempts to fill the  specified `field` with `details`.
+
+Example:
+```pascal
+WriteLn Login.FillInput(ELoginInput.USERNAME, 'myprofile@email.com');
+```
+*)
+function TLogin.FillInput(field: ELoginInput; details: String): Boolean;
+begin
+  if Self.InputIsFilled(field) then Exit(True);
+  if not Self.SelectInput(field) then Exit;
+
+  Result := True;
+  if details = '' then
+    raise GetDebugLn('Login', 'Can''t fill ' + ToStr(field) + ' because the details are empty.');
+  Keyboard.Send(details, EKeyCode.RETURN);
+end;
+
+
+(*
+## Login.GetMessage
+```pascal
+function TLogin.GetMessage(): ELoginMessage;
+```
+Returns the currently visible login message as a `ELoginMessage`.
+Check {ref}`Login Enums` for more information on `ELoginMessage`.
+
+Example:
+```pascal
+WriteLn Login.GetMessage();
+```
+*)
+function TLogin.GetMessage(): ELoginMessage;
+var
+  dialog: String;
+  msg: ELoginMessage;
+begin
+  dialog := OCR.RecognizeLines(Self.Bounds, Fonts.BOLD_SHADOW, [$00FFFF], 0).Join(' ');
+
+  if dialog = '' then
+    dialog := OCR.RecognizeLines(Self.Bounds, Fonts.PLAIN_12, [$00FFFF], 0).Join(' ');
+
+  if dialog = '' then
+    dialog := OCR.RecognizeLines(Self.Bounds, Fonts.BOLD_SHADOW, [$FFFFFF], 0).Join(' ');
+
+  if dialog = '' then
+    Exit;
+
+  for msg := ELoginMessage.WELCOME to High(ELoginMessage)-1 do
+    if dialog.Contains(LOGIN_MESSAGES[msg-1]) then
+      Exit(msg);
+end;
+
+
+(*
+## Login.GetMode
+```pascal
+function TLogin.GetMode(): ELoginMode;
+```
+Returns the current login mode as a `ELoginMode`.
+The login mode can only be known from the "Welcome to " screen.
+
+Check {ref}`Login Enums` for more information on `ELoginMode`.
+
+Example:
+```pascal
+WriteLn Login.GetMode();
+```
+*)
+function TLogin.GetMode(): ELoginMode;
+begin
+  if Self.GetMessage() = ELoginMessage.WELCOME then
+  begin
+    if Self.FindButton(ELoginButton.EXISTING_USER) then
+    begin
+      DebugLn('Login', 'Legacy client mode detected.');
+      Exit(ELoginMode.LEGACY);
+    end;
+
+    if Self.FindButton(ELoginButton.LAUNCHER) then
+    begin
+      DebugLn('Login', 'Launcher client mode detected.');
+      Exit(ELoginMode.LAUNCHER);
+    end;
+  end;
+
+  DebugLn('Login', 'Failed to detect login mode.', ELogLevel.WARN);
+end;
+
+
+(*
+## Login.HandleWelcome
+```pascal
+function TLogin.HandleWelcome(): Boolean;
+```
+Attempts to handle the "Welcome to " screen regardless of the
+`ELoginMode` the client is on.
+
+Check {ref}`Login Enums` for more information on `ELoginMode`.
+
+Example:
+```pascal
+WriteLn Login.HandleWelcome();
+```
+*)
+function TLogin.HandleWelcome(): Boolean;
+begin
+  if Self.Mode = ELoginMode.UNKNOWN then
+    Self.Mode := Self.GetMode();
+
+  case Self.Mode of
+    ELoginMode.LEGACY:   if not Self.ClickButton(ELoginButton.EXISTING_USER) then Exit;
+    ELoginMode.LAUNCHER: if not Self.ClickButton(ELoginButton.LAUNCHER) then Exit;
+  end;
+
+  Result := SleepUntil(Self.GetMessage() <> ELoginMessage.WELCOME, RandomMode(100, 50, 1500), 600);
+end;
+
+(*
+## Login.Back2Welcome
+```pascal
+function TLogin.Back2Welcome(): Boolean;
+```
+Attempts to return to the "Welcome to " screen.
+This is used to handle any screen that has an "Ok" button.
+Returns True if we succeed.
+
+Example:
+```pascal
+WriteLn Login.Back2Welcome();
+```
+*)
+function TLogin.Back2Welcome(): Boolean;
+begin
+  if not Self.ClickButton(ELoginButton.OKAY) then Exit;
+  Result := SleepUntil(Self.GetMessage() = ELoginMessage.WELCOME, RandomMode(100, 50, 1500), 600);
+end;
+
+
+(*
+## Login.EnterCredentials
+```pascal
+function TLogin.EnterCredentials(username, password: String): Boolean;
+```
+Attempts to enter a user credentials.
+
+Example:
+```pascal
+WriteLn Login.EnterCredentials('username', 'password');
+```
+*)
+function TLogin.EnterCredentials(username, password: String): Boolean;
+begin
+  if Self.ClearInputs then
+  begin
+    if not Self.ClearInput(ELoginInput.USERNAME) then Exit;
+    if not Self.ClearInput(ELoginInput.PASSWORD) then Exit;
+  end;
+
+  if not Self.FillInput(ELoginInput.USERNAME, username) then Exit;
+  if not Self.FillInput(ELoginInput.PASSWORD, password) then Exit;
+  Result := SleepUntil(Self.GetMessage() <> ELoginMessage.ENTER_CREDENTIALS, RandomMode(100, 50, 1500), 600);
+end;
+
+
+(*
+## Login.Retry
+```pascal
+function TLogin.Retry(msg: ELoginMessage): Boolean;
+```
+Attempts to handle any screen that has a "Retry" button.
+Returns True if we succeed.
+
+The current `ELoginMessage` message has to be passed as `msg` so we know
+when we successfully handled the button.
+*)
+function TLogin.Retry(msg: ELoginMessage): Boolean;
+begin
+  if not Self.ClickButton(ELoginButton.RETRY) then Exit;
+  Self.ClearInputs := True;
+  Result := SleepUntil(Self.GetMessage() <> msg, RandomMode(100, 50, 1500), 600);
+end;
+
+(*
+## Login.HandleError
+```pascal
+function TLogin.HandleError(msg: ELoginMessage): Boolean;
+```
+Attempts to handle any screen that has an error message.
+Returns True if we succeed.
+
+The current `ELoginMessage` message has to be passed as `msg` so we know
+when we successfully handled the current error.
+
+Everytime this function is called, the internal `Login.Attempts` variable is
+increased.
+After 10 times of this being called without `Login.Attempts` being reset, this
+will raise an exception **IF** the reason we can't login is not the world being
+full. **IF** the reason is the world being full, this can be called forever.
+*)
+function TLogin.HandleError(msg: ELoginMessage): Boolean;
+var
+  time: Integer;
+begin
+  time := Random(10000, 20000) * Inc(Self.Attempts);
+
+  if (msg = ELoginMessage.WORLD_FULL) or (Self.Attempts < 4) then
+  begin
+    DebugLn('Login', 'Failed to login ' + ToStr(Self.Attempts) + ' times.', ELogLevel.WARN);
+    DebugLn('Login', 'Waiting ' + ToStr(time) + ' seconds before trying again.', ELogLevel.WARN);
+    Sleep(time);
+    Exit(True);
+  end;
+
+  if Self.Attempts = 4 then
+  begin
+    DebugLn('Login', 'Failed to login ' + ToStr(Self.Attempts) + ' times.', ELogLevel.ERROR);
+    DebugLn('Login', 'Script will shutdown if we fail one more time.', ELogLevel.ERROR);
+    DebugLn('Login', 'Waiting ' + ToStr(time) + ' seconds before trying again.', ELogLevel.ERROR);
+    Sleep(time);
+    Exit(True);
+  end;
+
+  raise GetDebugLn('Login', 'Failed to login 10 times. Last login state: ' + ToStr(msg));
+end;
+
+(*
+## Login.HandleMessage
+```pascal
+function TLogin.HandleMessage(msg: ELoginMessage; username, password: String): Boolean;
+```
+Attempts to handle whatever screen the login screen is currently at.
+Returns True if we succeed.
+
+The current `ELoginMessage` message has to be passed as `msg` so we know
+when we successfully handled the current error.
+
+The profile `username` and `password` we want to use also have to be passed in.
+This can be empty value if we are using the Jagex Launcher, e.g.: `'', ''`.
+
+On certain `ELoginMessages` that cannot be handled this will raise an
+exception to shutdown your script. For example, if the profile you are trying to
+use has been banned.
+*)
+function TLogin.HandleMessage(msg: ELoginMessage; username, password: String): Boolean;
+begin
+  case msg of
+    ELoginMessage.WELCOME:           Result := Self.HandleWelcome();
+    ELoginMessage.CONNECTING:        Result := SleepUntil(msg <> Self.GetMessage(), RandomMode(100, 50, 1500), 50000); //50 secs
+    ELoginMessage.DISCONNECTED:      Result := Self.Back2Welcome();
+    ELoginMessage.ENTER_CREDENTIALS: Result := Self.EnterCredentials(username, password);
+
+    ELoginMessage.INVALID,
+    ELoginMessage.INCORRECT:         Result := Self.Retry(msg);
+
+    ELoginMessage.ERROR_CONNECTING,
+    ELoginMessage.LIMIT_EXCEEDED,
+    ELoginMessage.ACCOUNT_ONLINE,
+    ELoginMessage.WORLD_FULL,
+    ELoginMessage.TIMED_OUT:         Result := Self.HandleError(msg);
+
+    ELoginMessage.SKILL_TOTAL:       raise GetDebugLn('Login', 'We are trying to login into a total level world you can''t login to.');
+    ELoginMessage.SERVER_OFFLINE:    raise GetDebugLn('Login', 'Login server offline. The game is/was probably updated.');
+    ELoginMessage.BEING_UPDATED:     raise GetDebugLn('Login', 'The game is being updated.');
+    ELoginMessage.GAME_UPDATED:      raise GetDebugLn('Login', 'The game was updated.');
+    ELoginMessage.ERROR_LOADING:     raise GetDebugLn('Login', 'Game loading error. It was probably updated.');
+    ELoginMessage.BANNED:            raise GetDebugLn('Login', 'profile seems to be banned or disabled.');
+    ELoginMessage.NOT_MEMBER:        raise GetDebugLn('Login', 'profile is not members and we are trying to login into a P2P world.');
+    ELoginMessage.ON_MEMBER_AREA,
+    ELoginMessage.ON_MEMBER_AREA2:   raise GetDebugLn('Login', 'profile is on a P2P area and we are trying to login into a F2P world.');
+
+    ELoginMessage.AUTHENTICATOR:     raise GetDebugLn('Login', 'profile needs authenticator to login.');
+
+    ELoginMessage.UNKNOWN:           if Client.IsLoggedIn() or Lobby.IsOpen() then Exit(True) else raise GetDebugLn('Login', 'Unknown login state.');
+  end;
+end;
+
+(*
+## Login.SwitchWorld
+```pascal
+procedure TLogin.SwitchWorld(worlds: TIntegerArray);
+```
+Ensures we are on a world declared in the profile, retrying transient failures
+before giving up.
+*)
+procedure TLogin.SwitchWorld(worlds: TIntegerArray);
+var
+  attempt: Integer;
+begin
+  for attempt := 0 to 4 do
+  begin
+    if LoginWorldSwitcher.Switch(worlds.Random()) then
+      Exit;
+
+    if attempt < 4 then
+      Sleep(Random(10000, 20000) * (1 + attempt));
+  end;
+
+  raise GetDebugLn('Login', 'Failed to switch to a valid world from the profile list after 5 attempts.');
+end;
+
+(*
+## Login.DoLogin
+```pascal
+function TLogin.DoLogin(profile: TProfile): Boolean;
+```
+Attempts to login into `profile`.
+If we login, the {ref}`Lobby` screen is handled for you.
+Returns true if we succeed.
+
+Example:
+```pascal
+WriteLn Login.DoLogin(profile);
+```
+*)
+function TLogin.DoLogin(profile: TProfile = Default(TProfile)): Boolean;
+var
+  timeout: UInt64;
+  switched: Boolean;
+begin
+  if profile = Default(TProfile) then
+    profile := Profiles.Get();
+
+  timeout := Time() + 40000;
+
+  while not Client.IsLoggedIn() and not Lobby.IsOpen() do
+  begin
+    if Time() > timeout then
+    begin
+      DebugLn('Login', 'Timed out trying to login.', ELogLevel.ERROR);
+      Exit;
+    end;
+
+    if not switched and (profile.Worlds <> []) and
+       not profile.Worlds.Contains(LoginWorldSwitcher.GetCurrent()) then
+    begin
+      Self.SwitchWorld(profile.Worlds);
+      switched := True;
+    end;
+
+    if not Self.HandleMessage(Self.GetMessage(), profile.Username, profile.Password) then
+      Exit;
+    Sleep(600, 1200);
+  end;
+
+  Self.Attempts := 0;
+
+  timeout := Time() + 15000;
+  while Lobby.IsOpen() do
+  begin
+    if Time() > timeout then
+    begin
+      DebugLn('Login', 'Timed out trying to handle the lobbyscreen.', ELogLevel.ERROR);
+      Exit;
+    end;
+
+    if Lobby.EnterGame() then Exit(True);
+  end;
+
+  Result := Client.IsLoggedIn();
+end;
+
+var
+(*
+## Login variable
+Global {ref}`TLogin` variable.
+*)
+  Login: TLogin;

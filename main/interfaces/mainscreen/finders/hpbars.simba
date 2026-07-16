@@ -1,0 +1,141 @@
+(*
+# HPBars
+Find, sort and read HP bars on the mainscreen.
+*)
+
+{$DEFINE WL_HPBARS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+(*
+(THPBar)=
+## type THPBar
+```pascal
+THPBar = record
+  Bounds: TBox;    // Bounds of the bar
+  Percent: Int32;  // Green percent of the bar.
+end;
+```
+*)
+type
+  THPBar = record
+    Bounds: TBox;
+    Percent: Int32;
+  end;
+
+  THPBarArray = array of THPBar;
+
+
+function THPBar.Find(out AllBars: THPBarArray): Boolean; static;
+  procedure AddToBars(Box: TBox; Percent: Int32);
+  begin
+    SetLength(AllBars, Length(AllBars)+1);
+    AllBars[High(AllBars)].Bounds := Box;
+    AllBars[High(AllBars)].Percent := Percent;
+  end;
+var
+  i,h            : Int32;
+  Border         : TBox;
+  GTPA,RTPA,BarG,
+  Bar            : TPointArray;
+  GBars,RBars    : T2DPointArray;
+begin
+  // Unsure if freezing is still needed here
+  //if (not Target.IsImageFrozen) then
+    //Target.FreezeImage;
+
+  try
+    GTPA := Target.FindColor($00FF00, 0, Mainscreen.Bounds);
+    RTPA := Target.FindColor($0000FF, 0, Mainscreen.Bounds);
+
+    if Length(GTPA) > 0 then GBars := GTPA.Cluster(13,1);
+    if Length(RTPA) > 0 then RBars := RTPA.Cluster(13,1);
+
+    if Length(GBars) > 0 then
+    begin
+      Result := True;
+      for i:=0 to High(GBars) do
+      begin
+        if (not InRange(GBars[i].Bounds().Height, 3, 5)) then Continue;
+        Bar    := [];
+        Border := [];
+        BarG   := [];
+        if Length(RBars) >= 1 then
+        begin
+          for h:=0 to High(RBars) do
+          begin
+            if Length(GBars[i].PointsNearby(RBars[h], 1, 0, 15, 0)) > 0 then
+            begin
+              Bar := RBars[h];
+              Bar.Insert(GBars[i],0);
+              Border := Bar.Bounds();
+              BarG := Target.FindColor($00FF00, 0, Border);
+              if Length(BarG) > 0 then
+              begin
+                AddToBars(Border, Round(BarG.Bounds().Width / Border.Width * 100));
+                break;
+              end;
+            end else
+            begin
+              if (h = High(RBars)) then
+                AddToBars(GBars[i].Bounds(), 100);
+            end;
+          end;
+        end else AddToBars(GBars[i].Bounds(), 100);
+      end;
+    end else if Length(GBars) = 0 then
+    begin
+      if Length(RBars) > 0 then
+        for i:=0 to High(RBars) do
+        begin
+          if (not InRange(RBars[i].Bounds().Height, 3, 5)) then Continue;
+          if (RBars[i].Bounds().Width < 10) then Continue;
+          AddToBars(RBars[i].Bounds(), 0);
+        end;
+    end;
+  finally
+    //Target.UnFreezeImage;
+  end;
+end;
+
+procedure THPBarArray.SortFrom(Pt: TPoint);
+  procedure _Sort(Arr: THPBarArray; weights: TIntegerArray; iLo, iHi: Int32);
+  var
+    lo,hi,mid: Int32;
+  begin
+    if (Length(weights) <> Length(Arr)) then Exit;
+    lo := iLo;
+    hi := iHi;
+    Mid := weights[(lo + hi) shr 1];
+    repeat
+      while (weights[lo] < mid) do Inc(lo);
+      while (weights[hi] > mid) do Dec(hi);
+      if (lo <= hi) then
+      begin
+        Swap(weights[lo], weights[hi]);
+        Swap(Arr[lo], Arr[hi]);
+        Inc(lo);
+        Dec(hi);
+      end;
+    until Lo > Hi;
+    if (hi > iLo) then _Sort(Arr, weights, iLo, hi);
+    if (lo < iHi) then _Sort(Arr, weights, lo, iHi);
+  end;
+var
+  i,L: Integer;
+  Mid: TPoint;
+  weights: TIntegerArray;
+begin
+  if Length(Self) < 2 then Exit;
+
+  L := High(Self);
+  if (L <= 0) then Exit;
+
+  SetLength(weights, L + 1);
+  for i := 0 To L do
+  begin
+    Mid := Self[i].Bounds.Center;
+    weights[i] := Round(Sqr(Pt.X - Mid.X) + Sqr(Pt.Y - Mid.Y));
+  end;
+
+  _Sort(Self, weights, 0, L);
+end;

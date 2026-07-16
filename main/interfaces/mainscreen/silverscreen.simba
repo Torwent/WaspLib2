@@ -1,0 +1,312 @@
+(*
+# SilverScreen
+Methods to interact with the silver‑smelting **Silver Screen** interface.
+
+```{figure} ../../images/silverscreen_interface.png
+```
+
+```{note}
+Credits to Flight and Skunkworks
+```
+*)
+
+{$DEFINE WL_SILVERSCREEN_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## ESilverItem enum
+```pascal
+ESilverItem = enum(OPAL_RING, OPAL_NECKLACE.., TIARA, DEMONIC_SIGIL);
+```
+Enum representing the silver jewelry that can be crafted.
+*)
+  ESilverItem = enum(
+    OPAL_RING,     OPAL_NECKLACE,  OPAL_AMULET,  OPAL_BRACELET,
+    JADE_RING,     JADE_NECKLACE,  JADE_AMULET,  JADE_BRACELET,
+    TOPAZ_RING,    TOPAZ_NECKLACE, TOPAZ_AMULET, TOPAZ_BRACELET,
+    HOLY_SYMBOL,   SILVER_SICKLE,  SILVER_BOLTS, SILVTHRILL_ROD,
+    UNHOLY_SYMBOL, LIGHTNING_ROD,  TIARA,        DEMONIC_SIGIL
+  );
+
+(*
+## TSilverScreen type
+Main record to interact with the {ref}`SilverScreen` interface.
+*)
+  TSilverScreen = record
+    Title: TInterfaceTitle;
+    Bounds: TBox;
+    SlotBoxes: TBoxArray;
+    QuantityButtons: array [EItemQuantity] of TButton;
+    const ITEMS: set of ESilverItem =
+      [ESilverItem.OPAL_RING..ESilverItem.DEMONIC_SIGIL];
+  end;
+
+function TSilverScreen.IsOpen(): Boolean; forward;
+
+(*
+## SilverScreen.SetupInterface
+```pascal
+procedure TSilverScreen.SetupInterface();
+```
+Internal method used to setup the {ref}`TSilverScreen` coordinates.
+This is automatically called for you on the {ref}`SilverScreen variable`.
+*)
+procedure TSilverScreen.SetupInterface();
+var
+  boxes: TBoxArray;
+  weights: TIntegerArray;
+  i: Integer;
+begin
+  case Client.Mode of
+    EMode.FIXED:
+      Self.Bounds := MSInterface.CreateBounds([0,1,0,-1], 505, 323);
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Bounds := MSInterface.CreateBounds([0,1,0,-3], 505, 323);
+  end;
+
+  Self.Title.Setup(Self.Bounds);
+
+  boxes :=
+    TBoxArray.Create(Self.Bounds.TopLeft.Offset(10, 40), 3, 4, 79, 55, [5,1]) +
+    TBoxArray.Create(Self.Bounds.TopRight.Offset(-233, 40), 2, 4, 109, 55, [5,1]);
+
+  SetLength(weights, Length(boxes));
+  for i := 0 to High(boxes) do
+    weights[i] := boxes[i].X1 * 100 + boxes[i].Y1;
+
+  Self.SlotBoxes := boxes.Sorted(weights, True);
+
+  boxes := TBoxArray.Create(
+    Self.Bounds.BottomLeft.Offset(134, -45), 5, 1, 36, 36, [14,0]
+  );
+  for i := 0 to 4 do
+    Self.QuantityButtons[i] := new TButton(
+      boxes[i], [[$25323B, 1.30, EColorSpace.RGB, [1,1,1]]]
+    );
+end;
+
+(*
+## SilverScreen.IsOpen
+```pascal
+function TSilverScreen.IsOpen(): Boolean;
+```
+Returns true if the SilverScreen interface is open.
+
+Example:
+```pascal
+WriteLn SilverScreen.IsOpen();
+```
+*)
+function TSilverScreen.IsOpen(): Boolean;
+begin
+  Result := Self.Title.IsOpen();
+end;
+
+(*
+## SilverScreen.WaitOpen
+```pascal
+function TSilverScreen.WaitOpen(time, interval: Integer): Boolean;
+```
+Returns true if the SilverScreen interface opens within `time` milliseconds.
+
+Example:
+```pascal
+WriteLn SilverScreen.WaitOpen(5000);
+```
+*)
+function TSilverScreen.WaitOpen(time, interval : Integer) : Boolean;
+begin
+  if interval < 0 then
+    interval := RandomMode(100,50,1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+(*
+## SilverScreen.Close
+```pascal
+function TSilverScreen.Close(PressEscape: Boolean): Boolean;
+
+function TSilverScreen.Close(
+  escapeProbability: Single = -1
+): Boolean; overload;
+```
+Attempts to close the {ref}`SilverScreen` interface. If `pressEscape` is true,
+the escape key is pressed to close, otherwise the close button is clicked.
+
+Example:
+```pascal
+WriteLn SilverScreen.Close(True);
+```
+*)
+function TSilverScreen.Close(pressEscape : Boolean) : Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit(True);
+
+  Result := (not pressEscape and MSInterface.Close(False))
+            or
+            (pressEscape     and MSInterface.Close(True));
+
+  if Result then
+    Result := SleepUntil(not Self.IsOpen(),
+                         RandomMode(100,50,1500),
+                         Random(1500,2000));
+end;
+
+function TSilverScreen.Close(
+  escapeProbability: Single = -1
+): Boolean; overload;
+begin
+  if escapeProbability = -1 then
+    escapeProbability := Biometrics.RandomDouble(0.5);
+  Result := Self.Close(RandomBoolean(escapeProbability));
+end;
+
+(*
+## SilverScreen.SetQuantity
+```pascal
+function TSilverScreen.SetQuantity(amount: Integer): Boolean;
+```
+Sets the quantity to craft. Pass 0 or any negative value for "All".
+
+If a preset button (1, 5, 10, All) matches the amount, it will be clicked.
+Otherwise, the "X" button is used to enter a custom amount.
+
+Example:
+```pascal
+SilverScreen.SetQuantity(10);
+SilverScreen.SetQuantity(0); // All
+SilverScreen.SetQuantity(-1); // All
+SilverScreen.SetQuantity(QUANTITY_ALL); // All
+```
+*)
+function TSilverScreen.SetQuantity(amount: Integer): Boolean;
+var
+  txt: String;
+  btn: TButton;
+begin
+  txt := ToString(amount);
+  if amount <= QUANTITY_ALL then
+    txt := 'All';
+
+  { already selected? }
+  for btn in Self.QuantityButtons do
+    if (OCR.Locate(btn.Bounds, txt, [TFonts.WHITE], 1, Fonts.PLAIN_11) > 0.85)
+    and btn.Enabled then
+      Exit(True);
+
+  { preset button available? }
+  for btn in Self.QuantityButtons do
+    if OCR.Locate(btn.Bounds, txt, [TFonts.ORANGE], 1, Fonts.PLAIN_11) > 0.85 then
+    begin
+      btn.Click();
+      Exit(True);
+    end;
+
+  { custom amount via “X” }
+  for btn in Self.QuantityButtons do
+    if OCR.Locate(btn.Bounds, 'X', [TFonts.ORANGE], 1, Fonts.PLAIN_11) > 0.85 then
+    begin
+      btn.Click();
+      Exit(Chat.AnswerQuery('Enter amount', ToString(Amount), 3000));
+    end;
+end;
+
+(*
+## SilverScreen.CanCraft
+```pascal
+function TSilverScreen.CanCraft(silver: ESilverItem): Boolean;
+```
+Checks if the specified `silver` can be crafted.
+
+Example:
+```pascal
+WriteLn SilverScreen.CanCraft(ESilverItem.OPAL_RING);
+```
+*)
+function TSilverScreen.CanCraft(silver: ESilverItem): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  Result := Target.HasColor(TFonts.ORANGE, 1, 1, Self.SlotBoxes[silver]) or
+            Target.HasColor(TFonts.WHITE, 1, 1, Self.SlotBoxes[silver]);
+end;
+
+
+(*
+## SilverScreen.IsHighlighted
+```pascal
+function TSilverScreen.IsHighlighted(silver: ESilverItem): Boolean;
+```
+Returns true if the specified `silver` is currently highlighted/selected in the
+interface.
+You probably won't need to work with this directly.
+
+Example:
+```pascal
+if SilverScreen.IsHighlighted(ESilverItem.OPAL_RING) then
+  Keyboard.KeyPress(EKeyCode.SPACE);
+```
+*)
+function TSilverScreen.IsHighlighted(silver: ESilverItem): Boolean;
+begin
+  if not Self.IsOpen() or not Self.CanCraft(silver) then
+    Exit;
+  Result := Target.HasColor($49596A, 2, 1, Self.SlotBoxes[silver]);
+end;
+
+(*
+## SilverScreen.CraftItem
+```pascal
+function TSilverScreen.CraftItem(
+  silver: ESilverItem; amount: Integer; useSpace: Boolean
+): Boolean;
+
+function TSilverScreen.CraftItem(
+  item: Tilver;
+  amount: Integer = QUANTITY_ALL;
+  spaceProbability: Single = -1
+): Boolean; overload;
+```
+Crafts the specified item with the given `amount`.
+If `useSpace` is true and the item is already highlighted, spacebar will be
+pressed instead of clicking.
+
+Example:
+```pascal
+SilverScreen.CraftItem('Opal ring', 10, True);
+```
+*)
+function TSilverScreen.CraftItem(
+  silver: ESilverItem; amount: Integer; useSpace: Boolean
+): Boolean;
+begin
+  if not Self.CanCraft(silver) or not Self.SetQuantity(amount) then
+    Exit;
+
+  if useSpace and Self.IsHighlighted(silver) then
+    Keyboard.KeyPress(EKeyCode.SPACE)
+  else
+    Mouse.Click(Self.SlotBoxes[silver], EMouseButton.LEFT);
+
+  Result := SleepUntil(not Self.IsOpen(), 200, 6 * TICK);
+end;
+
+function TSilverScreen.CraftItem(
+  silver: ESilverItem;
+  amount: Integer = QUANTITY_ALL;
+  spaceProbability: Single = -1
+): Boolean; overload;
+begin
+  if spaceProbability = -1 then
+    spaceProbability := Biometrics.RandomDouble(0.5);
+  Result := Self.CraftItem(silver, amount, RandomBoolean(spaceProbability));
+end;
+
+var
+(*
+## SilverScreen variable
+Global {ref}`TSilverScreen` variable.
+*)
+  SilverScreen: TSilverScreen;

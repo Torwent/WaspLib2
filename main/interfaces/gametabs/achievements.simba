@@ -1,0 +1,512 @@
+(*
+# Achievements
+This page is dedicated to the achievements game tab and methods to interact with it.
+```{figure} ../../images/achievements.png
+```
+*)
+{$DEFINE WL_ACHIEVEMENTS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## EAchievementTab
+```pascal
+EAchievementTab = enum(SUMMARY, QUESTS, DIARIES);
+```
+An enum representing each of the {ref}`Achievements` gametab tabs.
+*)
+  EAchievementTab = enum(SUMMARY, QUESTS, DIARIES, ADVENTURE_PATHS);
+
+(*
+## EAchievementDiary
+```pascal
+EAchievementDiary = enum(
+  ARDOUGNE,
+  DESERT,
+  FALADOR,
+  FREMENNIK,
+  KANDARIN,
+  KARAMJA,
+  KOUREND_AND_KEBOS,
+  LUMBRIDGE_AND_DRAYNOR,
+  MORYTANIA,
+  VARROCK,
+  WESTERN_PROVINCES,
+  WILDERNESS
+);
+```
+An enum representing each of the achievement diaries available.
+*)
+  EAchievementDiary = enum(
+    ARDOUGNE,
+    DESERT,
+    FALADOR,
+    FREMENNIK,
+    KANDARIN,
+    KARAMJA,
+    KOUREND_AND_KEBOS,
+    LUMBRIDGE_AND_DRAYNOR,
+    MORYTANIA,
+    VARROCK,
+    WESTERN_PROVINCES,
+    WILDERNESS
+  );
+
+(*
+## TAchievementsSummary
+Helper record used to interact with the {ref]`Achievements` gametab "Summary" tab:
+```{figure} ../../images/achievements.png
+```
+*)
+  TAchievementsSummary = record
+    Username, CombatLevel, TotalLevel, TotalXP, Quests, Diaries, CombatTasks,
+    CollectionLog, TimePlayed: TBox;
+  end;
+
+(*
+## TAchievementsSummary.SetupGameTab
+```pascal
+procedure TAchievementsSummary.SetupGameTab();
+```
+Internal method used to setup {ref]`TAchievementsSummary` coordinates.
+
+This is automatically called for you on the `Achievements.Summary variable`.
+*)
+procedure TAchievementsSummary.SetupGameTab();
+var
+  boxes: TBoxArray;
+begin
+  with GameTab.Bounds do
+  begin
+    Self.Username := [X1+4, Y1+26, X2-4, Y1+44];
+    boxes := TBoxArray.Create([X1, Y1+45], 2, 1, 90, 41, [3,0]);
+    Self.CombatLevel := boxes[0];
+    Self.TotalLevel := boxes[1];
+    Self.TotalXP := [X1, Y1+89, X2, Y1+116];
+    boxes := TBoxArray.Create([X1, Y1+119], 2, 2, 90, 53, [3,3]);
+    Self.Quests := boxes[0];
+    Self.Diaries := boxes[1];
+    Self.CombatTasks := boxes[2];
+    Self.CollectionLog := boxes[3];
+    Self.TimePlayed := [X1, Y2 - 30, X2, Y2-5];
+  end;
+end;
+
+type
+(*
+## TQuestList
+Helper record used to interact with the {ref]`Achievements` gametab "Quests" tab:
+```{figure} ../../images/achievements_quests.png
+```
+*)
+  TQuestList = record
+    Scroll: TScrollBar;
+  end;
+
+(*
+## TQuestList.SetupGameTab
+```pascal
+procedure TQuestList.SetupGameTab();
+```
+Internal method used to setup {ref]`TQuestList` coordinates.
+
+This is automatically called for you on the `Achievements.Quests variable`.
+*)
+procedure TQuestList.SetupGameTab();
+begin
+  with GameTab.Bounds do
+    Self.Scroll.Area := [X1+6, Y1+51, X2-21, Y2-45];
+  Self.Scroll.Setup();
+end;
+
+type
+(*
+## TDiarySlot
+Helper record used to interact with a {ref}`TDiaryList` slot.
+*)
+  TDiarySlot = record
+    Name, Number, Bounds: TBox;
+    Levels: TBoxArray;
+  end;
+
+(*
+## TDiaryList
+Helper record used to interact with the {ref]`Achievements` gametab "Diaries" tab:
+```{figure} ../../images/achievements_diaries.png
+```
+*)
+  TDiaryList = record
+    Names: TStringArray;
+    Scroll: TScrollBar;
+    Cache: array [EAchievementDiary] of Integer;
+  end;
+
+(*
+## TDiaryList.SetupGameTab
+```pascal
+procedure TDiaryList.SetupGameTab();
+```
+Internal method used to setup {ref]`TDiaryList` coordinates.
+
+This is automatically called for you on the `Achievements.Diaries variable`.
+*)
+procedure TDiaryList.SetupGameTab();
+var
+  diary: EAchievementDiary;
+begin
+  for diary := Low(EAchievementDiary) to High(EAchievementDiary) do
+    Self.Names += ToString(diary).After('EAchievementDiary.').Replace('_', ' ').Replace(' AND ', ' & ').CapitalizeWords();
+
+  with GameTab.Bounds do
+    Self.Scroll.Area := [X1, Y1+45, X2-16, Y2-4];
+  Self.Scroll.Setup();
+end;
+
+(*
+## TDiaryList.GetSlots
+```pascal
+function TDiaryList.GetSlots(): array of TDiarySlot;
+```
+Returns the slots available in the diary tab as an array of {ref}`TDiarySlot`.
+
+Example:
+```pascal
+img := Target.GetImage();
+for slot in Achievements.Diaries.GetSlots() do
+begin
+  img.DrawColor := $FFFFFF;
+  img.DrawBox(slot.Bounds);
+
+  img.DrawColor := $00FFFF;
+  img.DrawBox(slot.Name);
+
+  img.DrawColor := $FF00FF;
+  img.DrawBox(slot.Number);
+
+  img.DrawColor := $FFFF00;
+  img.DrawBoxArray(slot.Levels, False);
+end;
+
+img.Show();
+img.Free();
+```
+
+```{figure} ../../images/diary_slots.png
+```
+*)
+function TDiaryList.GetSlots(): array of TDiarySlot;
+var
+  tpa: TPointArray;
+  atpa: T2DPointArray;
+  slot: TDiarySlot;
+begin
+  tpa := Target.FindColor($0, 0, Self.Scroll.Area);
+  atpa := tpa.Cluster(1.5).ExcludeSize(200, EComparator.__LT__);
+
+  for tpa in atpa do
+  begin
+    with tpa.Bounds() do
+    begin
+      slot.Bounds := [X1-4, Y1-17, X2+3, Y2+3];
+      if (Self.Scroll.Area.Y1 > slot.Bounds.Y1) or
+         (Self.Scroll.Area.Y2 < slot.Bounds.Y2) then
+         Continue;
+      slot.Name   := [X1-1, Y1 - 15, X1 + 105, Y1 - 1];
+      slot.Number := [X2-28, Y1-15, X2+1, Y1-3];
+      slot.Levels := TBoxArray.Create(TopLeft, 4, 1, 36, 6, [0,0]);
+    end;
+    Result += slot;
+  end;
+end;
+
+(*
+## TDiaryList.GetSlot
+```pascal
+function TDiaryList.GetSlot(diary: EAchievementDiary): TDiarySlot;
+```
+Returns the slot of the specified `diary` as a {ref}`TDiarySlot`.
+
+Example:
+```pascal
+img := Target.GetImage();
+slot := Achievements.Diaries.GetSlot(EAchievementDiary.FREMENNIK);
+
+img.DrawColor := $FFFFFF;
+img.DrawBox(slot.Bounds);
+
+img.DrawColor := $00FFFF;
+img.DrawBox(slot.Name);
+
+img.DrawColor := $FF00FF;
+img.DrawBox(slot.Number);
+
+img.DrawColor := $FFFF00;
+img.DrawBoxArray(slot.Levels, False);
+
+img.Show();
+img.Free();
+```
+
+```{figure} ../../images/diary_slot.png
+```
+*)
+function TDiaryList.GetSlot(diary: EAchievementDiary): TDiarySlot;
+var
+  slot: TDiarySlot;
+begin
+  for slot in Self.GetSlots() do
+    if OCR.Locate(slot.Name, Self.Names[diary], [TFonts.RED, TFonts.YELLOW, TFonts.LIGHT_GREEN, TFonts.WHITE], 0, Fonts.PLAIN_11) > 0.9 then
+      Exit(slot);
+end;
+
+
+(*
+## TDiaryList.ScrollTo
+```pascal
+procedure TDiaryList.ScrollTo(diary : EAchievementDiary);
+```
+Scrolls to the specified `diary`.
+
+Example:
+```pascal
+Achievements.Diaries.ScrollTo(EAchievementDiary.MORYTANIA);
+```
+*)
+procedure TDiaryList.ScrollTo(diary : EAchievementDiary);
+var
+  lo, hi: Integer;
+begin
+  lo := Max(0, Ord(diary) - 6) * 20;
+  hi := Min(100, Ord(diary) * 20);
+
+  if not InRange(Self.Scroll.GetLevel(), lo, hi) then
+    Self.Scroll.SetLevel(Random(lo, hi));
+end;
+
+type
+(*
+## TAchievements
+Main record used to interact with the {ref]`Achievements` gametab.
+
+Each tab has it's own specific variable:
+- `TAchievements.Summary: TAchievementsSummary`
+- `TAchievements.Quests: TQuestList`
+- `TAchievements.Diaries: TDiaryList`
+
+So if you want to use {ref}`TDiaryList.GetLevel` for example you would do this:
+```pascal
+WriteLn Achievements.Diaries.GetLevel(EAchievementDiary.ARDOUGNE);
+```
+*)
+  TAchievements = record
+    TabsArea, TabTitle: TBox;
+    Tabs: TBoxArray;
+    Summary: TAchievementsSummary;
+    Quests: TQuestList;
+    Diaries: TDiaryList;
+  end;
+
+(*
+## Achievements.SetupGameTab();
+```pascal
+procedure TAchievements.SetupGameTab();
+```
+Internal method used to setup the {ref}`TAchievements` coordinates.
+
+This is automatically called for you on the {ref}`Achievements variable`.
+*)
+procedure TAchievements.SetupGameTab();
+begin
+  with GameTab.Bounds do
+  begin
+    Self.TabsArea := [X1, Y1 + 5, X2, Y1 + 22];
+    Self.TabTitle := [X1, Y1 + 25, X2, Y1 + 48];
+
+    Self.Summary.SetupGameTab();
+    Self.Quests.SetupGameTab();
+    Self.Diaries.SetupGameTab();
+  end;
+end;
+
+(*
+## Achievements.IsOpen
+```pascal
+function TAchievements.IsOpen(): Boolean;
+```
+Returns true/false if the inventory is open.
+
+Example:
+```pascal
+WriteLn Achievements.IsOpen();
+```
+*)
+function TAchievements.IsOpen(): Boolean;
+begin
+  Result := GameTabs.IsOpen(EGameTab.ACHIEVEMENTS);
+end;
+
+(*
+## Achievements.Open
+```pascal
+function TAchievements.Open(): Boolean;
+```
+Attempts to open the inventory gametab.
+
+Example:
+```pascal
+WriteLn Achievements.Open();
+```
+*)
+function TAchievements.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.ACHIEVEMENTS);
+end;
+
+(*
+## Achievements Tabs
+The {ref}`Achievements` tabs are dynamic as one of them can be hidden away on certain types of accounts:
+![3 tabs](../../images/achievements_tabs3.png) ![4 tabs](../../images/achievements_tabs4.png)
+To handle this, you have the 2 following methods, they are used automatically for you on the
+{ref}`Achievements variable`.
+*)
+
+(*
+### Achievements.CountTabs
+```pascal
+function TAchievements.CountTabs(): Integer;
+```
+Internal method used to count the available tabs on the {ref}`Achievements` gametab.
+*)
+function TAchievements.CountTabs(): Integer;
+begin
+  Result := Length(Target.FindColor(TInterface.Border, 0, Self.TabsArea).Cluster(1.5));
+end;
+
+(*
+### Achievements.SetupTabs
+```pascal
+procedure TAchievements.SetupTabs();
+```
+Internal method used to update the coordinates of the tabs on the {ref}`Achievements` gametab.
+
+This is automatically used for you.
+*)
+procedure TAchievements.SetupTabs();
+begin
+  case Self.CountTabs() of
+    3: Self.Tabs := TBoxArray.Create(GameTab.TopLeft.Offset(1,4), 3, 1, 57, 20, [5, 2]);
+    4: Self.Tabs := TBoxArray.Create(GameTab.TopLeft.Offset(1,4), 4, 1, 43, 20, [3, 2]);
+    else Exit;
+  end;
+end;
+
+(*
+## Achievements.GetTab
+```pascal
+function TAchievements.GetTab():  EAchievementTab;
+```
+Returns the currently active {ref}`EAchievementTab`.
+
+Example:
+```pascal
+WriteLn Achievements.GetTab();
+```
+*)
+function TAchievements.GetTab(): EAchievementTab;
+var
+  title: String;
+begin
+  if Self.Tabs = [] then
+  begin
+    if not Self.Open() then Exit;
+    Self.SetupTabs();
+  end;
+
+  title := OCR.Recognize(Self.TabTitle, Fonts.BOLD_SHADOW, [TFonts.ORANGE, $3399FF], 3);
+
+  case title of
+    'Quest List': Result := EAchievementTab.QUESTS;
+    'Achievement Diaries': Result := EAchievementTab.DIARIES;
+    'Click here to see all': Result := EAchievementTab.ADVENTURE_PATHS;
+    else Result := EAchievementTab.SUMMARY;
+  end;
+end;
+
+(*
+## Achievements.OpenTab
+```pascal
+function TAchievements.OpenTab(tab:  EAchievementTab): Boolean;
+```
+Attempts to open the specified `tab` {ref}`EAchievementTab`.
+
+Example:
+```pascal
+WriteLn Achievements.OpenTab(EAchievementTab.DIARIES);
+```
+*)
+function TAchievements.OpenTab(tab: EAchievementTab): Boolean;
+var
+  b: TBox;
+begin
+  if not Self.Open() then Exit;
+  if Self.Tabs = [] then Self.SetupTabs();
+
+  b := Self.Tabs[tab];
+  case Self.GetTab() of
+    tab: Exit(True);
+    EAchievementTab.SUMMARY:
+    if (tab <> EAchievementTab.ADVENTURE_PATHS) and Biometrics.RandomBoolean() then
+    begin
+      if tab = EAchievementTab.QUESTS then b := Self.Summary.Quests
+      else b := Self.Summary.Diaries;
+    end;
+  end;
+
+  Mouse.Click(b, EMouseButton.LEFT);
+  Result := SleepUntil(Self.GetTab() = tab, RandomMode(100, 50, 1500), 4*TICK);
+end;
+
+
+var
+(*
+## Achievements variable
+Global {ref}`TAchievements` variable.
+*)
+  Achievements: TAchievements;
+
+(*
+## TDiaryList.GetLevel
+```pascal
+function TDiaryList.GetLevel(diary: EAchievementDiary): Integer;
+```
+Returns the current completion level of the specified `diary`.
+The level will be between -1 and 4. -1 is returned if we fail.
+
+Example:
+```pascal
+WriteLn Achievements.Diaries.GetLevel(EAchievementDiary.MORYTANIA);
+```
+*)
+function TDiaryList.GetLevel(diary: EAchievementDiary): Integer;
+var
+  i: Integer;
+  slot: TDiarySlot;
+begin
+  if Self.Cache[diary] > 0 then
+    Exit(Self.Cache[diary]-1);
+
+  if not Achievements.OpenTab(EAchievementTab.DIARIES) then Exit(-1);
+  Self.ScrollTo(diary);
+  slot := Self.GetSlot(diary);
+
+  if slot = Default(TDiarySlot) then
+    Exit;
+
+  for i := 0 to 3 do
+  begin
+    if not Target.HasColor($14B537, 0, 1, slot.Levels[i]) then Break;
+    Result += 1;
+  end;
+
+  Self.Cache[diary] := Result+1;
+end;

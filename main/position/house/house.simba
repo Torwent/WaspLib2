@@ -1,0 +1,461 @@
+(*
+# House
+This file is about {ref}`THouse` and the {ref}`House variable` and all of it's
+methods used to interact and navigate an account's POH:
+
+```{figure} ../../images/house.png
+```
+
+For {ref}`House` to work properly you need to setup it's {ref}`HouseLoader`,
+which you can do either via the {ref}`House Form` or via the
+{ref}`HouseViewer`.
+*)
+
+{$DEFINE WL_HOUSE_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## THouse
+The core record used to handle navigating a POH.
+*)
+  THouse = record
+    Loader: THouseLoader;
+    Walker: TWalker;
+
+    Objects: array [EHouseObject] of TGObject;
+    Teleports: array [EHouseTeleport] of TGObject;
+
+    Downscale: Integer;
+    Similarity: Single;
+
+    Sample: TMapSample;
+    Cache: TMatchTemplateCache;
+
+    Graph: TWebGraph;
+    IsSetup: Boolean;
+
+    Entrance: TGObject;
+
+    TeleportMode: EHouseTeleportMode;
+    CapeTab: EGameTab;
+    TeleportPlace: EHouseTeleportPlace;
+    HouseTeleportItem: TItem;
+  end;
+
+function THouse.Position(): TPoint; forward;
+
+procedure THouse._SetupTeleport(obj: EHouseObject; coordinate: TPoint; rotation: Integer; teleport: EHouseTeleport);
+begin
+  if Self.Teleports[teleport].Coordinates <> [] then
+  begin
+    Self.Teleports[teleport].Coordinates += coordinate;
+    Self.Teleports[teleport].Rotations += rotation;
+    Exit;
+  end;
+
+  Self.Teleports[teleport] := TGObject.Create(Self.Walker, obj.GetSize(), [coordinate], teleport.GetUpText());
+  Self.Teleports[teleport].Rotations := [rotation];
+  Self.Teleports[teleport].Finder := teleport.GetFinder();
+end;
+
+procedure THouse._SetupObject(obj: EHouseObject; coordinate: TPoint; rotation: Integer);
+begin
+  if Self.Objects[obj].Coordinates <> [] then
+  begin
+    Self.Objects[obj].Coordinates += coordinate;
+    Self.Objects[obj].Rotations += rotation * 90;
+    Exit;
+  end;
+
+  Self.Objects[obj] := TGObject.Create(Self.Walker, obj.GetSize(), [coordinate], obj.GetUpText());
+  Self.Objects[obj].Rotations := [rotation * 90];
+  Self.Objects[obj].Finder := obj.GetFinder();
+end;
+
+procedure THouse.SetupObjects();
+var
+  idx, coordinate: TPoint;
+  room: THouseRoom;
+  obj: EHouseObject;
+begin
+  for idx.Y := 0 to Self.Loader.AMOUNT-1 do
+    for idx.X := 0 to Self.Loader.AMOUNT-1 do
+    begin
+      room := Self.Loader.ReadRoom(idx);
+
+      for obj in room.Objects do
+      begin
+        coordinate := obj.RotatedOffset(Self.Loader.SIZE, room.Rotation);
+        coordinate += idx * Self.Loader.SIZE;
+
+        case obj of
+          EHouseObject.LEFT_PORTAL, EHouseObject.LEFT_AMULET:
+            Self._SetupTeleport(obj, coordinate, room.Rotation,
+                                Self.Loader.TeleportRooms[idx.Y,idx.X].Left);
+
+          EHouseObject.MIDDLE_PORTAL:
+            Self._SetupTeleport(obj, coordinate, room.Rotation,
+                                Self.Loader.TeleportRooms[idx.Y,idx.X].Middle);
+
+          EHouseObject.RIGHT_PORTAL, EHouseObject.RIGHT_AMULET:
+            Self._SetupTeleport(obj, coordinate, room.Rotation,
+                                Self.Loader.TeleportRooms[idx.Y,idx.X].Right);
+        end;
+
+        Self._SetupObject(obj, coordinate, room.Rotation);
+      end;
+    end;
+end;
+
+function THouse.CreateObject(offset: TPoint; size: TVector3; eRoom: EHouseRoom): TGObject;
+var
+  idx, coordinate: TPoint;
+  room: THouseRoom;
+begin
+  for idx.Y := 0 to Self.Loader.AMOUNT-1 do
+    for idx.X := 0 to Self.Loader.AMOUNT-1 do
+    begin
+      room := Self.Loader.ReadRoom(idx);
+      if room.Room <> eRoom then Continue;
+
+      coordinate := _RotateRoomOffset(offset, Self.Loader.SIZE, room.Rotation);
+      coordinate += idx * Self.Loader.SIZE;
+
+      if Result.Coordinates <> [] then
+      begin
+        Result.Coordinates += coordinate;
+        Result.Rotations += room.Rotation * 90;
+        Continue;
+      end;
+
+      Result := TGObject.Create(Self.Walker, size, [coordinate]);
+      Result.Rotations := [room.Rotation * 90];
+    end;
+end;
+
+(*
+## POH.Setup()
+```pascal
+procedure THouse.Setup();
+```
+Method you need to use at the start of your script after the user has already configured his house
+with `TScriptForm.CreateHouseBuilder()`.
+*)
+procedure THouse.Setup(downscale: Integer = 8);
+var
+  minimapImage, minimapSample: TImage;
+begin
+  if Self.IsSetup then Exit;
+
+  if Self.Loader.Rooms = [] then Self.Loader.Init();
+  if Self.Sample.Amount = 0 then Self.Sample.Amount := 2;
+  if Self.Sample.Radius = 0 then Self.Sample.Radius := 67;
+
+  Self.SetupObjects();
+
+  Self.Loader.Setup(downscale);
+  minimapImage := Minimap.GetCleanImage();
+  minimapSample := Minimap.ScaleMinimap(minimapImage, Self.Loader.Downscale, Self.Sample.Radius);
+
+  Self.Walker.Setup(@Self.Position, nil, nil, nil, @Self.Graph, Self.Loader.Map);
+  Self.Walker.Name := 'House.Walker';
+
+  //TODO:
+  //Self.Graph := Self._BuildGraph(Self.Loader.Collision);
+
+  Self.Entrance := TGObject.Create(Map.Walker, [2,4,7], [Self.Loader.Location.GetEntranceCoordinate()], ['Portal']);
+  Self.Entrance.Rotations := [Self.Loader.Location.GetEntranceRotation()];
+  //TODO:
+  //Self.Entrance.Finder.Colors += CTS2(6316135, 8, 0.28, 0.12);
+  //Self.Entrance.Finder.Colors += CTS2(9379961, 30, 0.16, 1.76);
+
+  Self.CapeTab := EGameTab.NONE;
+  Self.IsSetup := True;
+end;
+
+(*
+## House.ScaledSearch
+```pascal
+function THouse.ScaledSearch(img: TImage; samples: Integer): TPointArray;
+```
+Internal THouse method used to get an initial TPointArray of possible positions.
+This is performed in a downscaled map with a downscaled minimap.
+This is very innacurate by itself but by ruling down most of the map
+in a downscaled search before doing a full sized search speed has a dramatic boost.
+You probably won't ever need to call this directly.
+*)
+function THouse.ScaledSearch(img: TImage): TPointArray;
+var
+  sample: TImage;
+  matrix: TSingleMatrix;
+  n: Integer;
+  p: TPoint;
+  hw, hh: Integer;
+begin
+  sample := Minimap.ScaleMinimap(img, Self.Loader.Downscale, Self.Sample.Radius);
+
+  matrix := MatchTemplateMask(
+    Self.Loader.DownscaleMatrix, sample.ToMatrix(), TM_CCOEFF_NORMED, Self.Cache
+  );
+
+  hw := sample.Width div 2;
+  hh := sample.Height div 2;
+
+  while Length(Result) < Self.Sample.Amount do
+    with matrix.ArgMax() do
+    begin
+      p := Offset(hw, hh) * Self.Loader.Downscale;
+      Result += p;
+      matrix.Fill([X - 5, Y - 5, X + 5, Y + 5], 0);
+    end;
+
+  n := Self.Loader.Downscale div 2;
+  Result := Result.Offset([n, n]);
+end;
+
+(*
+## House.Position
+```pascal
+function THouse.Position(): TPoint;
+```
+Returns the players current position on the loaded house map.
+
+Example:
+```pascal
+WriteLn(House.Position());
+WriteLn(House.Similarity); // Check to see the match percentage if needed
+```
+*)
+function THouse.Position(): TPoint;
+const
+  SCALE: Integer = 2;
+var
+  clean, half: TImage;
+  matrix: TIntegerMatrix;
+  results: TPointArray;
+  i: Integer;
+  hit, center: TPoint;
+  angle, match: Single;
+begin
+  Self.Similarity := 0;
+
+  angle := Minimap.CompassRadians;
+  clean := Minimap.GetCleanImage(angle, Self.Sample.Radius);
+  results := Self.ScaledSearch(clean);
+
+  half := Minimap.ScaleMinimap(clean, SCALE, Self.Sample.Radius);
+  half := half.Blend(half.FindColor($0, 0), 10);
+  matrix := half.ToMatrix();
+
+  for i := 0 to High(results) do
+  begin
+    hit := TImageMap.FullSearch(matrix, Self.Loader.HalfMap, results[i], SCALE, match);
+
+    if match > Self.Similarity then
+    begin
+      Self.Similarity := match;
+      Result := hit;
+    end;
+  end;
+
+  center := clean.Center;
+
+  if Client.Mode = EMode.FIXED then
+    center := center.Offset(0, 8).Rotate(-angle, center)
+  else
+    center := center.Offset(2, 1).Rotate(-angle, center);
+
+  Result := Result.Offset(center);
+  Result := RSTranslator.Normalize(Result);
+end;
+
+(*
+## House.DebugPosition
+```pascal
+function THouse.DebugPosition(): TPoint;
+```
+Debugs the player position in the currently loaded house map.
+
+Example:
+```pascal
+//setup your house and house.loader
+while True do
+  Map.DebugPosition();
+```
+*)
+function THouse.DebugPosition(print: Boolean = True): TPoint;
+  function _BoxStr(b: TBox): String;
+  begin
+    Result := Format('[%d, %d, %d, %d]', [b.X1, b.Y1, b.X2, b.Y2]);
+  end;
+var
+  x1, y1, x2, y2, x, y, i: Int32;
+  p, local: TPoint;
+  img, map, cleanMinimap: TImage;
+  time: Double;
+  lines: TStringArray;
+begin
+  Target.FreezeImage();
+
+  time   := PerformanceTime();
+  Result := Self.Position();
+
+  time   := PerformanceTime() - time;
+
+  x1 := Max(0, local.X - 200);
+  y1 := Max(0, local.Y - 200);
+  x2 := Min(x1 + 400, Self.Loader.Map.Width  - 1);
+  y2 := Min(y1 + 400, Self.Loader.Map.Height - 1);
+
+  x := local.X - x1;
+  y := local.Y - y1;
+
+  lines := [
+    'Position:',
+    ' - Position: ' + Format('[%d, %d]', [Result.X, Result.Y]),
+    '',
+    'Certainty: '    + ToStr(Round(Self.Similarity, 3)),
+    'Time: '         + ToStr(Round(time)) + ' ms'
+  ];
+
+  map := Self.Loader.Map.Copy([x1, y1, x2, y2]);
+  map.DrawColor := $00FF00;
+  map.DrawLine(Point(0, y), Point(x2 - x1, y));
+  map.DrawLine(Point(x, 0), Point(x, y2 - y1));
+  map.DrawColor := $FFFFFF;
+  map.DrawBox([x - 2, y - 2, x + 2, y + 2]);
+
+  cleanMinimap := Minimap.ScaleMinimap(Minimap.GetCleanImage(), 1);
+  img := new TImage(700 + cleanMinimap.Width, 440);
+  img.DrawImage(map, [10, 20]);
+  with cleanMinimap.Center do
+    if Client.Mode = EMode.FIXED then
+      p := Point(X, Y).Offset(0, 8).Rotate(-Minimap.CompassRadians, [X,Y]);
+
+  cleanMinimap.DrawColor := $FFFFFF;
+  cleanMinimap.DrawBoxFilled([p.X - 1, p.Y - 1, p.X + 1, p.Y + 1]);
+
+  {$IFDEF WINDOWS}
+  img.FontName := 'Consolas';
+  {$ENDIF}
+  img.FontSize := 18;
+  img.FontAntialiasing := True;
+
+  img.DrawColor := $FFFFFF;
+  for i := 0 to High(lines) do
+  begin
+    if print then WriteLn(lines[i]);
+    img.DrawText(lines[i], [430, cleanMinimap.Height + 20 + 20 * i]);
+  end;
+
+  img.DrawImage(cleanMinimap, [520, 10]);
+  img.Show();
+
+  Target.UnFreezeImage();
+end;
+
+
+
+function THouse.IsLoading(): Boolean;
+begin
+  //TODO...
+  Result := True;
+end;
+
+function THouse.Inside(): Boolean;
+begin
+  //TODO...
+  Result := True;
+end;
+
+
+function THouse.Enter(): Boolean;
+var
+  CAPES: TItemArray = ['Construct. cape', 'Construct. cape(t)', 'Max cape'];
+  slot: Integer;
+  option: String;
+  loading, outside: Boolean;
+begin
+  if Self.Inside() then
+    Exit(True);
+
+  if Map.Position().AnyInRange(Self.Entrance.Coordinates, 60) then
+  begin
+    if not Self.Entrance.WalkInteract(['Home']) then Exit;
+    Exit(SleepUntil(Self.Inside(), 300, 10000));
+  end;
+
+  case Self.TeleportMode of
+    EHouseTeleportMode.SPELL:
+      begin
+        if not Magic.Open() then
+          Exit;
+        if not Magic.ContainsSpell(ESpell.TELEPORT_TO_HOUSE) then
+          RaiseException('Can''t find teleport to house spell.');
+        if not Magic.Cast(ESpell.TELEPORT_TO_HOUSE, 'Cast') then
+          Exit;
+      end;
+    EHouseTeleportMode.TABLET:
+      begin
+        if not Inventory.Open() then Exit;
+        if not Inventory.Items.Find('Teleport to house', slot) then
+          raise GetDebugLn('House', 'Can''t find teleport to house tablet.');
+        if Self.TeleportPlace = EHouseTeleportPlace.OUTSIDE then
+          option := 'Inside';
+        if not Inventory.Slots.Interact(slot, option) then
+          Exit;
+      end;
+    EHouseTeleportMode.CAPE:
+    begin
+      if Self.CapeTab <> EGameTab.NONE then
+        GameTabs.Open(Self.CapeTab);
+      //TODO... GEARHANDLER;
+      DebugLn('THouse', '"Enter" method is missing gear handler to handle capes: ' + ToStr(CAPES), ELogLevel.WARN);
+      //if not CAPES.Interact(Self.HouseTeleportItem, 'Tele to POH') then Exit;
+      Self.CapeTab := GameTabs.GetCurrent();
+    end;
+  end;
+
+  Result := SleepUntil(
+    (loading := Self.IsLoading()) or (outside := Map.Position().AnyInRange(Self.Entrance.Coordinates, 30)),
+    300, 3000
+  );
+
+  if outside then
+  begin
+    Self.TeleportPlace := EHouseTeleportPlace.OUTSIDE;
+    Result := False;
+  end;
+
+  if loading then
+    Result := SleepUntil(Self.Inside(), 300, 4000);
+
+  if not Result then
+  begin
+    if Map.Position().AnyInRange(Self.Entrance.Coordinates, 60) then
+    begin
+      if not Self.Entrance.WalkInteract(['Home']) then Exit;
+      Exit(SleepUntil(Self.Inside(), 300, 4000));
+    end;
+  end;
+end;
+
+function THouse.Leave(): Boolean;
+begin
+  if not Self.Inside() then Exit(True);
+
+  case Biometrics.RandomBoolean(0.95) of
+    True:  if not HouseOptions.LeaveHouse() then Exit;
+    False: if not Self.Objects[EHouseObject.EXIT].WalkInteract(['Enter']) then Exit;
+  end;
+
+  Result := SleepUntil(not Self.Inside(), 300, 3000);
+end;
+
+var
+(*
+## House variable
+Global {ref}`THouse` variable.
+*)
+  House: THouse;

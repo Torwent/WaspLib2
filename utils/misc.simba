@@ -1,0 +1,307 @@
+(*
+# Misc
+Misc functions and methods that don't really fit in a single place at the moment
+*)
+{$DEFINE WL_MISC_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+(*
+## Level2XP
+```pascal
+function Level2XP(level: Integer): Integer;
+```
+Converts a level to the xp required for that level.
+
+Example:
+```pascal
+  WriteLn Level2XP(70);
+```
+*)
+function Level2XP(level: Integer): Integer;
+var
+  total:Double;
+  i:Integer;
+begin
+  for i := 1 to level-1 do
+    total += Floor(i + 300 * 2 ** (i / 7));
+  Result := Floor(total / 4);
+end;
+
+(*
+## XP2Level
+```pascal
+function XP2Level(xp: Integer): Integer;
+```
+Converts XP to the respective level.
+
+Example:
+```pascal
+WriteLn XP2Level(100000);
+```
+*)
+function XP2Level(xp: Integer): Integer;
+var
+  total: Double;
+begin
+  while (total < xp*4+1) do
+  begin
+    Inc(Result);
+    total += Floor(Result + 300 * 2 ** (Result / 7));
+  end;
+end;
+
+
+(*
+## FormatNumber
+```pascal
+function FormatNumber(n: Double; dec: Byte = 3): String;
+```
+Truncates a number.
+
+Example:
+```pascal
+WriteLn FormatNumber(100000); //100k
+```
+*)
+function FormatNumber(n: Double; dec: Byte = 3): String;
+const
+  SUFFIXES: TStringArray = ['', 'K', 'M', 'B', 'T'];
+var
+  i: Integer;
+  f: Double;
+begin
+  if n = 0 then
+    Exit('0');
+
+  i := Min(Trunc(Ln(Abs(n)) / Ln(1000)), 4);
+  f := n / Power(1000, i);
+
+  Result := FormatFloat('0.' + StringOfChar('#', dec), f) + Suffixes[i];
+end;
+
+
+(*
+## TColor.Random
+```pascal
+function TColor.Random(min: Byte = $80): TColor; static;
+```
+Returns a random `TColor` with a `min` value of brightness.
+`min` is a `Byte` so it goes from $00 (0) to $FF (255).
+
+Example:
+```pascal
+WriteLn TColor.Random();
+```
+*)
+function TColor.Random(min: Byte = $80): TColor; static;
+var
+  rest, r, g, b: Byte;
+begin
+  rest := $FF-min;
+  r := min + Random(rest);
+  g := min + Random(rest);
+  b := min + Random(rest);
+  Result := (b shl 16) or (g shl 8) or r;
+end;
+
+(*
+## TColorArray.GetRarest
+```pascal
+function TColorArray.GetRarest(): TColor;
+```
+Returns a the rarest `TColor` in the `TColorArray`.
+
+Example:
+```pascal
+WriteLn arr.GetRarest();
+```
+*)
+function TColorArray.GetRarest(): TColor;
+var
+  weights: TIntegerArray;
+  i,L    : Integer;
+begin
+  L := High(Self);
+  if (L <= 0) then Exit;
+
+  SetLength(weights, L + 1);
+  for i := 0 To L do weights[i] := Self.IndicesOf(Self[i]).Length;
+
+  Self.Sort(weights, True);
+  Result := Self[0];
+end;
+
+(*
+## TStringArray.AnyContains
+```pascal
+function TStringArray.AnyContains(value: String; matchCase: Boolean = True): Boolean;
+```
+Returns True/False if any String in the TStringArray contains `value`.
+*)
+function TStringArray.AnyContains(value: String; matchCase: Boolean = True): Boolean;
+var
+  i: Integer;
+begin
+  for i := 0 to High(Self) do
+    if Self[i].Contains(value, matchCase) then
+      Exit(True);
+end;
+
+(*
+## TImage.ColorsInLineEx
+```pascal
+function TImage.ColorsInLineEx(start, stop: TPoint; colors: TIntegerArray): Boolean;
+```
+Checks if any of the specified `colors` exist on the line between `start` and `stop`.
+Uses horizontal and vertical line checking.
+*)
+function TImage.ColorsInLineEx(start, stop: TPoint; colors: TIntegerArray): Boolean;
+var
+  x, y: Integer;
+  pXCross, pYCross, qXCross, qYCross: Boolean;
+begin
+  for x := Min(start.X, stop.X) to Max(start.X, stop.X) do
+  begin
+    if not pXCross then pXCross := Self.Pixel[x, start.Y] in colors;
+    if not qXCross then qXCross := Self.Pixel[x, stop.Y] in colors;
+    if pXCross and qXCross then Exit(True);
+  end;
+
+  for y := Min(start.Y, stop.Y) to Max(start.Y, stop.Y) do
+  begin
+    if not pYCross then pYCross := Self.Pixel[start.X, y] in colors;
+    if not qYCross then qYCross := Self.Pixel[stop.X, y] in colors;
+    if pYCross and qYCross then Exit(True);
+  end;
+
+  Result := (pXCross and pYCross) or (qXCross and qYCross);
+end;
+
+(*
+## TImage.ColorsInLine
+```pascal
+function TImage.ColorsInLine(start, stop: TPoint; colors: TIntegerArray): Boolean;
+```
+Checks if any of the specified `colors` exist on the line between `start` and `stop`.
+Uses Bresenham's line algorithm for pixel-accurate line tracing.
+
+Credits: Simba1400/Source/MML/simba.tpa.pas
+*)
+function TImage.ColorsInLine(start, stop: TPoint; colors: TIntegerArray): Boolean;
+var
+  Xinc, YInc: Integer;
+  TwoDxAccumulatedError, TwoDyAccumulatedError: Integer;
+  current, d, twoD: TPoint;
+begin
+  d := [(stop.X-start.X), (stop.Y-start.Y)];
+  twoD := [d.X + d.X, d.Y + d.Y];
+  current := start;
+  Xinc := 1;
+  Yinc := 1;
+
+  if (d.X < 0) then
+  begin
+    Xinc := -1;
+    d.X := - d.X;
+    twoD.X := - twoD.X;
+  end;
+
+  if (d.Y < 0) then
+  begin
+    Yinc := -1;
+    d.Y := -d.Y;
+    twoD.Y := - twoD.Y;
+  end;
+
+  if ((d.X = 0) and (D.Y = 0)) then
+    Exit;
+
+  if (d.Y <= d.X) then
+  begin
+    repeat
+      Inc(current.X, Xinc);
+      Inc(TwoDxAccumulatedError, twoD.Y);
+      if (TwoDxAccumulatedError > d.X) then
+      begin
+        Inc(current.Y, Yinc);
+        Dec(TwoDxAccumulatedError, twoD.X);
+      end;
+
+      if Self.Pixel[current.X, current.Y] in colors then Exit(True);
+    until (current.X = stop.X);
+
+    Exit;
+  end;
+
+  repeat
+    Inc(current.Y, Yinc);
+    Inc(TwoDyAccumulatedError, twoD.X);
+
+    if (TwoDyAccumulatedError > d.Y) then
+    begin
+      Inc(current.X, Xinc);
+      Dec(TwoDyAccumulatedError, twoD.Y);
+    end;
+
+    if Self.Pixel[current.X, current.Y] in colors then Exit(True);
+  until (current.Y = stop.Y);
+end;
+
+(*
+## SaveScreenshotEx
+```pascal
+function SaveScreenshotEx(folder: String; bounds: TBox = [-1,-1,-1,-1]): String;
+```
+Saves a screenshot to a subfolder of Simba's screenshots directory.
+Returns the file path on success, empty string on failure.
+*)
+function SaveScreenshotEx(folder: String; bounds: TBox = [-1,-1,-1,-1]): String;
+var
+  path: String;
+  img: TImage;
+begin
+  path := SimbaEnv.ScreenshotsPath + folder + PATH_SEP;
+  if not DirCreate(path) then Exit;
+
+  path += TDateTime.CreateFromSystem().ToString(FILE_TIME_FORMAT);
+
+  img := Target.GetImage(bounds);
+  if img.Save(path + '.png', True) then
+    Result := path;
+end;
+
+var
+(*
+## Activity
+Global `Activity` variable.
+
+You can use this to handle the activity in your script.
+
+The idea behind "Activity" is that it's a timer, by default that runs for 5
+minutes. Everytime your script is considered "active" the timer is reset back to
+the start.
+
+If `Activity.IsFinished` ever returns `True` that means your script is inactive
+or you are not restarting `Activity` properly.
+
+By default, WaspLib will restart `Activity` for your when {ref}`XPBar.EarnedXP`
+or {ref}`XPBar.WaitXP` return `True`.
+
+For more custom ways of using this kind of activity tracker you need to
+implement it but you could for example, in a fishing script, restart `Activity`
+whenever you get a fish with:
+```pascal
+Activity.Restart();
+```
+
+Using `Activity` to shutdown your script or correct course is up to you.
+A simple way to shutdown your script would be to add this to your main loop:
+```pascal
+if Activity.IsFinished then
+  raise 'Script shutdown due to no activity detected for 5 minutes.';
+```
+*)
+  Activity: TCountDown;
+
+type
+  EOrientation = enum(HORIZONTAL, VERTICAL);

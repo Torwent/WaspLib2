@@ -1,0 +1,207 @@
+{%anchor WaspLib}
+(*
+# WaspLib
+WaspLib is a library used to bot a popular MMORPG with Simba 2.0.
+WaspLib is heavily inspired in previous work done by the SRL Community.
+
+This library is meant to do the job of both [SRL-T](https://github.com/Torwent/SRL-T)
+and the original [WaspLib](https://github.com/Torwent/WaspLib) in Simba 1.4 in a lighter,
+less confusing way.
+*)
+
+{%anchor Compiler Directives}
+(*
+## Compiler Directives
+```pascal
+{$DEFINE WL_DISABLE_FAKE_INPUT}
+{$DEFINE WL_GENERATE_GRAPH_ALWAYS}
+{$DEFINE WL_DEBUG_MAPLOADER}
+{$DEFINE WL_DEBUG_MOUSE}
+{$DEFINE WL_DEBUG_KEYBINDS}
+{$DEFINE WL_DEBUG_UPTEXT}
+{$DEFINE WL_DEBUG_INTERFACES}
+{$DEFINE WL_DEBUG_MAP}
+{$DEFINE WL_DEBUG_TRANSPORTER}
+{$DEFINE WL_DEBUG_CHAT_LISTENER}
+{$DEFINE WL_DEBUG_LEVELUP_LISTENER}
+{$DEFINE WL_DEBUG_RECORDER}
+```
+These are the main compiler directives available in the library.
+
+They should be self-explanatory.
+
+You also have the following to override versions, for more information read {ref}`Version`
+```pascal
+{$DEFINE SCRIPT_SIMBA_VERSION := 'version_hash'}
+{$DEFINE SCRIPT_WASPLIB_VERSION := 'version_hash'}
+```
+
+For the {ref}`WaspClient` you also have the following:
+```pascal
+{$DEFINE WASP_LOCAL_DEVELOPMENT}
+{$DEFINE WASP_REFRESH_TOKEN := 'refresh_token'}
+{$DEFINE SCRIPT_ID := 'script_UUID'}
+{$DEFINE SCRIPT_REVISION := 'script_revision'}
+```
+They also should be self-explanatory but you can read more about them in
+{ref}`WaspClient`.
+
+All of the directives above must be added **before** including the library to
+use them, for example:
+```pascal
+{$DEFINE WL_DISABLE_FAKE_INPUT}
+{$I WaspLib/main.simba}
+```
+Otherwise WaspLib won't be aware of them.
+*)
+
+{$INCLUDE_ONCE version.simba}
+{$INCLUDE_ONCE utils.simba}
+
+{
+The following allows individual include files to compile on their own with
+just having {$INCLUDE_ONCE WaspLib/osr.simba}
+
+Summary: It includes this file until the current file is reached.
+}
+
+{$IFNDEF WL_BIOMETRICS_INCLUDED}            {$INCLUDE_ONCE main/antiban/biometrics.simba}
+
+{$IFNDEF WL_CLIENT_INCLUDED}                {$INCLUDE_ONCE main/client.simba}
+{$IFNDEF WL_FAKE_INPUT_INCLUDED}            {$INCLUDE_ONCE main/fakeinput.simba}
+{$IFNDEF WL_CACHEPARSER_INCLUDED}           {$INCLUDE_ONCE main/cacheparser.simba}
+
+{$IFNDEF WL_ITEMFINDER_INCLUDED}            {$INCLUDE_ONCE main/finders/itemfinder.simba}
+{$IFNDEF WL_SPELLFINDER_INCLUDED}           {$INCLUDE_ONCE main/finders/spellfinder.simba}
+{$IFNDEF WL_PRAYERFINDER_INCLUDED}          {$INCLUDE_ONCE main/finders/prayerfinder.simba}
+{$IFNDEF WL_DATA_INCLUDED}                  {$INCLUDE_ONCE main/data/data.simba}
+
+{$IFNDEF WL_INTERFACE_CORE_INCLUDED}        {$INCLUDE_ONCE main/interfaces/interface.simba}
+{$IFNDEF WL_LOBBY_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/login/lobby.simba}
+{$IFNDEF WL_LOGIN_WORLDSWITCHER_INCLUDED}   {$INCLUDE_ONCE main/interfaces/login/worldswitcher.simba}
+{$IFNDEF WL_LOGIN_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/login/login.simba}
+{$IFNDEF WL_INTERFACE_CONTROLS_INCLUDED}    {$INCLUDE_ONCE main/interfaces/interfacecontrols.simba}
+{$IFNDEF WL_CHOOSEOPTION_INCLUDED}          {$INCLUDE_ONCE main/interfaces/chooseoption.simba}
+{$IFNDEF WL_MAINSCREEN_INCLUDED}            {$INCLUDE_ONCE main/interfaces/mainscreen/mainscreen.simba}
+{$IFNDEF WL_MINIMAP_INCLUDED}               {$INCLUDE_ONCE main/interfaces/minimap.simba}
+{$IFNDEF WL_SAILING_MINIMAP_INCLUDED}       {$INCLUDE_ONCE main/interfaces/sailing_minimap.simba}
+
+{$IFNDEF WL_OVERHEADFINDER_INCLUDED}        {$INCLUDE_ONCE main/finders/overheadfinder.simba}
+
+{$IFNDEF WL_GAMETABS_INCLUDED}              {$INCLUDE_ONCE main/interfaces/gametabs/gametabs.simba}
+{$IFNDEF WL_CHAT_TABS_INCLUDED}             {$INCLUDE_ONCE main/interfaces/chat/chattabs.simba}
+{$IFNDEF WL_CHAT_INCLUDED}                  {$INCLUDE_ONCE main/interfaces/chat/chat.simba}
+{$IFNDEF WL_CHAT_OPTIONS_INCLUDED}          {$INCLUDE_ONCE main/interfaces/chat/chatoptions.simba}
+{$IFNDEF WL_MAKE_INCLUDED}                  {$INCLUDE_ONCE main/interfaces/chat/make.simba}
+{$IFNDEF WL_INTERFACE_AREA_INCLUDED}        {$INCLUDE_ONCE main/interfaces/interfacearea.simba}
+
+{$IFNDEF WL_SLOT_INTERFACE_INCLUDED}        {$INCLUDE_ONCE main/interfaces/slotinterface.simba}
+{$IFNDEF WL_ITEM_INTERFACE_INCLUDED}        {$INCLUDE_ONCE main/interfaces/iteminterface.simba}
+
+{$IFNDEF WL_SAILING_INCLUDED}               {$INCLUDE_ONCE main/interfaces/gametabs/sailing.simba}
+{$IFNDEF WL_COMBAT_INCLUDED}                {$INCLUDE_ONCE main/interfaces/gametabs/combat.simba}
+{$IFNDEF WL_STATS_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/gametabs/stats.simba}
+{$IFNDEF WL_ACHIEVEMENTS_INCLUDED}          {$INCLUDE_ONCE main/interfaces/gametabs/achievements.simba}
+{$IFNDEF WL_INVENTORY_INCLUDED}             {$INCLUDE_ONCE main/interfaces/gametabs/inventory.simba}
+{$IFNDEF WL_EQUIPMENT_INCLUDED}             {$INCLUDE_ONCE main/interfaces/gametabs/equipment.simba}
+{$IFNDEF WL_PRAYER_INCLUDED}                {$INCLUDE_ONCE main/interfaces/gametabs/prayer.simba}
+{$IFNDEF WL_MAGIC_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/gametabs/magic.simba}
+
+{$IFNDEF WL_GROUPING_INCLUDED}              {$INCLUDE_ONCE main/interfaces/gametabs/grouping.simba}
+{$IFNDEF WL_FRIENDS_INCLUDED}               {$INCLUDE_ONCE main/interfaces/gametabs/friends.simba}
+{$IFNDEF WL_ACCOUNT_INCLUDED}               {$INCLUDE_ONCE main/interfaces/gametabs/account.simba}
+{$IFNDEF WL_WORLDSWITCHER_INCLUDED}         {$INCLUDE_ONCE main/interfaces/gametabs/worldswitcher.simba}
+{$IFNDEF WL_LOGOUT_INCLUDED}                {$INCLUDE_ONCE main/interfaces/gametabs/logout.simba}
+{$IFNDEF WL_HOUSEOPTIONS_INCLUDED}          {$INCLUDE_ONCE main/interfaces/gametabs/houseoptions.simba}
+{$IFNDEF WL_OPTIONS_INCLUDED}               {$INCLUDE_ONCE main/interfaces/gametabs/options.simba}
+{$IFNDEF WL_EMOTES_INCLUDED}                {$INCLUDE_ONCE main/interfaces/gametabs/emotes.simba}
+{$IFNDEF WL_MUSIC_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/gametabs/music.simba}
+
+{$IFNDEF WL_GOALS_FORM_INCLUDED}            {$INCLUDE_ONCE main/forms/goals_form.simba}
+
+
+{$IFNDEF WL_XPBAR_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/xpbar.simba}
+{$IFNDEF WL_XPBAR_MENU_INCLUDED}            {$INCLUDE_ONCE main/interfaces/mainscreen/xpbarmenu.simba}
+
+{$IFNDEF WL_MOUSEZOOM_INCLUDED}             {$INCLUDE_ONCE main/mousezoom.simba}
+{$IFNDEF WL_DOTFILTERS_INCLUDED}            {$INCLUDE_ONCE main/dotfilters.simba}
+
+
+{$IFNDEF WL_MM2MS_INCLUDED}                 {$INCLUDE_ONCE main/projection/mm2ms.simba}
+{$IFNDEF WL_CAMERA_INCLUDED}                {$INCLUDE_ONCE main/projection/camera.simba}
+{$IFNDEF WL_PROJECTION_INCLUDED}            {$INCLUDE_ONCE main/projection/projection.simba}
+
+{$IFNDEF WL_ANTIBAN_INCLUDED}               {$INCLUDE_ONCE main/antiban/antiban.simba}
+
+
+{$IFNDEF WL_WALKER_INCLUDED}                {$INCLUDE_ONCE main/walker.simba}
+{$IFNDEF WL_COLORFINDER_INCLUDED}           {$INCLUDE_ONCE main/interfaces/mainscreen/finders/colorfinder.simba}
+
+{$IFNDEF WL_IMAGEMAP_INCLUDED}              {$INCLUDE_ONCE main/position/imagemap.simba}
+{$IFNDEF WL_MAPLOADER_INCLUDED}             {$INCLUDE_ONCE main/position/map/maploader.simba}
+{$IFNDEF WL_MAP_INCLUDED}                   {$INCLUDE_ONCE main/position/map/map.simba}
+{$IFNDEF WL_OBJECTS_INCLUDED}               {$INCLUDE_ONCE main/position/map/objects.simba}
+{$IFNDEF WL_ENTITIES_INCLUDED}              {$INCLUDE_ONCE main/position/map/entities.simba}
+{$IFNDEF WL_MAPDEBUGGER_INCLUDED}           {$INCLUDE_ONCE main/position/map/mapdebugger.simba}
+{$IFNDEF WL_MAPJSON_INCLUDED}               {$INCLUDE_ONCE main/position/map/mapjson.simba}
+
+{$IFNDEF WL_HOUSEUTILS_INCLUDED}            {$INCLUDE_ONCE main/position/house/houseutils.simba}
+{$IFNDEF WL_HOUSELOADER_INCLUDED}           {$INCLUDE_ONCE main/position/house/houseloader.simba}
+{$IFNDEF WL_HOUSE_INCLUDED}                 {$INCLUDE_ONCE main/position/house/house.simba}
+{$IFNDEF WL_HOUSE_LAYOUT_FINDER_INCLUDED}   {$INCLUDE_ONCE main/finders/house_layout_finder.simba}
+{$IFNDEF WL_HOUSE_VIEWER_INCLUDED}          {$INCLUDE_ONCE main/interfaces/mainscreen/houseviewer.simba}
+{$IFNDEF WL_HOUSE_FORM_INCLUDED}            {$INCLUDE_ONCE main/forms/house_form.simba}
+
+{$IFNDEF WL_BANKPIN_INCLUDED}               {$INCLUDE_ONCE main/interfaces/mainscreen/bankpin.simba}
+{$IFNDEF WL_BANK_INCLUDED}                  {$INCLUDE_ONCE main/interfaces/mainscreen/bank.simba}
+{$IFNDEF WL_COLLECTIONBOX_INCLUDED}         {$INCLUDE_ONCE main/interfaces/mainscreen/collectionbox.simba}
+{$IFNDEF WL_ANVIL_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/mainscreen/anvil.simba}
+{$IFNDEF WL_GOLDSCREEN_INCLUDED}            {$INCLUDE_ONCE main/interfaces/mainscreen/goldscreen.simba}
+{$IFNDEF WL_SILVERSCREEN_INCLUDED}          {$INCLUDE_ONCE main/interfaces/mainscreen/silverscreen.simba}
+{$IFNDEF WL_DEPOSITBOX_INCLUDED}            {$INCLUDE_ONCE main/interfaces/mainscreen/depositbox.simba}
+{$IFNDEF WL_LAMP_INCLUDED}                  {$INCLUDE_ONCE main/interfaces/mainscreen/lamp.simba}
+{$IFNDEF WL_GRANDEXCHANGE_INCLUDED}         {$INCLUDE_ONCE main/interfaces/mainscreen/grandexchange/grandexchange.simba}
+{$IFNDEF WL_GRANDEXCHANGE_HISTORY_INCLUDED} {$INCLUDE_ONCE main/interfaces/mainscreen/grandexchange/grandexchange_history.simba}
+{$IFNDEF WL_GRANDEXCHANGE_CHAT_INCLUDED}    {$INCLUDE_ONCE main/interfaces/mainscreen/grandexchange/grandexchange_chat.simba}
+{$IFNDEF WL_GRANDEXCHANGE_OFFER_INCLUDED}   {$INCLUDE_ONCE main/interfaces/mainscreen/grandexchange/grandexchange_offer.simba}
+{$IFNDEF WL_SHOP_INCLUDED}                  {$INCLUDE_ONCE main/interfaces/mainscreen/shop.simba}
+{$IFNDEF WL_CARGOHOLD_INCLUDED}             {$INCLUDE_ONCE main/interfaces/mainscreen/cargohold.simba}
+{$IFNDEF WL_FAIRYRING_INCLUDED}             {$INCLUDE_ONCE main/interfaces/mainscreen/fairyring.simba}
+{$IFNDEF WL_HITSPLATS_INCLUDED}             {$INCLUDE_ONCE main/interfaces/mainscreen/finders/hitsplats.simba}
+{$IFNDEF WL_HPBARS_INCLUDED}                {$INCLUDE_ONCE main/interfaces/mainscreen/finders/hpbars.simba}
+
+{$IFNDEF WL_GEAR_LAYOUTS_INCLUDED}          {$INCLUDE_ONCE main/interfaces/handlers/gear_layout.simba}
+{$IFNDEF WL_GEAR_FORM_INCLUDED}             {$INCLUDE_ONCE main/forms/gear_form.simba}
+{$IFNDEF WL_INVENTORY_LAYOUTS_INCLUDED}     {$INCLUDE_ONCE main/interfaces/handlers/inventory_layout.simba}
+{$IFNDEF WL_INVENTORY_FORM_INCLUDED}        {$INCLUDE_ONCE main/forms/inventory_form.simba}
+{$IFNDEF WL_PRAYER_FORM_INCLUDED}           {$INCLUDE_ONCE main/forms/prayer_form.simba}
+{$IFNDEF WL_CONSUMABLES_INCLUDED}           {$INCLUDE_ONCE main/interfaces/handlers/consumables.simba}
+{$IFNDEF WL_TRANSPORTER_INCLUDED}           {$INCLUDE_ONCE main/position/map/transporter.simba}
+
+{$IFNDEF WL_CHAT_LISTENER_INCLUDED}         {$INCLUDE_ONCE main/listeners/chat_listener.simba}
+{$IFNDEF WL_LEVELUP_LISTENER_INCLUDED}      {$INCLUDE_ONCE main/listeners/levelup_listener.simba}
+{$IFNDEF WL_LISTENERS_INCLUDED}             {$INCLUDE_ONCE main/listeners/listeners.simba}
+
+{$IFNDEF WL_ANTIBAN_TASKS_INCLUDED}         {$INCLUDE_ONCE main/antiban/antibantasks.simba}
+{$IFNDEF WL_ANTIBAN_FORM_INCLUDED}          {$INCLUDE_ONCE main/forms/antiban_form.simba}
+{$IFNDEF WL_RECORDER_INCLUDED}              {$INCLUDE_ONCE main/recorder/recorder.simba}
+{$IFNDEF WL_WASPCLIENT_FORM_INCLUDED}       {$INCLUDE_ONCE main/forms/waspclient_form.simba}
+{$IFNDEF WL_RECORDER_FORM_INCLUDED}         {$INCLUDE_ONCE main/forms/recorder_form.simba}
+{$IFNDEF WL_LLM_FORM_INCLUDED}              {$INCLUDE_ONCE main/forms/llm_form.simba}
+{$IFNDEF WL_MISC_FORM_INCLUDED}             {$INCLUDE_ONCE main/forms/misc_form.simba}
+
+{$IFNDEF WL_SETUP_INCLUDED}                 {$INCLUDE_ONCE main/interfaces/setup.simba}
+{$IFNDEF WL_INTERFACE_DEBUGGING_INCLUDED}   {$INCLUDE_ONCE main/interfaces/debugging.simba}
+{$IFNDEF WL_OVERRIDES_INCLUDED}             {$INCLUDE_ONCE main/overrides.simba}
+
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}

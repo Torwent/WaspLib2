@@ -1,0 +1,228 @@
+//!PACKAGE SCRIPT
+(*
+(Resource Editor)=
+# Tool: Resource Editor
+Tool to inspect and edit resource files created by Simba's `TResourceWriter`:
+
+```{figure} ../../images/resource_editor.png
+```
+
+These files usually end in a `.bin` extension and are an optimized way to store
+multiple compressed files for Simba to read from.
+
+This tool is also a little bit slow at doing certain things like loading the
+files bytes, adding and removing files/images because Simba is not optimized for
+what this tool does.
+*)
+{$I WaspLib/main.simba}
+
+var
+  HEX_TABLE: TStringArray;
+function ToString(constref value: TByteArray): String; override;
+var
+  i: Integer;
+begin
+  for i := 0 to High(value)-1 do
+    Result += HEX_TABLE[value[i]] + ' ';
+  Result += HEX_TABLE[value[High(value)]];
+end;
+
+
+type
+  TResourceEditor = record
+    Form: TLazForm;
+    FileList: TLazListBox;
+    Reader: TResourceReader;
+    Dialog: TLazOpenDialog;
+    FileData: TLazMemo;
+    FileImage: TImageBox;
+    SelectedResource, CompressionAlgo, CompressedSize, Uncompressed: TLazEdit;
+  end;
+
+{$H-}
+procedure TResourceEditor.OnOpenClick(sender: TLazObject);
+begin
+  if not Self.Dialog.Execute() then
+    Exit;
+
+  Self.FileList.Items.BeginUpdate();
+  Self.FileList.Clear();
+  Self.FileList.ItemIndex := -1;
+  try
+    Self.Reader := new TResourceReader(Self.Dialog.FileName);
+    Self.SelectedResource.Text := Self.Dialog.FileName;
+    Self.FileList.Items.AddStrings(Self.Reader.Names);
+  except
+      Self.SelectedResource.Text := '';
+  finally
+    Self.FileList.Items.EndUpdate();
+  end;
+end;
+
+procedure TResourceEditor.OnAddFileClick(sender: TLazObject);
+var
+  writer: TResourceWriter;
+  name: String;
+  i: Integer;
+  data: TByteArray;
+begin
+  if not Self.Dialog.Execute() then
+    Exit;
+
+  writer := new TResourceWriter();
+  for i := 0 to Self.Reader.Count-1 do
+  begin
+    data := Self.Reader.Load(i);
+    writer.Add(Self.Reader.Name[i], @data[0], Length(data));
+  end;
+
+  data := FileReadBytes(Self.Dialog.FileName);
+  name := PathExtractName(Self.Dialog.FileName);
+  writer.Add(name, @data[0], Length(data));
+
+  Self.Reader.Unload();
+  Self.Reader.Destroy();
+  FileDelete(Self.SelectedResource.Text);
+  writer.Save(Self.SelectedResource.Text);
+  Self.Reader := new TResourceReader(Self.SelectedResource.Text);
+  Self.FileList.Items.Add(name);
+  Self.FileList.ItemIndex := Self.FileList.Count-1;
+end;
+
+procedure TResourceEditor.OnAddImageClick(sender: TLazObject);
+var
+  writer: TResourceWriter;
+  name: String;
+  i: Integer;
+  data: TByteArray;
+  img: TImage;
+begin
+  if not Self.Dialog.Execute() then
+    Exit;
+
+  writer := new TResourceWriter();
+  for i := 0 to Self.Reader.Count-1 do
+  begin
+    data := Self.Reader.Load(i);
+    writer.Add(Self.Reader.Name[i], @data[0], Length(data));
+  end;
+
+  img := new TImage(Self.Dialog.FileName);
+  name := PathExtractName(Self.Dialog.FileName);
+  writer.AddImage(name, img);
+
+  Self.Reader.Unload();
+  Self.Reader.Destroy();
+  FileDelete(Self.SelectedResource.Text);
+  writer.Save(Self.SelectedResource.Text);
+  Self.Reader := new TResourceReader(Self.SelectedResource.Text);
+  Self.FileList.Items.Add(name);
+  Self.FileList.ItemIndex := Self.FileList.Count-1;
+end;
+
+procedure TResourceEditor.OnRemoveClick(sender: TLazObject);
+var
+  idx, i: Integer;
+  writer: TResourceWriter;
+  data: TByteArray;
+begin
+  idx := Self.FileList.ItemIndex;
+  if idx < 0 then Exit;
+
+  Self.FileList.Items.Delete(idx);
+  writer := new TResourceWriter();
+
+  for i := 0 to Self.Reader.Count-1 do
+  begin
+    if i = idx then Continue;
+    data := Self.Reader.Load(i);
+    writer.Add(Self.Reader.Name[i], @data[0], Length(data));
+  end;
+
+  Self.Reader.Unload();
+  Self.Reader.Destroy();
+  FileDelete(Self.SelectedResource.Text);
+  writer.Save(Self.SelectedResource.Text);
+  Self.Reader := new TResourceReader(Self.SelectedResource.Text);
+end;
+
+procedure TResourceEditor.OnSelectionChange(sender: TLazObject; user: Boolean);
+var
+  i: Integer;
+  data: TByteArray;
+begin
+  i := TLazListBox(sender).ItemIndex;
+  try
+    Self.FileImage.SetImage(Self.Reader.LoadImage(i));
+  except
+  end;
+
+  data := Self.Reader.Load(i);
+
+  Self.FileData.Text := ToStr(data);
+
+  case Self.Reader.CompressAlgo[i] of
+    0: Self.CompressionAlgo.Text := 'None';
+    1: Self.CompressionAlgo.Text := 'SynLZ';
+    2: Self.CompressionAlgo.Text := 'RleSynLZ';
+  end;
+
+  Self.CompressedSize.Text := ToStr(Self.Reader.CompressedSize[i]);
+  Self.Uncompressed.Text := ToStr(Self.Reader.UncompressedSize[i]);
+end;
+{$H+}
+
+var
+  Editor: TResourceEditor;
+  openBtn, addFileBtn, addImgBtn, removeBtn: TLazButton;
+  i: Integer;
+begin
+  for i := 0 to 255 do
+    HEX_TABLE += IntToHex(i, 2);
+  Editor.Dialog := TLazOpenDialog.Create(nil);
+  Editor.Dialog.Width := 600;
+  Editor.Dialog.Height := 800;
+  Editor.Dialog.DefaultExt := '.bin';
+  Editor.Dialog.InitialDir := Map.Loader.CacheDir;
+  Editor.Dialog.Options := [ELazOpenFileOptions.ShowHelp, ELazOpenFileOptions.ExtensionDifferent, ELazOpenFileOptions.FileMustExist];
+
+  Editor.Form := TLazForm.Create();
+  Editor.Form.Caption := 'Resource Editor';
+  Editor.Form.Height := 600;
+  Editor.Form.Width := 800;
+  Editor.Form.Position := ELazFormPosition.ScreenCenter;
+
+  Editor.FileList := TLazListBox.CreateEx(Editor.Form, 'Compressed files:', 'Files stored in the resource file.', 20, 60, 220, Editor.Form.Height - 120);
+  Editor.FileList.OnSelectionChange := @Editor.OnSelectionChange;
+
+  openBtn := TLazButton.CreateEx(Editor.Form, 'Open .bin file', 'Open a resource file.', Editor.Form.Width div 2 - 120, Editor.FileList.Top + 20, 200);
+  openBtn.OnClick := @Editor.OnOpenClick;
+
+  Editor.SelectedResource := TLazEdit.CreateEx(Editor.Form, 'Selected resource:', 'Name of the currently selected resource file.', openBtn.Left, openBtn.Bottom + 20, 200);
+  Editor.SelectedResource.ReadOnly := True;
+
+  addFileBtn := TLazButton.CreateEx(Editor.Form, 'Add file', 'Adds and compresses a file into the resource file.', Editor.SelectedResource.Left, Editor.SelectedResource.Bottom + 80, 200);
+  addFileBtn.OnClick := @Editor.OnAddFileClick;
+
+  addImgBtn := TLazButton.CreateEx(Editor.Form, 'Add image', 'Adds and compresses an image into the resource file.', addFileBtn.Left, addFileBtn.Bottom + 10, 200);
+  addImgBtn.OnClick := @Editor.OnAddImageClick;
+
+  removeBtn := TLazButton.CreateEx(Editor.Form, 'Remove selected', 'Removes the selected file from the resource file.', addImgBtn.Left, addImgBtn.Bottom + 10, 200);
+  removeBtn.OnClick := @Editor.OnRemoveClick;
+
+  Editor.CompressionAlgo := TLazEdit.CreateEx(Editor.Form, 'Compression algorithm:', 'Compression algorithm used on this file', removeBtn.Left, removeBtn.Bottom + 80, 200);
+  Editor.CompressionAlgo.ReadOnly := True;
+
+  Editor.CompressedSize := TLazEdit.CreateEx(Editor.Form, 'Compressed size:', 'Compressed file size', Editor.CompressionAlgo.Left, Editor.CompressionAlgo.Bottom + 20, 200);
+  Editor.CompressedSize.ReadOnly := True;
+
+  Editor.Uncompressed := TLazEdit.CreateEx(Editor.Form, 'Original size:', 'Original file size', Editor.CompressedSize.Left, Editor.CompressedSize.Bottom + 20, 200);
+  Editor.Uncompressed.ReadOnly := True;
+
+  Editor.FileImage := TImageBox.CreateEx(Editor.Form, 'Image viewer:', 'View the file data as a TImage', Editor.Form.Width - 280, 60, 260, 260);
+  Editor.FileData := TLazMemo.CreateEx(Editor.Form, 'File data:', 'View the file bytes', Editor.FileImage.Left, Editor.FileImage.Bottom + 20, 260, 200);
+  Editor.FileData.Font.Name := 'Courier New';
+  Editor.FileData.ReadOnly := True;
+
+  Editor.Form.ShowModal();
+end.

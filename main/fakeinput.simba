@@ -1,0 +1,357 @@
+(*
+# Fake Input
+Fake Input is achieved by external tools, usually by injecting the client.
+
+Fake input is what WaspLib uses that allows you to use your mouse and keyboard
+freely while botting.
+
+There's 2 versions of fake input:
+- RemoteInput for java based clients
+- wasp-input for the official CPP client
+
+If you wish to completely disable fake input you can do so by adding the
+following compiler directive before you include WaspLib in your script:
+```pascal
+{$DEFINE WL_DISABLE_FAKE_INPUT}
+```
+
+You can find remote input source code here: https://github.com/Brandon-T/RemoteInput
+And wasp-input here: https://github.com/WaspScripts/wasp-input
+*)
+{$DEFINE WL_FAKE_INPUT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DISABLE_FAKE_INPUT}
+{.$DEFINE WL_DISABLE_FAKE_INPUT}
+
+{$IFDEF WL_TEST}{$DEFINE WL_DISABLE_FAKE_INPUT}{$ENDIF}
+
+{$IFNDEF WL_DISABLE_FAKE_INPUT}
+
+{$loadlib Plugins/wasp-plugins/libremoteinput/libremoteinput}
+
+type
+(*
+## TRemoteInput
+Main record used to interact with the remote input plugin.
+*)
+  TRemoteInput = record
+    Target: Pointer;
+    Window: TWindowHandle;
+  end;
+
+(*
+## TRemoteInput.Setup
+```pascal
+procedure TRemoteInput.Setup();
+```
+Internal method used to setup {ref}`TRemoteInput`.
+This is automatically called for you on the {ref}`RemoteInput variable`.
+*)
+procedure TRemoteInput.Setup();
+var
+  timer: TCountDown;
+  pid: TProcessID;
+begin
+  if Target.Info.Kind <> ETargetKind.WINDOW then
+    raise GetDebugLn('RemoteInput', 'Can''t get target window.');
+
+  Self.Window := Target.Info.Window;
+  if Self.Window.GetClassName() <> 'SunAwtCanvas' then
+    Exit;
+
+  pid := Self.Window.GetPID();
+
+  try
+    RIInject(pid);
+  except
+    if GetExceptionMessage() = 'Access violation' then
+      ErrorDialog(
+        'RemoteInput',
+        'A different RemoteInput has already been paired with this client.' +
+        LINE_SEP + LINE_SEP + 'Please open a new one.'
+      );
+    raise GetExceptionMessage();
+  end;
+
+  timer.Start(2000);
+  repeat
+    try
+      Self.Target := EIOS_PairClient(pid);
+    except
+      if GetExceptionMessage() = 'Access violation' then
+        ErrorDialog(
+          'RemoteInput',
+          'A different RemoteInput has already been paired with this client.' +
+          LINE_SEP + LINE_SEP + 'Please open a new one.'
+        );
+      raise GetExceptionMessage();
+    end;
+
+    if Self.Target <> nil then
+      Break;
+    Sleep(100);
+  until timer.IsFinished;
+
+  if Self.Target = nil then
+  begin
+    DebugLn('RemoteInput', 'Invalid target for RemoteInput, RemoteInput will not be used.', ELogLevel.WARN);
+    Exit;
+  end;
+
+  try
+    Target.SetPlugin({$MACRO LOADEDLIB(libremoteinput)}, ToStr(pid), Client.Canvas);
+  except
+    if GetExceptionMessage() = 'Access violation' then
+      ErrorDialog(
+        'RemoteInput',
+        'A different RemoteInput has already been paired with this client.' +
+        LINE_SEP + LINE_SEP + 'Please open a new one.'
+      );
+
+    raise GetExceptionMessage();
+  end;
+end;
+
+var
+(*
+## RemoteInput variable
+Global {ref}`TRemoteInput` variable.
+*)
+  RemoteInput: TRemoteInput;
+
+{$IFDEF WINDOWS}
+{$loadlib Plugins/wasp-plugins/waspinput/waspinput}
+
+type
+(*
+## TWaspInput
+Main record used to interact with the wasp input plugin.
+*)
+  TWaspInput = record
+    Target: Pointer;
+    Window: TWindowHandle;
+  end;
+
+(*
+## TWaspInput.Setup
+```pascal
+procedure TWaspInput.Setup();
+```
+Internal method used to setup {ref}`TWaspInput`.
+This is automatically called for you on the {ref}`WaspInput variable`.
+*)
+procedure TWaspInput.Setup();
+var
+  pid: TProcessID;
+begin
+  if Target.Info.Kind <> ETargetKind.WINDOW then
+    raise GetDebugLn('WaspInput', 'Can''t get target window.');
+
+  Self.Window := Target.Info.Window;
+  if Self.Window.GetClassName() <> 'JagRenderView' then
+    Exit;
+
+  pid := Self.Window.GetPID();
+  Inject({$MACRO LOADEDLIB(waspinput)}, pid);
+  Target.SetPlugin({$MACRO LOADEDLIB(waspinput)}, ToStr(pid), Client.Canvas);
+  Self.Target := @pid;
+end;
+
+var
+  WaspInput: TWaspInput;
+{$ENDIF}
+{$ENDIF}
+
+
+(*
+## TClient.Clear
+```pascal
+procedure TClient.Clear();
+```
+Clears the client canvas.
+
+Example:
+```pascal
+Client.Clear();
+```
+*)
+procedure TClient.Clear();
+begin
+  if Self.Canvas <> nil then
+    Self.Canvas.Clear();
+end;
+
+
+(*
+## Client.LoseFocus()
+```pascal
+procedure TClient.LoseFocus();
+procedure TClient.LoseFocus(delay: Int32);
+```
+Loses focus if available. Maybe useful for antiban.
+You can optionally delay losing focus by passing in a `delay`.
+*)
+procedure TClient.LoseFocus();
+{$IFNDEF WL_DISABLE_FAKE_INPUT}
+var
+  space: TBoxArray;
+{$ENDIF}
+begin
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL:
+      if WaspInput.Target <> nil then
+      begin
+        space := Target.Bounds.Expand(50).Invert(Target.Bounds.Expand(500));
+        if Length(space) = 0 then Exit;
+
+        DebugLn('Client', 'LoseFocus method is not implemented for WaspInput yet.', ELogLevel.WARN);
+        Exit;
+      end;
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+      if RemoteInput.Target <> nil then
+      begin
+        space := Target.Bounds.Expand(50).Invert(Target.Bounds.Expand(500));
+        if Length(space) = 0 then Exit;
+
+        Target.MouseMove(Space.Random());
+        Target.MouseClick(EMouseButton.LEFT);
+        Exit;
+      end;
+  end;
+  {$ENDIF}
+  DebugLn('Client', 'LoseFocus method is not implemented without a fake input tool.', ELogLevel.WARN);
+end;
+
+procedure TClient.LoseFocus(delay: UInt32); overload;
+begin
+  Sleep(delay);
+  Self.LoseFocus();
+end;
+
+
+(*
+## TClient.IsInputEnabled
+```pascal
+function TClient.IsInputEnabled(): Boolean;
+```
+Returns True/False if the user **REAL** input is enabled/disabled,
+fully or partially, on the client.
+
+Example:
+```pascal
+WriteLm Client.IsInputEnabled();
+```
+*)
+function TClient.IsInputEnabled(): Boolean;
+begin
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL: if WaspInput.Target <> nil then Exit(GetInputState());
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+      if RemoteInput.Target <> nil then
+        Exit(EIOS_IsMouseInputEnabled(RemoteInput.Target) and EIOS_IsKeyboardInputEnabled(RemoteInput.Target));
+  end;
+  {$ENDIF}
+  DebugLn('Client', 'IsInputEnabled method is not implemented without a fake input tool.', ELogLevel.WARN);
+  Result := False;
+end;
+
+
+(*
+## TClient.DisableRealInput
+```pascal
+procedure TClient.DisableRealInput();
+```
+Disables the user real input on the client for both the mouse and keyboard.
+
+Example:
+```pascal
+Client.DisableRealInput();
+```
+*)
+procedure TClient.DisableRealInput();
+begin
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL: if WaspInput.Target <> nil then SetInputState(False);
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+      if RemoteInput.Target <> nil then
+      begin
+        EIOS_SetMouseInputEnabled(RemoteInput.Target, False);
+        EIOS_SetKeyboardInputEnabled(RemoteInput.Target, False);
+      end;
+  end;
+  {$ELSE}
+  DebugLn('Client', 'DisableRealInput method is not implemented without a fake input tool.', ELogLevel.WARN);
+  {$ENDIF}
+end;
+
+(*
+## TClient.EnableRealInput
+```pascal
+procedure TClient.EnableRealInput();
+```
+Enables the user real input on the client for both the mouse and keyboard.
+
+Example:
+```pascal
+Client.EnableRealInput();
+```
+*)
+procedure TClient.EnableRealInput();
+begin
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL: if WaspInput.Target <> nil then SetInputState(True);
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+      if RemoteInput.Target <> nil then
+      begin
+        EIOS_SetMouseInputEnabled(RemoteInput.Target, True);
+        EIOS_SetKeyboardInputEnabled(RemoteInput.Target, True);
+      end;
+  end;
+  {$ELSE}
+  DebugLn('Client', 'EnableRealInput method is not implemented without a fake input tool.', ELogLevel.WARN);
+  {$ENDIF}
+end;
+
+(*
+## TClient.InjectInput
+```pascal
+procedure TClient.InjectInput();
+```
+Injects the client with one of the fake input tools:
+- {ref}`RemoteInput`
+- {ref}`WaspInput`
+
+Example:
+```pascal
+Client.InjectInput();
+```
+*)
+procedure TClient.InjectInput();
+begin
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Self.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL: WaspInput.Setup();
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE: RemoteInput.Setup();
+  end;
+
+  AddOnTerminate(@Self.Clear);
+  AddOnTerminate(@Self.EnableRealInput);
+  {$ELSE}
+  DebugLn('Client', 'InjectInput method is not implemented without a fake input tool.', ELogLevel.WARN);
+  {$ENDIF}
+end;

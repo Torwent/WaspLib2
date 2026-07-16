@@ -1,0 +1,81 @@
+(*
+# Config
+Configuration related types and methods. These can be used to save script and
+library configurations in either JSON or INI formats.
+*)
+{$DEFINE WL_CONFIG_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+function TJSONItem.Assert(key: String; typ: EJSONType): Boolean;
+begin
+  if not Self.Has(key) then
+    Exit;
+  if Self.Item[key].Typ = typ then
+    Exit(True);
+  Self.Delete(Self.Item[key]);
+end;
+
+type
+(*
+## TConfigJSON
+Type responsible for dealing with JSON configuration files.
+*)
+  TConfigJSON = record
+    Path: String;
+    Data: TJSONItem;
+  end;
+
+(*
+## TConfigJSON.Setup
+```pascal
+procedure TConfigJSON.Setup(jsonFile: String);
+```
+Main method to setup your `TConfigJSON`
+*)
+procedure TConfigJSON.Setup(filename: String = SCRIPT_FILE);
+var
+  tmp: String;
+begin
+  Self.Path := WLEnv.ConfigsDir;
+
+  if filename.Contains(PATH_SEP) then
+  begin
+    //if filename already had the configs path makes sure to not duplicate it.
+    if filename.Contains(Self.Path) then
+      filename := filename.After(Self.Path);
+
+    tmp := PathExtractNameWithoutExt(filename);
+    Self.Path += filename.Before(tmp);
+    filename :=  tmp + '.json';
+  end;
+
+  if not DirCreate(Self.Path) then
+    TerminateScript('Can''t create configs directory.');
+
+  Self.Path += filename;
+
+  Self.Data := new TJSONParser();
+  if FileExists(Self.Path) then
+    TJSONParser(Self.Data).Load(Self.Path);
+end;
+
+(*
+## TConfigJSON.Save
+```pascal
+procedure TConfigJSON.Save();
+```
+Used to save your `TConfigJSON`.
+*)
+procedure TConfigJSON.Save();
+begin
+  TJSONParser(Self.Data).Save(Self.Path, [EJSONFormatOption.USE_TABS, EJSONFormatOption.SINGLE_LINE_ARR], 1);
+end;
+
+(*
+## TConfigINI
+Type responsible for dealing with INI configuration files.
+*)
+type
+  TConfigINI  = record
+    Path: String;
+  end;

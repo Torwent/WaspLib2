@@ -1,0 +1,556 @@
+(*
+# ChooseOption
+Methods to interact with the game context menu.
+
+```{figure} ../../images/chooseoption.png
+```
+*)
+{$DEFINE WL_CHOOSEOPTION_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TOption
+Helper record to interact with {ref}`ChooseOption`.
+*)
+  TOption = record
+    Text: String;
+    Bounds: TBox;
+    Index: Integer;
+  end;
+
+  TOptionArray = array of TOption;
+
+(*
+## TChooseOption
+Core record responsible with interacting with the {ref}`ChooseOption` context menu.
+*)
+  TChooseOption = record
+    Bounds: TBox;
+    MinDelay, MaxDelay: Integer;
+    const BACKGROUND: TColor = $47545D;
+    const TitleImg: TImage = ImageFromString('IMG:AQAAAGYAAAASAAAAAAAAAP21aQABAAAAIKprAAEAAADI5D8BAAAAAM0CAQABAAAAOIe7BgAAAAAApLsGAAAAADQBAACYAQAAOIe7BgAAAAABAAAAZgAAABIAAAAYAAAAAAAAAAAAAAAAAAAAAwAAABgIEAgICAAAAAEAAAIAAAAAAAAAAAAAAAAAAAAAiVBORw0KGgoAAAANSUhEUgAAAGYAAAASCAIAAAAmDjziAAAAzUlEQVR4nO2U0Q2AMAhE3c4F/HX/NYzxo9oWvAO0mkBqoqTA9Qmd1mXORa1pf9IoS2S0JTLaWmRlaK+ed3X1rdU2RkT1eXjOysarvMoA9TwlG+mmLyAzNH4iC0AWcxAcWfce8fjb0sqRdGSenEpUP5BCVu3xvEs4wE63lcOjtEuTHUwnJuXH4hpspf3iSxZJVkglPCcyRGZJkeKlpFGYPMMohRjwRYpvXdTgSN2hDODtfgUfG1s5EfEWZL8zsEkj671X7BlLZLQNQJaLWhvxdfuwwsTSHQAAAABJRU5ErkJggg==');
+  end;
+
+
+property TChooseOption.Header(clientBounds: TBox): TBox;
+var
+  pt: TPoint;
+  tpa: TPointArray;
+begin
+  //clientBounds should be Client.Bounds
+  with clientBounds do
+    pt := Target.FindImage(Self.TitleImg, 0, [X1, Y1, Target.Bounds.X2, Target.MouseY+30]);
+  if pt = [-1,-1] then
+    Exit;
+
+  Result.X1 := pt.X+1;
+  Result.Y1 := pt.Y+1;
+
+  with Result do
+    tpa := Target.FindColor(Self.BACKGROUND, 0, [X1+Self.TitleImg.Width-2, Y1, clientBounds.Width-1, Y1+1]);
+
+  Result.X2 := tpa.Bounds().X2-1;
+  Result.Y2 := Result.Y1 + Self.TitleImg.Height - 3;
+end;
+
+(*
+## ChooseOption.IsOpen
+```pascal
+function TChooseOption.IsOpen(): Boolean;
+```
+Returns True/False if the {ref}`ChooseOption` menu is currently visible/open.
+
+Example:
+```pascal
+WriteLn ChooseOption.IsOpen();
+```
+*)
+function TChooseOption.IsOpen(): Boolean;
+var
+  tpa: TPointArray;
+  bounds, header: TBox;
+begin
+  bounds := Client.Bounds;
+  header := Self.Header[bounds];
+  if header = Default(TBox) then
+    Exit;
+
+  Self.Bounds.X1 := header.X1+1;
+  Self.Bounds.Y1 := header.Y2+3;
+  Self.Bounds.X2 := header.X2-1;
+
+  with Self.Bounds do
+    tpa := Target.FindColor(Self.BACKGROUND, 0, [X1, Y1+15, X1+1, bounds.Height-1]);
+
+  Self.Bounds.Y2 := tpa.Bounds().Y2-2;
+  Result := True;
+end;
+
+(*
+## ChooseOption.WaitOpen
+```pascal
+function TChooseOption.WaitOpen(time: Integer; interval: Integer = -1): Boolean;
+```
+Returns True/False if the {ref}`ChooseOption` menu is becomes visible/open within the specified `time`.
+
+Example:
+```pascal
+WriteLn ChooseOption.WaitOpen();
+```
+*)
+function TChooseOption.WaitOpen(time: Integer; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+(*
+## ChooseOption.Open
+```pascal
+function TChooseOption.Open(): Boolean;
+```
+Opens the {ref}`ChooseOption` context menu if it's not currently open.
+
+Example:
+```pascal
+WriteLn ChooseOption.Open();
+```
+*)
+function TChooseOption.Open(): Boolean;
+begin
+  if Self.IsOpen() then
+    Exit(True);
+
+  Mouse.Click(EMouseButton.RIGHT);
+  Result := Self.WaitOpen(600);
+end;
+
+
+function TChooseOption._GetOption(img: TImage; idx, x1, x2, offset: Integer): TOption;
+var
+  y1, y2, y: Integer;
+begin
+  y1 := idx * 15 + offset;
+  y2 := y1+15;
+  y := Self.Bounds.Y1 + y1;
+  Result.Bounds := [Self.Bounds.X1, y, Self.Bounds.X2, y + 15];
+  Result.Text := OCR.Engine.Recognize(img.Copy([x1, y1, x2, y2]), Fonts.BOLD_SHADOW, [0,0]);
+  Result.Index := idx;
+end;
+
+(*
+## ChooseOption.GetOptions
+```pascal
+function TChooseOption.GetOptions(): TChooseOption_OptionArray;
+```
+Returns a `TOptionArray` of all available options in the {ref}`ChooseOption` context menu.
+This is a internal method, you probably don't need to call it.
+*)
+function TChooseOption.GetOptions(): TOptionArray;
+var
+  i, x, offset: Integer;
+  img: TImage;
+  tpa: TPointArray;
+begin
+  if not Self.Open() then
+    Exit;
+  if Self.Bounds.Height < 15 then
+    Exit;
+
+  img := Target.GetImage(Self.Bounds);
+  tpa := img.FindColor(Self.BACKGROUND, 0) + img.FindColor(Colors.BLACK, 0);
+  img.Fill(Colors.WHITE);
+  img.DrawColor := Colors.BLACK;
+  img.DrawTPA(tpa);
+
+  x := Self.Bounds.Width-1;
+
+  if Client.Client = EClient.OFFICIAL then
+    offset := 2
+  else
+    offset := 0;
+
+  SetLength(Result, Self.Bounds.Height div 15);
+  for i := 0 to High(Result) do
+    Result[i] := Self._GetOption(img, i, 0, x, offset);
+
+  if Client.Client = EClient.OFFICIAL then
+    Result[High(Result)].Bounds.Y2 -= 1;
+end;
+
+(*
+## ChooseOption.FindSubmenu
+```pascal
+function TChooseOption.FindSubmenu(): TBox;
+```
+Returns the bounds of the submenu if it exists, otherwise returns an empty TBox.
+*)
+function TChooseOption.FindSubmenu(): TBox;
+var
+  atpa: T2DPointArray;
+  tpa: TPointArray;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  tpa := Target.FindColor(Self.BACKGROUND, 0, Client.Bounds).ExcludeBox(Self.Bounds.Expand(2, 20));
+  atpa := tpa.Cluster(2).ExcludeSize(100, __LT__).SortFrom(Mouse.Position);
+
+  for tpa in atpa do
+    if tpa.Bounds().Corners().Intersection(tpa).Length = 4 then
+      Exit(tpa.Bounds().Expand(-2));
+end;
+
+(*
+## ChooseOption.Close
+```pascal
+function TChooseOption.Close(): Boolean;
+```
+Closes the {ref}`ChooseOption` context menu if it's open.
+Returns True on success.
+
+Example:
+```pascal
+WriteLn ChooseOption.Close();
+```
+*)
+function TChooseOption.Close(): Boolean;
+var
+  boxes: TBoxArray;
+  space, sub: TBox;
+begin
+  if not Self.IsOpen() then
+    Exit(True);
+
+  sub := Self.FindSubMenu();
+  if sub <> Default(TBox) then
+    space := Self.Bounds.Combine(sub)
+  else
+    space := Self.Bounds;
+
+  boxes := space.Expand(50).Invert(Target.Bounds);
+  if boxes.IsEmpty then
+    raise GetDebugLn('ChooseOption', 'No space found to move mouse');
+
+  Mouse.Move(boxes.Random(), True);
+  Result := SleepUntil(not Self.IsOpen(), 50, 600);
+end;
+
+
+(*
+## ChooseOption.Find
+```pascal
+function TChooseOption.Find(strings: TStringArray; out option: TOption; matchCase: Boolean = True; closeOnFail: Boolean = True): Boolean;
+```
+Check if an option is available in the {ref}`ChooseOption` context menu.
+Returns true if any of the specified `strings` is available and the `option` parameter will
+return the `TOption` data.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  option: TOption;
+begin
+  if ChooseOption.Find(['Take'], option) then
+    ShowOnTarget(option.Bounds);
+end.
+```
+*)
+function TChooseOption.Find(strings: TStringArray; out option: TOption; matchCase: Boolean = True; closeOnFail: Boolean = True): Boolean;
+var
+  i, x, offset: Integer;
+  img: TImage;
+  tpa: TPointArray;
+begin
+  if not Self.Open() then
+    Exit;
+
+  if (Self.MinDelay > 0) and (Self.MaxDelay > 0) then
+    Sleep(Self.MinDelay, Self.MaxDelay);
+
+  if Self.Bounds.Height < 15 then
+  begin
+    if closeOnFail then
+      Self.Close();
+    Exit;
+  end;
+
+  img := Target.GetImage(Self.Bounds);
+  tpa := img.FindColor(Self.BACKGROUND, 0) + img.FindColor(Colors.BLACK, 0);
+  img.Fill(Colors.WHITE);
+  img.DrawColor := Colors.BLACK;
+  img.DrawTPA(tpa);
+
+  x := Self.Bounds.Width-1;
+
+  if Client.Client = EClient.OFFICIAL then
+    offset := 2
+  else
+    offset := 0;
+
+  for i := 0 to (Self.Bounds.Height div 15) - 1 do
+  begin
+    option := Self._GetOption(img, i, 0, x, offset);
+    if option.Text.ContainsAny(strings, matchCase) then
+      Exit(True);
+  end;
+
+  if closeOnFail then
+    Self.Close();
+end;
+
+
+(*
+## ChooseOption.ContainsAny
+```pascal
+function TChooseOption.ContainsAny(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean;
+```
+Checks if an option is available in the {ref}`ChooseOption` context menu.
+Returns true if any of the specified `strings` is available.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn ChooseOption.ContainsAny(['Take']);
+end.
+```
+*)
+function TChooseOption.ContainsAny(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean;
+var
+  option: TOption;
+begin
+  Result := Self.Find(strings, option, matchCase, closeOnFail);
+end;
+
+
+(*
+## ChooseOption.Hover
+```pascal
+procedure TChooseOption.Hover(const option: TOption);
+function TChooseOption.Hover(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+function TChooseOption.Hover(text: String; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+```
+Hovers the specified option if it exists on the {ref}`ChooseOption` context menu.
+
+Example:
+```pascal
+WriteLn ChooseOption.Select('Take Bones');
+```
+*)
+procedure TChooseOption.Hover(const option: TOption);
+begin
+  Mouse.Move(option.Bounds.Expand(-1));
+end;
+
+function TChooseOption.Hover(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+var
+  option: TOption;
+begin
+  Result := Self.Find(strings, option, matchCase, closeOnFail);
+  if Result then
+    Self.Hover(option);
+end;
+
+function TChooseOption.Hover(text: String; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+begin
+  Result := Self.Hover([text], matchCase, closeOnFail);
+end;
+
+
+(*
+## ChooseOption.Select
+```pascal
+procedure TChooseOption.Select(const option: TOption);
+function TChooseOption.Select(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+function TChooseOption.Select(text: String; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+```
+Selects the specified option if it exists on the {ref}`ChooseOption` context menu.
+
+Example:
+```pascal
+WriteLn ChooseOption.Select('Take Bones');
+```
+*)
+procedure TChooseOption.Select(const option: TOption);
+begin
+  Self.Hover(option);
+  Mouse.Click(EMouseButton.LEFT);
+end;
+
+function TChooseOption.Select(strings: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+begin
+  Result := Self.Hover(strings, matchCase, closeOnFail);
+  if Result then
+    Mouse.Click(EMouseButton.LEFT);
+end;
+
+function TChooseOption.Select(text: String; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+begin
+  Result := Self.Select([text], matchCase, closeOnFail);
+end;
+
+
+(*
+## ChooseOption.HasSubmenu
+```pascal
+function TChooseOption.HasSubmenu(): Boolean;
+```
+Returns True if the {ref}`ChooseOption` context menu has a submenu (indicated by ' >' in the option text).
+*)
+function TChooseOption.HasSubmenu(): Boolean;
+begin
+  Result := Self.IsOpen() and Self.ContainsAny([' >']);
+end;
+
+(*
+## ChooseOption.IsSubmenuOpen
+```pascal
+function TChooseOption.IsSubmenuOpen(): Boolean;
+```
+Returns True if a submenu is currently open and visible.
+*)
+function TChooseOption.IsSubmenuOpen(): Boolean;
+begin
+  Result := Self.FindSubmenu() <> [];
+end;
+
+(*
+## ChooseOption.OpenSubmenu
+```pascal
+function TChooseOption.OpenSubmenu(closeIfNotFound: Boolean = True): Boolean;
+```
+Opens a submenu if it exists. Returns True if successful.
+If closeIfNotFound is True, closes the context menu if no submenu is found.
+*)
+function TChooseOption.OpenSubmenu(closeOnFail: Boolean = True): Boolean;
+begin
+  if Self.IsSubmenuOpen() then
+    Exit(True);
+
+  if not Self.Open() then
+    Exit;
+
+  if Self.Hover([' >'], False, closeOnFail) then
+    Result := SleepUntil(Self.IsSubmenuOpen(), 5, 250);
+
+  if not Result and closeOnFail then
+    Self.Close();
+end;
+
+(*
+## ChooseOption.GetSubmenuOptions
+```pascal
+function TChooseOption.GetSubmenuOptions(): TOptionArray;
+```
+Returns a `TOptionArray` of all available options in the submenu.
+This is a internal method, you probably don't need to call it.
+*)
+function TChooseOption.GetSubmenuOptions(): TOptionArray;
+var
+  bounds, b: TBox;
+  i: Integer;
+begin
+  if not Self.OpenSubmenu() then Exit;
+  bounds := Self.FindSubmenu();
+  if (bounds.Height < 15) then Exit;
+  SetLength(Result, bounds.Height div 15);
+
+  b.X1 := bounds.X1;
+  b.X2 := bounds.X2;
+
+  for i := 0 to Result.High do
+  begin
+    b.Y1 := bounds.Y1 + (i * 15);
+    if Client.Client = EClient.OFFICIAL then
+      b.Y1 += 2;
+    b.Y2 := b.Y1 + 15;
+
+    Result[i].Text := OCR.RecognizeShadow(b, Fonts.BOLD_SHADOW, 0);
+    Result[i].Bounds := b;
+  end;
+end;
+
+(*
+## ChooseOption.FindSubmenuOption
+```pascal
+function TChooseOption.FindSubmenuOption(text: TStringArray; out option: TOption; matchCase, closeIfNotFound: Boolean = True): Boolean;
+```
+Searches for a specific option in the submenu. Returns True if found.
+The found option is returned through the 'option' parameter.
+*)
+function TChooseOption.FindSubmenuOption(text: TStringArray; out option: TOption; matchCase, closeIfNotFound: Boolean = True): Boolean;
+var
+  o: TOption;
+begin
+  for o in Self.GetSubmenuOptions() do
+    if o.Text.ContainsAny(text, matchCase) then
+    begin
+      Result := True;
+      option := o;
+      Break;
+    end;
+
+  if closeIfNotFound and (not Result) then
+    Self.Close;
+end;
+
+(*
+## ChooseOption.HoverSubmenuOption
+```pascal
+function TChooseOption.HoverSubmenuOption(const option: TOption): Boolean;
+function TChooseOption.HoverSubmenuOption(text: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+```
+Hovers over a specific option in the submenu. Returns True if successful.
+*)
+function TChooseOption.HoverSubmenuOption(const option: TOption): Boolean;
+begin
+  Self.Hover(option);
+  Result := SleepUntil(Self.IsSubmenuOpen(), 100, TICK);
+end;
+
+function TChooseOption.HoverSubmenuOption(text: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+var
+  option: TOption;
+begin
+  if not Self.Open() then
+    Exit;
+
+  Result := Self.OpenSubmenu(closeOnFail)
+    and Self.FindSubmenuOption(text, option, matchCase, closeOnFail)
+    and Self.HoverSubmenuOption(option);
+end;
+
+(*
+## ChooseOption.SelectSubmenuOption
+```pascal
+function TChooseOption.SelectSubmenuOption(const option: TOption): Boolean;
+function TChooseOption.SelectSubmenuOption(text: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean;
+```
+Selects a specific option in the submenu by clicking on it. Returns True if successful.
+*)
+function TChooseOption.SelectSubmenuOption(const option: TOption): Boolean;
+begin
+  if not Self.HoverSubmenuOption(option) then
+    Exit;
+  Mouse.Click(EMouseButton.LEFT);
+  Result := True;
+end;
+
+function TChooseOption.SelectSubmenuOption(text: TStringArray; matchCase, closeOnFail: Boolean = True): Boolean; overload;
+var
+  option: TOption;
+begin
+  Result := Self.Open()
+    and Self.OpenSubmenu(closeOnFail)
+    and Self.FindSubmenuOption(text, option, matchCase, closeOnFail)
+    and Self.SelectSubmenuOption(option);
+end;
+
+var
+(*
+## ChooseOption variable
+Global {ref}`TChooseOption` variable.
+*)
+  ChooseOption: TChooseOption;

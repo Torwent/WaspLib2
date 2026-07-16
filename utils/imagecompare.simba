@@ -1,0 +1,108 @@
+(*
+# Image Compare
+Utilities for comparing images using template matching.
+*)
+{$DEFINE WL_IMAGECOMPARE_INCLUDED}
+
+type
+(*
+## TImageMatch
+Record storing image match result with position and similarity score.
+*)
+  TImageMatch = record
+    Index: Integer;
+    Box: TBox;
+    Match: Single;
+  end;
+
+  TImageMatchArray = array of TImageMatch;
+
+  TImageCompareFilter = procedure(constref image, template: TImage) of object;
+
+(*
+## TImageCompareUtils
+Utilities for comparing and matching images with optional cleaning and alignment.
+*)
+  TImageCompareUtils = record
+    Clean: procedure (image, template: TImage) of object;
+    Align: function (image, template: TImage): Boolean of object;
+    Filter: TImageCompareFilter;
+  end;
+
+(*
+## TImageCompareUtils.Compare
+```pascal
+function TImageCompareUtils.Compare(image, template: TImage; var similarity: Single): Boolean;
+```
+Compares two images and returns True if similarity threshold is met.
+*)
+function TImageCompareUtils.Compare(image, template: TImage; var similarity: Single): Boolean;
+var
+  match: Single;
+  tmp: TImage;
+begin
+  tmp := image.Copy();
+
+  if @Self.Align <> nil then
+    if not Self.Align(tmp, template) then Exit;
+
+  if (template.Width < tmp.Width) or (template.Height < tmp.Height) then
+  begin
+    similarity := 0;
+    Exit;
+  end;
+
+  template.SetSize(tmp.Width, tmp.Height);
+
+  if @Self.Clean <> nil then Self.Clean(tmp, template);
+  if @Self.Filter <> nil then Self.Filter(tmp, template);
+
+  if similarity = 1 then
+    Exit(tmp.Equals(template));
+
+  match := tmp.Compare(template);
+  Result := match >= similarity;
+  similarity := match;
+end;
+
+function TImageCompareUtils.Compare(image: TImage; slot: TBox; out similarity: Single): Boolean; overload;
+var
+  template: TImage;
+begin
+  if slot.Width < 37 then
+    slot.X2 := slot.X1 + 36;
+
+  template := Target.GetImage(slot);
+  Result := Self.Compare(image, template, similarity);
+end;
+
+(*
+## TImageCompareUtils.FindMatch
+```pascal
+function TImageCompareUtils.FindMatch(img: TImage; bounds: TBox; out match: TImageMatch): Boolean;
+```
+Finds the best match for an image within specified bounds using template matching.
+*)
+function TImageCompareUtils.FindMatch(img: TImage; bounds: TBox; out match: TImageMatch): Boolean;
+var
+  container: TImage;
+  matrix: TSingleMatrix;
+  similarity: Single;
+begin
+  container := Target.GetImage(bounds);
+  matrix := MatchTemplate(container.ToMatrix(), img.ToMatrix(), ETMFormula.TM_CCOEFF_NORMED);
+
+  with matrix.ArgMax() do
+  begin
+    similarity := matrix[Y][X];
+    if similarity < match.Match then Exit;
+
+    bounds.X1 += X;
+    bounds.Y1 += Y;
+    bounds.X2 := bounds.X1 + img.Width;
+    bounds.Y2 := bounds.Y1 + img.Height;
+
+    match := [0, bounds, similarity];
+    Result := True;
+  end;
+end;

@@ -1,0 +1,354 @@
+(*
+# Geometry
+Methods and functions related to geometry.
+*)
+{$DEFINE WL_GEOMETRY_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+{$loadlib Plugins/wasp-plugins/libtpaex/libtpaex}
+
+{$R-}
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn('Geometry: Range checks are enabled for geometry, these should be disabled in production!');
+end;
+{$ENDIF}
+
+type
+  T3DPoint = record
+    X,Y,Z: Integer;
+  end;
+
+  T3DPointArray = array of T3DPoint;
+
+const
+  TAU: Double = 2 * PI;
+
+function TBox.Create(a, b: TPoint): TBox; static; overload;
+begin
+  Result := TBox.Create(
+    Min(a.X,b.X), Min(a.Y,b.Y), Max(a.X,b.X), Max(a.Y,b.Y)
+  );
+end;
+
+function Box(a, b: TPoint): TBox; static; overload;
+begin
+  Result := TBox.Create(a, b);
+end;
+
+
+function TBox.ContainsBox(const other: TBox): Boolean;
+begin
+  Result := InRange(other.X1, Self.X1, Self.X2) and
+            InRange(other.X2, Self.X1, Self.X2) and
+            InRange(other.Y1, Self.Y1, Self.Y2) and
+            InRange(other.Y2, Self.Y1, Self.Y2);
+end;
+
+
+function TBox.ContainsQuad(const other: TQuad): Boolean;
+begin
+  Result := Self.Contains(other.Top) and Self.Contains(other.Left) and
+            Self.Contains(other.Bottom) and Self.Contains(other.Right);
+end;
+
+function TBox.Overlap(const other: TBox): Boolean;
+begin
+  Result := (Self.X1 <= other.X2) and (Self.X2 >= other.X1) and
+            (Self.Y1 <= other.Y2) and (Self.Y2 >= other.Y1);
+end;
+
+function TPoint.ToVec2(): TVector2;
+begin
+  Result.X := Self.X;
+  Result.Y := Self.Y;
+end;
+
+function TPoint.ToVec3(z: Single = 0): TVector3;
+begin
+  Result.X := Self.X;
+  Result.Y := Self.Y;
+  Result.Z := z;
+end;
+
+
+(*
+## TPoint.InRange
+```pascal
+function TPoint.InRange(other: TPoint; dist: Double): Boolean; constref;
+function TPoint.AnyInRange(other: TPointArray; dist: Double): Boolean; constref;
+function TPoint.AllInRange(other: TPointArray; dist: Double): Boolean; constref;
+```
+Checks if the current point is within `dist` distance of `other`.
+*)
+function TPoint.InRange(other: TPoint; dist: Double): Boolean;
+begin
+  Result := Self.DistanceTo(other) <= dist;
+end;
+
+function TPoint.AnyInRange(other: TPointArray; dist: Double): Boolean;
+var
+  p: TPoint;
+begin
+  for p in other do
+    if Self.InRange(p, dist) then
+      Exit(True);
+end;
+
+function TPoint.AllInRange(other: TPointArray; dist: Double): Boolean;
+var
+  p: TPoint;
+begin
+  for p in other do
+    if not Self.InRange(p, dist) then
+      Exit;
+  Result := True;
+end;
+
+
+function TPointArray.CreateFromQuad(quad: TQuad; filled: Boolean): TPointArray; static;
+begin
+  if filled then
+    Result := quad.Corners.Connect().ShapeFill()
+  else
+    Result := quad.Corners;
+end;
+
+function TPointArray.AStar(start, goal: TPoint; diagonalTravel: Boolean = True): TPointArray;
+begin
+  Result := AStarTPA(Self, start, goal, diagonalTravel);
+end;
+
+function T2DPointArray.InSameTPA(a, b: TPoint): Boolean;
+var
+  i: Integer;
+begin
+  for i := 0 to High(Self) do
+    with Self[i].Bounds() do
+      if Contains(a) and Contains(b) then
+        case Length(Self[i].Intersection([a, b])) of
+          1: if a = b then Exit(True) else Exit;
+          2: Exit(True);
+        end;
+end;
+
+function TPointArray.NearestIndex(pt: TPoint): Integer;
+var
+  i: Integer;
+  dist, best: Double;
+begin
+  best := $FFFFFF;
+  for i := 1 to High(Self) do
+  begin
+    dist := Self[i].DistanceTo(pt);
+
+    if (dist < best) then
+    begin
+      best := dist;
+      Result := i;
+    end;
+  end;
+end;
+
+function TPointArray.PolylineLength(): Double;
+var
+  i: Integer;
+begin
+  if Length(Self) < 2 then Exit;
+  for i := 0 to High(Self)-1 do
+    Result += Self[i].DistanceTo(Self[i+1]);
+end;
+
+
+procedure ShowOnTarget(circle: TCircle); overload;
+begin
+  ShowOnTarget(TPointArray.CreateFromCircle(circle.Center, circle.Radius, False));
+end;
+
+procedure TImage.DrawCircleArray(circleArray: TCircleArray); overload;
+var
+  i: Integer;
+  atpa: T2DPointArray;
+begin
+  for i := 0 to High(circleArray) do
+    atpa += TPointArray.CreateFromCircle(circleArray[i].Center, circleArray[i].Radius, False);
+  Self.DrawATPA(atpa);
+end;
+
+procedure ShowOnTarget(circleArray: TCircleArray); overload;
+var
+  i: Integer;
+  atpa: T2DPointArray;
+begin
+  for i := 0 to High(circleArray) do
+    atpa += TPointArray.CreateFromCircle(circleArray[i].Center, circleArray[i].Radius, False);
+  ShowOnTarget(atpa);
+end;
+
+
+type
+  TCuboid = record
+    Top, Bottom: TQuad;
+  end;
+  TCuboidArray = array of TCuboid;
+
+property TCuboid.Corners: TPointArray;
+begin
+  Result := Self.Top.Corners + Self.Bottom.Corners;
+  Result := Result.ConvexHull();
+end;
+
+function TCuboid.Polygon(): TPolygon;
+begin
+  Result := Self.Corners;
+end;
+
+property TCuboid.Center: TPoint;
+begin
+  Result := Self.Bottom.Mean + Self.Top.Mean;
+  Result := [Result.X div 2, Result.Y div 2];
+end;
+
+property TCuboid.Bounds: TBox;
+begin
+  Result := Self.Top.Bounds.Combine(Self.Bottom.Bounds);
+end;
+
+function TCuboid.Edges(): TPointArray;
+begin
+  Result := Self.Corners.Connect();
+end;
+
+function TCuboid.ShapeFill(): TPointArray;
+begin
+  Result := Self.Edges().ShapeFill();
+end;
+
+
+function TCuboid.Filter(arr: TPointArray): TPointArray;
+begin
+  Result := arr.ExcludePolygon(Self.Polygon());
+end;
+
+
+procedure TImage.DrawCuboid(const cuboid: TCuboid);
+begin
+  Self.DrawColor := $00FFFF;
+  Self.DrawTPA(cuboid.Bottom.Corners.Connect().Grow(1));
+  Self.DrawTPA(cuboid.Top.Corners.Connect().Grow(1));
+
+  Self.DrawColor := $FFFFFF;
+  Self.DrawTPA(cuboid.Edges());
+end;
+
+procedure ShowOnTarget(const cuboid: TCuboid); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  img.DrawCuboid(cuboid);
+  img.Show();
+end;
+
+
+procedure TImage.DrawCuboidArray(const cuboids: TCuboidArray);
+var
+  i: Integer;
+begin
+  Self.DrawColor := $00FFFF;
+  for i := 0 to High(cuboids) do
+  begin
+    Self.DrawTPA(cuboids[i].Bottom.Corners.Connect().Grow(1));
+    Self.DrawTPA(cuboids[i].Top.Corners.Connect().Grow(1));
+  end;
+
+  Self.DrawColor := $FFFFFF;
+  for i := 0 to High(cuboids) do
+    Self.DrawTPA(cuboids[i].Edges());
+end;
+
+procedure ShowOnTarget(const cuboids: TCuboidArray); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  img.DrawCuboidArray(cuboids);
+  img.Show();
+end;
+
+
+function TPointArray.ExtractCuboid(const cuboid: TCuboid): TPointArray;
+begin
+  Result := Self.Intersection(cuboid.ShapeFill());
+end;
+
+function TPointArray.ExcludeCuboid(const cuboid: TCuboid): TPointArray;
+begin
+  Result := Self.Difference(cuboid.ShapeFill());
+end;
+
+type
+  TBoxFilter = record
+    Box: TBox;
+    Inside: Boolean;
+  end;
+
+  TBoxFilterArray = array of TBoxFilter;
+
+function TBoxFilter.Valid(pt: TPoint): Boolean;
+begin
+  case Self.Inside of
+    True:  Result := pt in Self.Box;
+    False: Result := not (pt in Self.Box);
+  end;
+end;
+
+
+procedure ShowOnTarget(data: TIntegerMatrix; transparent: TColor = $0); overload;
+var
+  img: TImage;
+  y,x: Integer;
+begin
+  img := Target.GetImage();
+
+  for y := 0 to High(data) do
+    for x := 0 to High(data[y]) do
+      if data[y,x] <> transparent then
+        img.Pixel[x, y] := data[y,x];
+
+  img.Show();
+end;
+
+
+(*
+## TImage.RotateClockWise
+```pascal
+function TImage.RotateClockWise(times: Integer = 1): TImage;
+```
+Rotate a TImage clockwise `times` amoutn of times.
+*)
+function TImage.RotateClockWise(times: Integer = 1): TImage;
+var
+  i: Integer;
+begin
+  Result := Self.Copy();
+  for i := 1 to times do
+    Result := Result.Mirror(EImageMirrorStyle.LINE).Mirror(EImageMirrorStyle.WIDTH);
+end;
+
+(*
+## TImage.RotateCounterClockWise
+```pascal
+function TImage.RotateCounterClockWise(times: Integer = 1): TImage;
+```
+Rotate a TImage counter clockwise `times` amoutn of times.
+*)
+function TImage.RotateCounterClockWise(times: Integer = 1): TImage;
+var
+  i: Integer;
+begin
+  Result := Self.Copy();
+  for i := 1 to times do
+    Result := Result.Mirror(EImageMirrorStyle.LINE).Mirror(EImageMirrorStyle.HEIGHT);
+end;
+{$R+}

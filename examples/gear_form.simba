@@ -1,0 +1,32 @@
+//!PACKAGE EXAMPLE
+{$I WaspLib/main.simba}
+
+var
+  gear1: TGearLayout;
+  gear2: TGearLayout;
+  mainGear: TLazComboBox;
+  specAttack: TLazComboBox;
+
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+begin
+  gear1.Gear := GearForm.Sets[mainGear.ItemIndex];
+  gear2.Gear := GearForm.Sets[specAttack.ItemIndex];
+
+  WriteLn('Main Gear: ', gear1.Gear);
+  WriteLn('SpecAttack Gear: ', gear2.Gear);
+  inherited();
+end;
+
+var
+  form: TScriptForm;
+  tab: TLazTabSheet;
+begin
+  form.Setup();
+  tab := form.CreateTab('My Settings');
+  form.CreateGearTab();
+
+  mainGear := GearForm.CreateGearCombobox(tab, 'Choose gear:', 200, 200);
+  specAttack := GearForm.CreateGearCombobox(tab, 'Choose Special Attack gear:', 300, 300);
+
+  form.Run();
+end.

@@ -1,0 +1,660 @@
+(*
+# WebGraph
+Responsible for handling webwalking or any other graph logic you may need.
+
+It's partially based on the original webgraph logic by [slacky](https://slacky.one/)
+but it was written from scratch by Torwent.
+
+It's important to note that most types and methods are for internal usage and
+you shouldn't really have to interact with it.
+*)
+
+{$DEFINE WL_WEBGRAPH_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('WebGraph', 'Range checks are enabled for webgraphs, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+(*
+(TWebGraph)=
+## type TWebGraph
+Type representing a webgraph, for more information on what a graph is in this
+context visit this [wikipedia page](https://en.wikipedia.org/wiki/Graph_(discrete_mathematics))
+*)
+  TWebGraph = record
+    Nodes: TPointArray;
+    Paths: T2DIntegerArray;
+    WalkableSpace: TPointArray;
+    WalkableClusters, ObjectClusters: T2DPointArray;
+    Blocking: TIntegerArray;
+    KDTree: TKDTree;
+  end;
+
+  PWebGraph = ^TWebGraph;
+
+function TWebGraph.TreeHash(): String;
+var
+  hashes: String;
+  i: Integer;
+begin
+  SetLength(hashes, Length(Self.WalkableClusters) + 1);
+  hashes := HashData(EHashAlgo.CRC32, @Self.Nodes[0], Length(Self.Nodes) * SizeOf(TPoint));
+
+  for i := 0 to High(Self.WalkableClusters) do
+  begin
+    if Length(Self.WalkableClusters[i]) > 0 then
+      hashes += HashData(EHashAlgo.CRC32, @Self.WalkableClusters[i][0], Length(Self.WalkableClusters[i]) * SizeOf(TPoint))
+    else
+      hashes += '0';
+  end;
+
+  Result := HashString(EHashAlgo.CRC32, hashes);
+end;
+
+(*
+## TWebGraph.GetKDItems
+```pascal
+function TWebGraph.GetKDItems(offset: Itneger = 0): TKDItems;
+```
+Returns `TKDItems` to be used on a {ref}`TKDTree` which can be used to compare
+distances between nodes very fast.
+*)
+function TWebGraph.GetKDItems(offset: Integer = 0): TKDItems;
+var
+  i, j: Integer;
+  boxes: TBoxArray;
+begin
+  boxes := Self.WalkableClusters.BoundsArray();
+
+  SetLength(Result, Length(Self.Nodes));
+  for i := 0 to High(Self.Nodes) do
+    for j := 0 to High(Self.WalkableClusters) do
+      if boxes[j].Contains(Self.Nodes[i]) then
+        if Self.WalkableClusters[j].Contains(Self.Nodes[i]) then
+        begin
+          Result[i] := [j+offset, [Self.Nodes[i].X, Self.Nodes[i].Y]];
+          Continue(2);
+        end;
+end;
+
+(*
+## TWebGraph.Setup
+```pascal
+procedure TWebGraph.Setup(const kditems: TKDItems = []);
+```
+It sets up `TWebGraph.Tree`, a {ref}`TKDTree` used to compare distances between
+nodes very fast.
+*)
+procedure TWebGraph.Setup(const kditems: TKDItems = []);
+begin
+  if kditems = [] then
+    Self.KDTree := TKDTree.Create(Self.GetKDItems())
+  else
+    Self.KDTree := TKDTree.Create(kditems);
+end;
+
+
+(*
+## TWebGraph.Copy
+```pascal
+function TWebGraph.Copy(): TWebGraph;
+```
+Performs a unique copy of the `TWebGraph` which you can modify without modifying the original.
+Useful for debugging graphs when you need to keep the original unchanged, e.g.
+with the {ref}`Map Debugger`.
+*)
+function TWebGraph.Copy(): TWebGraph;
+begin
+  Result.Nodes := System.Copy(Self.Nodes);
+  Result.WalkableSpace := System.Copy(Self.WalkableSpace);
+  Result.WalkableClusters := System.Copy(Self.WalkableClusters);
+  Result.ObjectClusters := System.Copy(Self.ObjectClusters);
+  Result.Setup();
+end;
+
+
+(*
+## TWebGraph.BlockArea
+```pascal
+procedure TWebGraph.BlockArea(area: TBox; inside: Boolean = True);
+```
+Blocks an area of the `TWebGraph` so no nodes in the specified `area` are returned
+when finding paths.
+
+For example, this is how you could block the space where wintertodt is so
+you don't get paths through the chasm:
+```pascal
+Map.Setup([EChunk.WINTERTODT]);
+Map.Loader.Graph.BlockArea([6478, 34358, 6565, 34445]);
+```
+*)
+procedure TWebGraph.BlockArea(area: TBox; inside: Boolean = True);
+var
+  i, c: Integer;
+begin
+  SetLength(Self.Blocking, Length(Self.Nodes));
+
+  if inside then
+  begin
+    for i := 0 to High(Self.Nodes) do
+    if area.Contains(Self.Nodes[i]) then
+    begin
+      Self.Blocking[c] := i;
+      Inc(c);
+    end;
+  end
+  else
+  begin
+    for i := 0 to High(Self.Nodes) do
+      if (not Area.Contains(Self.Nodes[i])) then
+      begin
+        Self.Blocking[c] := i;
+        Inc(c);
+      end;
+  end;
+
+  SetLength(Self.Blocking, c);
+end;
+
+
+(*
+## TWebGraph.NearNodesIndices
+```pascal
+function TWebGraph.NearNodesIndices(pt: TPoint; amount: Integer): TIntegerArray;
+```
+Returns the indices of the `amount` of nearest nodes to `pt` on the webgraph
+that can be walked to to and from `pt`.
+
+The result returned is sorted by shortest distance to `pt`.
+*)
+function TWebGraph.NearNodesIndices(item: TKDItem; amount: Integer): TIntegerArray;
+var
+  i, ref: Integer;
+  pt, near: TPoint;
+  items: TKDItems;
+  tpa: TPointArray;
+begin
+  ref := item.Ref;
+  items := Self.KDTree.KNearest(item.Vector, amount, [ETreeSetting.NotEqual, ETreeSetting.RefSensitive, ETreeSetting.IgnoreHidden], ref);
+  pt := Point(Round(item.Vector[0]), Round(item.Vector[1]));
+
+  for item in items do
+  begin
+    near := Point(Round(item.Vector[0]), Round(item.Vector[1]));
+    tpa := Self.WalkableClusters[ref].ExtractBox(Box(pt, near));
+
+    if not tpa.Cluster(1).InSameTPA(pt, near) then
+      Continue;
+
+    i := Self.Nodes.IndexOf(near);
+    if i > -1 then
+      Result += i;
+  end;
+
+  if Result = [] then
+    raise GetDebugLn('WebGraph', 'There''s no nodes near [' + ToStr(pt.X) + ',' + ToStr(pt.Y) + '] on the same cluster (' + ToStr(ref) + ').');
+end;
+
+function TWebGraph.NearClusteredNodes(a, b: TPoint; amount: Integer): TKDItems;
+var
+  iA, iB: Integer;
+  itemsA, itemsB: TKDItems;
+begin
+  itemsA := Self.KDTree.KNearest([a.X, a.Y], amount, [ETreeSetting.IgnoreHidden]);
+  itemsB := Self.KDTree.KNearest([b.X, b.Y], amount, [ETreeSetting.IgnoreHidden]);
+
+  for iA := 0 to High(itemsA) do
+    for iB := 0 to High(itemsB) do
+      if itemsA[iA].Ref = itemsB[iB].Ref then
+        Exit([itemsA[iA], itemsB[iB]]);
+
+  if Result = [] then
+    raise GetDebugLn('WebGraph', 'There''s no nodes near [' + ToStr(a.X) + ',' + ToStr(a.Y) + '] and [' + ToStr(b.X) + ',' + ToStr(b.Y) + '] on the same cluster.');
+end;
+
+
+(*
+## TWebGraph.FindPath
+```pascal
+function TWebGraph.FindPath(start, finish: Integer; rnd: Double = 0): TIntegerArray;
+```
+Finds a path between `start` and `finish` with the ability to introduce some
+randomness through `rnd`.
+
+This is basically a weighted BFS algorithm.
+
+For more information on the algorithm read the [wikipedia page on breadth-first search](https://en.wikipedia.org/wiki/Breadth-first_search).
+*)
+function TWebGraph.FindPath(start, finish: Integer; rnd: Double = 0): TIntegerArray;
+type TNode = record Indices: TIntegerArray; Score: Double; end;
+var queue: array of TNode;
+
+  function GetNextShortest(): TNode;
+  var
+    i, node: Integer;
+  begin
+    Result := queue[0];
+    for i := 1 to High(queue) do
+      if queue[i].Score < Result.Score then
+      begin
+        node   := i;
+        Result := queue[i];
+      end;
+    Delete(queue, node, 1);
+  end;
+
+var
+  visited: TBooleanArray;
+  cIdx, pathIdx, i: Integer;
+  current, node: TNode;
+  p, q: TPoint;
+  hyp: Double;
+begin
+  queue   := [[[start],0]];
+  SetLength(visited, Length(Self.Nodes));
+
+  for i in Self.Blocking do
+    visited[i] := True;
+
+  while Length(queue) <> 0 do
+  begin
+    current := GetNextShortest();
+    cIdx := current.Indices[High(current.Indices)];
+
+    if visited[cIdx] then
+      Continue;
+
+    visited[cIdx] := True;
+
+    if cIdx = finish then
+      Exit(current.Indices);
+
+    p := Self.Nodes[cIdx];
+
+    for pathIdx in Self.Paths[cIdx] do
+    begin
+      if visited[pathIdx] then
+        Continue;
+
+      node.Indices := current.Indices + pathIdx;
+
+      q := Self.Nodes[pathIdx];
+      hyp := Hypot(p.X-q.X, p.Y-q.Y);
+      node.Score := current.Score + hyp + (hyp*Random()*rnd-rnd/2) + 1;
+      queue += node;
+    end;
+  end;
+end;
+
+(*
+## TWebGraph.PathBetween
+```pascal
+function TWebGraph.PathBetween(a, b: TPoint; rnd: Double = 0; attempts: Integer = 3): TPointArray;
+```
+Returns a path between `a` and `b` with the ability to introduce some randomness
+through `rnd`.
+
+The returned path comes in the form of a `TPointArray`.
+*)
+function TWebGraph.PathBetween(a, b: TPoint; rnd: Double = 0; attempts: Integer = 3): TPointArray;
+var
+  items: TKDItems;
+  i, j: Integer;
+  intsA, intsB, indices: TIntegerArray;
+begin
+  items := Self.NearClusteredNodes(a,b, attempts);
+  intsA := Self.NearNodesIndices(items[0], attempts);
+  intsB := Self.NearNodesIndices(items[1], attempts);
+
+  if intsA[0] = intsB[0] then
+    Exit([a, b]);
+
+  if (Length(intsB) = 1) and (Self.Paths[intsB[0]] = []) then
+    raise GetDebugLn('WebGraph', 'Points ' + ToStr(a) + ' and ' + ToStr(b) + ' don''t connect! No paths available.');
+
+  for i := 0 to High(intsA) do
+    for j := 0 to High(intsB) do
+    begin
+      if intsA[i] = intsB[j] then
+        Continue;
+      indices := Self.FindPath(intsA[i],intsB[j], rnd);
+      if indices <> [] then
+        Break(2);
+    end;
+
+  if indices = [] then
+    raise GetDebugLn('WebGraph', 'Points ' + ToStr(a) + ' and ' + ToStr(b) + ' don''t connect!');
+
+  Result += a;
+  for i in indices do
+    Result += Self.Nodes[i];
+  Result += b;
+end;
+
+
+(*
+## TWebGraph.NearestPathable
+```pascal
+function TWebGraph.NearestPathable(me: TPoint; destinations: TPointArray): TPoint;
+```
+Returns the nearest point in `destinations` to `me` that has a valid path in
+between.
+*)
+function TWebGraph.NearestPathable(me: TPoint; destinations: TPointArray): TPoint;
+var
+  path: TPointArray;
+  best, dist, i, n: Integer;
+  destination: TPoint;
+  pathDist: Double;
+begin
+  best := $FFFFFF;
+
+  for destination in destinations do
+  begin
+    //straight line is further than best, no point in going further
+    if not me.InRange(destination, best) then
+      Continue;
+
+    try
+      path := Self.PathBetween(me, destination, 0, 4);
+    except
+      Continue;
+    end;
+
+    if path = [] then
+      Continue;
+
+    pathDist := 0;
+    for i := 0 to High(path)-1 do
+    begin
+      pathDist += path[i].DistanceTo(path[i+1]);
+      if pathDist > best then
+        Continue(2);
+    end;
+
+    dist := Floor(pathDist);
+
+    if dist < best then
+    begin
+      Result := path.Last;
+      best := dist;
+      n := 1;
+      path := [];
+      Continue;
+    end;
+
+    if (dist = best) and (Random(Inc(n)) = 0) then
+      Result := path.Last; //if multiple 1/n chance of replacing best
+
+    path := [];
+  end;
+
+  Result := destinations.NearestPoint(me);
+end;
+
+
+(*
+## TWebGraph.AddNode
+```pascal
+function TWebGraph.AddNode(pt: TPoint; fromNode: Integer): Boolean;
+```
+Adds a new node to the `TWebGraph` with a connection to `fromNode`.
+
+You can specify it's coordinate through `pt`.
+*)
+function TWebGraph.AddNode(pt: TPoint; fromNode: Integer): Boolean;
+var
+  i: Integer;
+begin
+  if fromNode < 0 then
+    Exit(False);
+
+  i := Length(Self.Nodes);
+  SetLength(Self.Nodes, i+1);
+  SetLength(Self.Paths, i+1);
+  Self.Nodes[i] := pt;
+
+  Self.Paths[fromNode] += i;
+  Self.Paths[i] += fromNode;
+  Result := True;
+end;
+
+
+(*
+## TWebGraph.ConnectNodes
+```pascal
+procedure TWebGraph.ConnectNodes(a,b: Integer);
+procedure TWebGraph.ConnectNodes(a,b: TPoint); overload;
+procedure TWebGraph.ConnectNodes(a: Integer; b: TPoint); overload;
+```
+Connects nodes `a` and `b`.
+
+If either `a` or `b` are `TPoints`, they must match exactly the coordinates of a
+node in the graph.
+
+Using indices is always better for performance but overtime they may change if
+the shape of the graph changes.
+*)
+procedure TWebGraph.ConnectNodes(a,b: Integer);
+begin
+  if not Self.Paths[a].Contains(b) then
+    Self.Paths[a] += b;
+  if not Self.Paths[b].Contains(a) then
+    Self.Paths[b] += a;
+end;
+
+procedure TWebGraph.ConnectNodes(a,b: TPoint); overload;
+var
+  i, idxA, idxB: Integer;
+begin
+  idxA := -1;
+  idxB := -1;
+
+  for i := 0 to High(Self.Nodes) do
+  begin
+    if (idxA = -1) and (Self.Nodes[i] = a) then
+      idxA := i
+    else if (idxB = -1) and (Self.Nodes[i] = b) then
+      idxB := i;
+
+    if (idxA <> -1) and (idxB <> -1) then
+      Break;
+  end;
+
+  Self.ConnectNodes(idxA,idxB);
+end;
+
+procedure TWebGraph.ConnectNodes(a: Integer; b: TPoint); overload;
+var
+  i: Integer;
+begin
+  i := Self.Nodes.IndexOf(b);
+  if i = -1 then Exit;
+
+  Self.ConnectNodes(a, i);
+end;
+
+(*
+## TWebGraph.ConnectNodesEx
+```pascal
+procedure TWebGraph.ConnectNodesEx(a,b: TPoint; notEqual: Boolean = False);
+```
+Connects the closest node to `a` to the closest node to `b`.
+
+This is similar to {ref}`TWebGraph.ConnectNodes` when using `TPoints` but unlike
+it, your points don't have to be the exact same as the nodes in the graph.
+
+Overall, this is the most flexible and easiest method to use but it might not
+connect exactly the nodes you want at times.
+*)
+procedure TWebGraph.ConnectNodesEx(a,b: TPoint; notEqual: Boolean = False);
+var
+  item: TKDItem;
+  flags: TTreeSettings;
+begin
+  if notequal then
+    flags := [ETreeSetting.NotEqual, ETreeSetting.IgnoreHidden]
+  else
+    flags := [ETreeSetting.IgnoreHidden];
+
+  item := Self.KDTree.KNearest([a.X, a.Y], 1, flags).First;
+  a := Point(Round(item.Vector[0]), Round(item.Vector[1]));
+
+  item := Self.KDTree.KNearest([b.X, b.Y], 1, flags).First;
+  b := Point(Round(item.Vector[0]), Round(item.Vector[1]));
+
+  Self.ConnectNodes(a,b);
+end;
+
+
+(*
+## TWebGraph.DeleteNode
+```pascal
+function TWebGraph.DeleteNode(node: Integer): Integer;
+```
+Deletes a `Node` from a `TWebGraph` along with all the connections to it.
+*)
+function TWebGraph.DeleteNode(node: Integer): Integer;
+var
+  i,j,n,curr: Integer;
+  marked: TIntegerArray;
+begin
+  marked += node;
+  repeat
+    curr := marked.Pop;
+
+    for n in Self.Paths[curr] do
+    begin
+      Self.Paths[n].Remove(curr);
+      if Self.Paths[n] = [] then
+        marked += n;
+    end;
+
+    // offset remainding nodes
+    for i:=0 to High(Self.Paths) do
+      for j:=0 to High(Self.Paths[i]) do
+        if Self.Paths[i][j] > curr then
+          Dec(Self.Paths[i][j]);
+
+    for i:=0 to High(marked) do
+      if marked[i] > curr then Dec(marked[i]);
+
+    // remove the node itself
+    Delete(Self.Paths, curr, 1);
+    Delete(Self.Nodes, curr, 1);
+    Result += 1;
+  until Length(marked) = 0;
+end;
+
+(*
+## TWebGraph.DeleteNodes
+```pascal
+procedure TWebGraph.DeleteNodes(b: TBox);
+```
+It's very similar to {ref}`TWebGraph.BlockNodes` but unlike it, what this does
+is permanent. Blocking nodes could be used to selectively toggle nodes on/off,
+this permanently removes them.
+
+For example, this is how you could block the space where wintertodt is so
+you don't get paths through the chasm:
+```pascal
+Map.Setup([EChunk.WINTERTODT]);
+Map.Loader.Graph.DeleteNodes([6478, 34358, 6565, 34445]);
+```
+*)
+procedure TWebGraph.DeleteNodes(b: TBox);
+var
+  i: Integer;
+begin
+  for i := High(Self.Nodes) downto 0 do
+    if b.Contains(Self.Nodes[i]) then
+      Self.DeleteNode(i);
+end;
+
+
+(*
+## TWebGraph.Merge
+```pascal
+procedure TWebGraph.Merge(constref graph: TWebGraph);
+```
+Merges `graph` into the current `TWebGraph`.
+*)
+procedure TWebGraph.Merge(constref graph: TWebGraph);
+var
+  i, n, len: Integer;
+begin
+  len := Length(Self.Nodes);
+
+  Self.Nodes += graph.Nodes;
+  Self.Paths += graph.Paths;
+
+  for i := 0 to High(graph.Nodes) do
+    for n := 0 to High(Self.Paths[len+i]) do
+      Self.Paths[len+i,n] += len;
+
+  Self.WalkableSpace    += graph.WalkableSpace;
+  Self.WalkableClusters += graph.WalkableClusters;
+  Self.ObjectClusters   += graph.ObjectClusters;
+end;
+
+(*
+## TWebGraph.Offset
+```pascal
+function TWebGraph.Offset(pt: TPoint): TWebGraph;
+```
+Returns an offset `TWebGraph` by the specified `pt`.
+*)
+function TWebGraph.Offset(pt: TPoint): TWebGraph;
+begin
+  Result.Nodes := Self.Nodes.Offset(pt);
+  Result.Paths := Self.Paths.Copy();
+  Result.WalkableSpace := Self.WalkableSpace.Offset(pt);
+  Result.WalkableClusters := Self.WalkableClusters.Offset(pt);
+  Result.ObjectClusters   := Self.ObjectClusters.Offset(pt);
+end;
+
+
+(*
+## TWebGraph.Draw
+```pascal
+procedure TWebGraph.Draw(img: TImage);
+procedure TWebGraph.Draw(canvas: TImageBoxCanvas); overload;
+```
+Used for `TWebGraph` debugging.
+*)
+procedure TWebGraph.Draw(img: TImage);
+var
+  i,j: Integer;
+begin
+  if Self.Nodes = [] then Exit;
+
+  img.DrawColor := $00EAEA;
+  for i := 0 to High(Self.Paths) do
+    for j := 0 to High(Self.Paths[i]) do
+      img.DrawLine(Self.Nodes[i], Self.Nodes[Self.Paths[i, j]]);
+
+  img.DrawColor := $0101CC;
+  for i := 0 to High(Self.Nodes) do
+    img.DrawBox(TBox.Create(Self.Nodes[i], 1, 1));
+end;
+
+procedure TWebGraph.Draw(canvas: TImageBoxCanvas); overload;
+var
+  i,j: Integer;
+begin
+  if Self.Nodes = [] then Exit;
+
+  for i := 0 to High(Self.Paths) do
+    for j := 0 to High(Self.Paths[i]) do
+      canvas.DrawLine(Self.Nodes[i], Self.Nodes[Self.Paths[i, j]], $00EAEA);
+
+  for i := 0 to High(Self.Nodes) do
+    canvas.DrawBoxFilled(TBox.Create(Self.Nodes[i], 1, 1), $0101CC);
+end;
+{$R+}

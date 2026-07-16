@@ -1,0 +1,1406 @@
+(*
+# Profile Form
+Profile management system for {ref}`TScriptForm`.
+
+This module handles all account profile functionality including storage,
+validation, and UI dialogs.
+
+Credits: Developed by TazE
+Acknowledgements: Thanks to XJ for design concepts and initial prototyping 
+
+*)
+{$DEFINE WL_PROFILE_FORM_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+type
+(*
+## TProfileForm
+The account management system that handles profile storage, validation, and UI.
+*)
+  TProfileForm = record
+    ProfileCombo: TLazComboBox;
+    ProfileUpdateTasks: array of procedure () of object;
+
+    EditButton: TLazButton;
+
+    EditForm: TLazForm;
+    NameEdit, UsernameEdit, PasswordEdit, BankPinEdit: TLazEdit;
+
+    TypePanel, LocationPanel, ActivityPanel: TLazScrollBox;
+    SpecificActivityPanel: TLazScrollBox;
+
+    F2PCheckbox, MembersCheckbox: TLazCheckBox;
+
+    GermanyCheckbox, UKCheckbox, USCheckbox, AustraliaCheckbox , BrazilCheckbox: TLazCheckBox;
+
+    NormalCheckbox, DangerousCheckbox, RestrictedCheckbox, SkillTotalCheckbox: TLazCheckBox;
+
+    SelectAllActivitiesCheckbox: TLazCheckBox;
+    ActivityCheckboxes: array of TLazCheckBox;
+
+    WorldList: TLazListBox;
+    GenerateButton: TLazButton;
+    ExcludeWorldsEdit: TLazEdit;
+    MinPlayersEdit, MaxPlayersEdit: TLazEdit;
+    SortCombo: TLazComboBox;
+    StatsLabel: TLazLabel;
+
+    FilteredWorlds: array of TWorldInfo;
+    AllWorldsCache: array of TWorldInfo;
+
+    SaveButton, DeleteButton, CloseButton: TLazButton;
+    IsNewProfile: Boolean;
+    EditIndex: Integer;
+  end;
+
+(*
+## TProfileForm.GetProfilePath
+```pascal
+function TProfileForm.GetProfilePath(index: Integer): String;
+```
+Constructs the file path for a profile based on its index.
+*)
+function TProfileForm.GetProfilePath(index: Integer): String;
+begin
+  Result := WLEnv.ConfigsDir + 'profiles' + PATH_SEP + ToStr(index) + '.json';
+end;
+
+(*
+## TProfileForm.SaveProfileToFile
+```pascal
+procedure TProfileForm.SaveProfileToFile(index: Integer; profile: TProfile);
+```
+Saves profile as a JSON file at the specified index.
+*)
+procedure TProfileForm.SaveProfile(index: Integer; profile: TProfile);
+var
+  parser: TJSONParser;
+  worldsJSON: TJSONArray;
+  w: Integer;
+begin
+  try
+    parser := new TJSONParser();
+    
+    parser.AddString('name', profile.Name);
+    parser.AddString('username', profile.Username);
+    parser.AddString('password', profile.Password);
+    parser.AddString('pin', profile.Pin);
+
+    worldsJSON := new TJSONArray;
+    for w in profile.Worlds do
+      worldsJSON.AddInt('worlds', w);
+    parser.AddArray('worlds', worldsJSON);
+
+    parser.Save(Self.GetProfilePath(index), [EJSONFormatOption.USE_TABS, EJSONFormatOption.SINGLE_LINE_ARR], 1);
+  except
+    WriteLn('Error: Failed to save profile to file - ' + GetExceptionMessage());
+  end;
+end;
+
+(*
+## TProfileForm.LoadProfileFromFile
+```pascal
+function TProfileForm.LoadProfileFromFile(index: Integer): TProfile;
+```
+Loads a profile from disk at the specified index. Returns a default profile if the file doesn't exist or is invalid.
+*)
+function TProfileForm.LoadProfileFromFile(index: Integer): TProfile;
+var
+  parser: TJSONParser;
+  worlds: TJSONItem;
+  path: String;
+  i: Integer;
+begin
+  Result := Default(TProfile);
+  path := Self.GetProfilePath(index);
+
+  if not FileExists(path) then Exit;
+
+  parser := new TJSONParser();
+  parser.Load(path);
+
+  if not parser.GetString('name', Result.Name) then Exit;
+  if not parser.GetString('username', Result.Username) then Exit;
+  if not parser.GetString('password', Result.Password) then Exit;
+  if not parser.GetString('pin', Result.Pin) then Exit;
+  if not parser.GetArray('worlds', worlds) then Exit;
+
+  for i := 0 to worlds.Count-1 do
+    Result.Worlds += worlds.Item[i].AsInt;
+end;
+
+(*
+## TProfileForm.GetExistingProfileIndices
+```pascal
+function TProfileForm.GetExistingProfileIndices(): TIntegerArray;
+```
+Scans the accounts directory and returns a sorted array of all existing profile indices.
+*)
+function TProfileForm.GetExistingProfileIndices(): TIntegerArray;
+var
+  files: TStringArray;
+  i, index: Integer;
+  filename: String;
+begin
+  files := DirList(WLEnv.ConfigsDir + 'profiles', True);
+  
+  for i := 0 to High(files) do
+  begin
+    filename := PathExtractName(files[i]);
+    if filename.EndsWith('.json') then
+    begin
+      index := StrToInt(filename.Before('.json'), -1);
+      if index >= 0 then
+        Result += index;
+    end;
+  end;
+  
+  Result.Sort();
+end;
+
+(*
+## TProfileForm.ReindexProfiles
+```pascal
+procedure TProfileForm.ReindexProfiles(fromIndex: Integer);
+```
+Renumbers profile files after a deletion to maintain sequential indexing. All profiles with indices greater than fromIndex are decremented by 1.
+*)
+procedure TProfileForm.ReindexProfiles(fromIndex: Integer);
+var
+  indices: TIntegerArray;
+  i, currentIndex, newIndex: Integer;
+  oldPath, newPath: String;
+begin
+  indices := Self.GetExistingProfileIndices();
+  
+  for i := 0 to High(indices) do
+  begin
+    currentIndex := indices[i];
+    if currentIndex > fromIndex then
+    begin
+      newIndex := currentIndex - 1;
+      oldPath := Self.GetProfilePath(currentIndex);
+      newPath := Self.GetProfilePath(newIndex);
+      
+      if FileExists(oldPath) then
+      begin
+        try
+          FileRename(oldPath, newPath);
+        except
+          WriteLn('Error: Failed to rename profile file from ' + oldPath + ' to ' + newPath + ' - ' + GetExceptionMessage());
+        end;
+      end;
+    end;
+  end;
+end;
+
+(*
+## TProfileForm.ValidateProfile
+```pascal
+function TProfileForm.ValidateProfile(profile: TProfile): Boolean;
+```
+Validates a profile has required fields filled.
+*)
+function TProfileForm.ValidateProfile(profile: TProfile): Boolean;
+begin
+  Result := profile.Name.Trim() <> '';  // Only profile name is required
+end;
+
+(*
+## TProfileForm.Setup
+```pascal
+procedure TProfileForm.Setup();
+```
+Sets up the account system and loads existing profiles from config.
+*)
+procedure TProfileForm.Setup();
+var
+  indices: TIntegerArray;
+  i, profileCount: Integer;
+  profile: TProfile;
+  profilesDir: String;
+begin
+  profilesDir := WLEnv.ConfigsDir + 'profiles' + PATH_SEP;
+  
+  if not DirCreate(profilesDir) then
+  begin
+    WriteLn('Error: Failed to create accounts directory');
+    Exit;
+  end;
+
+  indices := Self.GetExistingProfileIndices();
+  profileCount := Length(indices);
+  
+  if profileCount > 0 then
+  begin
+    SetLength(Profiles, profileCount);
+    
+    for i := 0 to High(indices) do
+    begin
+      profile := Self.LoadProfileFromFile(indices[i]);
+      
+      if Self.ValidateProfile(profile) then
+        Profiles[i] := profile
+      else
+        WriteLn('Warning: Invalid profile at index ' + ToStr(indices[i]) + ': ' + profile.Name);
+    end;
+  end
+  else
+    SetLength(Profiles, 0);
+end;
+
+
+(*
+## TProfileForm.UpdateProfileCombo
+```pascal
+procedure TProfileForm.UpdateProfileCombo();
+```
+Updates the profile combo box with current profiles.
+*)
+procedure TProfileForm.UpdateProfileCombo();
+var
+  i: Integer;
+begin
+  Self.ProfileCombo.Items.Clear();
+
+  for i := 0 to High(Profiles) do
+    Self.ProfileCombo.Items.Add(Profiles[i].Name);
+
+  Self.ProfileCombo.Items.Add('New Profile');
+end;
+
+
+(*
+## TProfileForm.AddProfile
+```pascal
+function TProfileForm.AddProfile(profile: TProfile): Boolean;
+```
+Adds a new profile to the configuration after validation.
+*)
+function TProfileForm.AddProfile(profile: TProfile): Boolean;
+var
+  idx: Integer;
+begin
+  if not Self.ValidateProfile(profile) then
+  begin
+    WriteLn('Error: Profile validation failed - missing required fields');
+    Exit;
+  end;
+  
+  if Profiles.Contains(profile.Name) then
+  begin
+    WriteLn('Error: Profile with name "' + profile.Name + '" already exists');
+    Exit;
+  end;
+  
+  Profiles += profile;
+  idx := High(Profiles);
+  Self.SaveProfile(idx, profile);
+  Result := True;
+
+  Self.UpdateProfileCombo();
+  Self.ProfileCombo.ItemIndex := idx;
+  ProfileIndex := idx;
+end;
+
+(*
+## TProfileForm.UpdateProfile
+```pascal
+function TProfileForm.UpdateProfile(index: Integer; profile: TProfile): Boolean;
+```
+Updates an existing profile at the specified index after validation.
+*)
+function TProfileForm.UpdateProfile(index: Integer; profile: TProfile): Boolean;
+begin
+  Result := False;
+
+  if not InRange(index, 0, High(Profiles)) then
+  begin
+    WriteLn('Error: Invalid profile index: ' + ToStr(index));
+    Exit;
+  end;
+  
+  if not Self.ValidateProfile(profile) then
+  begin
+    WriteLn('Error: Profile validation failed - missing required fields');
+    Exit;
+  end;
+  
+  Profiles[index] := profile;
+  
+  Self.SaveProfile(index, profile);
+  Result := True;
+
+  Self.UpdateProfileCombo();
+  if InRange(index, 0, Self.ProfileCombo.Items.Count - 2) then
+  begin
+    Self.ProfileCombo.ItemIndex := index;
+    ProfileIndex := index;
+  end;
+end;
+
+(*
+## TProfileForm.DeleteProfile
+```pascal
+function TProfileForm.DeleteProfile(index: Integer): Boolean;
+```
+Deletes a profile at the specified index.
+*)
+function TProfileForm.DeleteProfile(index: Integer): Boolean;
+var
+  path: String;
+begin
+  if (index < 0) or (index >= Length(Profiles)) then
+  begin
+    WriteLn('Error: Invalid profile index for deletion: ' + ToStr(index));
+    Exit;
+  end;
+  
+  path := Self.GetProfilePath(index);
+  if FileExists(path) then
+  begin
+    try
+      FileDelete(path);
+    except
+      WriteLn('Error: Failed to delete profile file ' + path + ' - ' + GetExceptionMessage());
+    end;
+  end;
+
+  Profiles.Delete(index);
+  Self.ReindexProfiles(index);
+  
+  Result := True;
+
+  Self.UpdateProfileCombo();
+  if Length(Profiles) = 0 then
+    Self.ProfileCombo.ItemIndex := 0
+  else if index >= Length(Profiles) then
+    Self.ProfileCombo.ItemIndex := High(Profiles)
+  else
+    Self.ProfileCombo.ItemIndex := index;
+end;
+
+
+(*
+## TProfileForm.GetSelectedProfile
+```pascal
+function TProfileForm.GetSelectedProfile(): TProfile;
+```
+Returns the currently selected account profile.
+*)
+function TProfileForm.GetSelectedProfile(): TProfile;
+var
+  selectedIndex: Integer;
+begin
+  Result := Default(TProfile);
+
+  selectedIndex := Self.ProfileCombo.ItemIndex;
+  
+  if (selectedIndex >= 0) and (selectedIndex < Length(Profiles)) then
+    Result := Profiles[selectedIndex];
+end;
+
+(*
+## TProfileForm.ValidateInput
+```pascal
+function TProfileForm.ValidateInput(profile: TProfile): String;
+```
+Validates user input and returns error message if validation fails.
+*)
+function TProfileForm.ValidateInput(profile: TProfile): String;
+begin
+  if profile.Name = '' then
+  begin
+    Result := 'Profile name is required.';
+    Exit;
+  end;
+  
+  // Validate Bank PIN if provided
+  if profile.Pin <> '' then
+  begin
+    if Length(profile.Pin) <> 4 then  //Bank PIN must be 4 digits
+    begin
+      Result := 'Bank PIN must be exactly 4 digits.';
+      Exit;
+    end;
+    
+    // Check that all characters are digits
+    if not profile.Pin.IsNumeric then
+    begin
+      Result := 'Bank PIN must contain only digits (0-9).';
+      Exit;
+    end;
+  end;
+end;
+
+
+(*
+## TProfileForm.BuildFilterSettings
+```pascal
+function TProfileForm.BuildFilterSettings(): TSettings;
+```
+Builds a TSettings record from the current state of all filter UI controls.
+*)
+function TProfileForm.BuildFilterSettings(): TWorldFetcherSettings;
+var
+  i: Integer;
+  excludeWorlds: TStringArray;
+  excludeNum: Integer;
+begin
+  Result := WorldFetcher.Settings;
+
+  Result.MinPlayers := StrToInt(Self.MinPlayersEdit.Text, 0);
+  Result.MaxPlayers := StrToInt(Self.MaxPlayersEdit.Text, 2000);
+
+  if not Self.F2PCheckbox.Checked or not Self.MembersCheckbox.Checked then
+  begin
+    if not Self.F2PCheckbox.Checked then
+      Result.ExcludeTypes += [EWorldType.FREE_TO_PLAY];
+    if not Self.MembersCheckbox.Checked then
+      Result.ExcludeTypes += [EWorldType.MEMBERS];
+  end;
+
+  if not Self.GermanyCheckbox.Checked then
+    Result.ExcludeLocations += [EWorldLocation.GERMANY];
+  if not Self.UKCheckbox.Checked then
+    Result.ExcludeLocations += [EWorldLocation.UNITED_KINGDOM];
+  if not Self.USCheckbox.Checked then
+    Result.ExcludeLocations += [EWorldLocation.UNITED_STATES];
+  if not Self.AustraliaCheckbox.Checked then
+    Result.ExcludeLocations += [EWorldLocation.AUSTRALIA];
+  if not Self.BrazilCheckbox.Checked then
+    Result.ExcludeLocations += [EWorldLocation.BRAZIL];
+
+  if not Self.NormalCheckbox.Checked then
+    Result.ExcludeActivities += [EWorldActivity.NORMAL];
+  if not Self.DangerousCheckbox.Checked then
+    Result.ExcludeActivities += [EWorldActivity.DANGEROUS];
+  if not Self.RestrictedCheckbox.Checked then
+    Result.ExcludeActivities += [EWorldActivity.RESTRICTED];
+  if not Self.SkillTotalCheckbox.Checked then
+    Result.ExcludeActivities += [EWorldActivity.SKILL_TOTAL];
+
+  if Self.ExcludeWorldsEdit.Text <> '' then
+  begin
+    excludeWorlds := Self.ExcludeWorldsEdit.Text.Split(',');
+    for i := 0 to High(excludeWorlds) do
+    begin
+      excludeNum := StrToInt(excludeWorlds[i].Trim(), -1);
+      if excludeNum > 0 then
+        Result.ExcludeWorlds += [excludeNum];
+    end;
+  end;
+end;
+
+(*
+## TProfileForm.ApplyActivityFilters
+```pascal
+procedure TProfileForm.ApplyActivityFilters();
+```
+Filters the current world list based on selected specific activity checkboxes.
+*)
+procedure TProfileForm.ApplyActivityFilters();
+var
+  i, j, checkboxIndex: Integer;
+  anyChecked: Boolean;
+begin
+  if Length(Self.ActivityCheckboxes) = 0 then
+    Exit;
+
+  // Check if ANY activity checkbox is selected
+  anyChecked := False;
+  for i := 0 to High(Self.ActivityCheckboxes) do
+    if Self.ActivityCheckboxes[i].Checked then
+    begin
+      anyChecked := True;
+      Break;
+    end;
+
+  // If none selected, no filtering needed (show all)
+  if not anyChecked then
+    Exit;
+
+  // Filter to ONLY include worlds matching checked activities
+  j := 0;
+  for i := 0 to High(Self.FilteredWorlds) do
+  begin
+    // Handle worlds with no specific activity - match against empty Hint checkbox
+    if (Self.FilteredWorlds[i].ActivityString = '') or (Self.FilteredWorlds[i].ActivityString = '-') then
+    begin
+      for checkboxIndex := 0 to High(Self.ActivityCheckboxes) do
+        if (Self.ActivityCheckboxes[checkboxIndex].Hint = '') and
+           Self.ActivityCheckboxes[checkboxIndex].Checked then
+        begin
+          Self.FilteredWorlds[j] := Self.FilteredWorlds[i];
+          Inc(j);
+          Break;
+        end;
+      Continue;
+    end;
+
+    for checkboxIndex := 0 to High(Self.ActivityCheckboxes) do
+      if (Self.ActivityCheckboxes[checkboxIndex].Hint = Self.FilteredWorlds[i].ActivityString) and
+         Self.ActivityCheckboxes[checkboxIndex].Checked then
+      begin
+        Self.FilteredWorlds[j] := Self.FilteredWorlds[i];
+        Inc(j);
+        Break;
+      end;
+  end;
+
+  SetLength(Self.FilteredWorlds, j);
+end;
+
+(*
+## TProfileForm.GetLocationString
+```pascal
+function TProfileForm.GetLocationString(loc: EWorldLocation): String;
+```
+Converts a world location enum to its display string.
+*)
+function TProfileForm.GetLocationString(loc: EWorldLocation): String;
+const
+  NAMES: array [EWorldLocation] of String = [
+    'Germany', 'UK', 'USA', 'Australia', 'Brazil'
+  ];
+begin
+  Result := NAMES[loc];
+end;
+
+(*
+## TProfileForm.GetTypeString
+```pascal
+function TProfileForm.GetTypeString(worldType: EWorldType): String;
+```
+Converts a world type enum to its display string.
+*)
+function TProfileForm.GetTypeString(worldType: EWorldType): String;
+const
+  NAMES: array [EWorldType] of String = ['F2P', 'Members'];
+begin
+  Result := NAMES[worldType];
+end;
+
+
+(*
+## TProfileForm.DisplayResults
+```pascal
+procedure TProfileForm.DisplayResults();
+```
+Formats and displays the filtered world list in the list box with columns for world number, location, type, activity, and player count.
+*)
+procedure TProfileForm.DisplayResults();
+const
+  ACTIVITY_TABLE_MAX_LENGTH = 14;
+  ACTIVITY_TABLE_TRUNCATE_LENGTH = 12;
+var
+  i, validWorldCount: Integer;
+  worldStr, activityStr: String;
+begin
+  Self.WorldList.Items.Clear();
+
+  Self.WorldList.Items.Add(Format('%s |  %-9s  |  %-7s  |  %-15s  |  %s',
+    ['World', 'Location', 'Type', 'Activity', 'Players']));
+  Self.WorldList.Items.Add('------+-------------+-----------+-------------------+---------');
+
+  validWorldCount := 0;
+  for i := 0 to High(Self.FilteredWorlds) do
+  begin
+    // Skip worlds with invalid player count (parsing errors)
+    if Self.FilteredWorlds[i].PlayerCount < 0 then
+      Continue;
+
+    activityStr := Self.FilteredWorlds[i].ActivityString;
+    if activityStr.Length > ACTIVITY_TABLE_MAX_LENGTH then
+      activityStr := activityStr.CopyRange(1, ACTIVITY_TABLE_TRUNCATE_LENGTH) + '...';
+
+    worldStr := Format('%-4d  |  %-9s  |  %-7s  |  %-15s  |  %1d',
+      [Self.FilteredWorlds[i].WorldNumber,
+       Self.GetLocationString(Self.FilteredWorlds[i].Location),
+       Self.GetTypeString(Self.FilteredWorlds[i].WorldType),
+       activityStr,
+       Self.FilteredWorlds[i].PlayerCount]);
+
+    Self.WorldList.Items.Add(worldStr);
+    Inc(validWorldCount);
+  end;
+
+  Self.StatsLabel.Caption := Format('Found: %d worlds', [validWorldCount]);
+end;
+
+(*
+## TProfileForm.RefreshActivities
+```pascal
+procedure TProfileForm.RefreshActivities();
+```
+Dynamically creates checkboxes for all unique specific activities found in the currently filtered worlds. Removes previous activity checkboxes before creating new ones.
+*)
+procedure TProfileForm.RefreshActivities();
+const
+  ACTIVITY_CHECKBOX_MAX_LENGTH = 35;
+  ACTIVITY_CHECKBOX_TRUNCATE_LENGTH = 32;
+type
+  TActivityGroup = record
+    Activity: String;
+  end;
+  TActivityState = record
+    Activity: String;
+    Checked: Boolean;
+  end;
+var
+  i, j: Integer;
+  activities: array of TActivityGroup;
+  activity: TActivityGroup;
+  tempWorlds: array of TWorldInfo;
+  checkbox: TLazCheckBox;
+  activityText: String;
+  previousStates: array of TActivityState;
+  activityStrings: TStringArray;
+  sortedActivities: array of TActivityGroup;
+begin
+  // Save current checkbox states before destroying them
+  SetLength(previousStates, Length(Self.ActivityCheckboxes));
+  for i := 0 to High(Self.ActivityCheckboxes) do
+    if Assigned(Self.ActivityCheckboxes[i]) then
+    begin
+      previousStates[i].Activity := Self.ActivityCheckboxes[i].Hint;
+      previousStates[i].Checked := Self.ActivityCheckboxes[i].Checked;
+    end;
+
+  for i := 0 to High(Self.ActivityCheckboxes) do
+    if Assigned(Self.ActivityCheckboxes[i]) then
+      Self.ActivityCheckboxes[i].Free();
+  SetLength(Self.ActivityCheckboxes, 0);
+
+  tempWorlds := Copy(Self.AllWorldsCache);
+
+  if not Self.F2PCheckbox.Checked then
+  begin
+    j := 0;
+    for i := 0 to High(tempWorlds) do
+      if tempWorlds[i].WorldType <> EWorldType.FREE_TO_PLAY then
+      begin
+        tempWorlds[j] := tempWorlds[i];
+        Inc(j);
+      end;
+    SetLength(tempWorlds, j);
+  end;
+
+  if not Self.MembersCheckbox.Checked then
+  begin
+    j := 0;
+    for i := 0 to High(tempWorlds) do
+      if tempWorlds[i].WorldType <> EWorldType.MEMBERS then
+      begin
+        tempWorlds[j] := tempWorlds[i];
+        Inc(j);
+      end;
+    SetLength(tempWorlds, j);
+  end;
+
+  j := 0;
+  for i := 0 to High(tempWorlds) do
+  begin
+    case tempWorlds[i].Location of
+      EWorldLocation.GERMANY: if not Self.GermanyCheckbox.Checked then Continue;
+      EWorldLocation.UNITED_KINGDOM: if not Self.UKCheckbox.Checked then Continue;
+      EWorldLocation.UNITED_STATES: if not Self.USCheckbox.Checked then Continue;
+      EWorldLocation.AUSTRALIA: if not Self.AustraliaCheckbox.Checked then Continue;
+      EWorldLocation.BRAZIL: if not Self.BrazilCheckbox.Checked then Continue;
+    end;
+    tempWorlds[j] := tempWorlds[i];
+    Inc(j);
+  end;
+  SetLength(tempWorlds, j);
+
+  j := 0;
+  for i := 0 to High(tempWorlds) do
+  begin
+    case tempWorlds[i].Activity of
+      EWorldActivity.NORMAL: if not Self.NormalCheckbox.Checked then Continue;
+      EWorldActivity.DANGEROUS: if not Self.DangerousCheckbox.Checked then Continue;
+      EWorldActivity.RESTRICTED: if not Self.RestrictedCheckbox.Checked then Continue;
+      EWorldActivity.SKILL_TOTAL: if not Self.SkillTotalCheckbox.Checked then Continue;
+    end;
+    tempWorlds[j] := tempWorlds[i];
+    Inc(j);
+  end;
+  SetLength(tempWorlds, j);
+
+  for i := 0 to High(tempWorlds) do
+  begin
+    if (tempWorlds[i].ActivityString = '') or (tempWorlds[i].ActivityString = '-') then
+      Continue;
+
+    for j := 0 to High(activities) do
+      if activities[j].Activity = tempWorlds[i].ActivityString then
+        Break;
+
+    if (j > High(activities)) or (Length(activities) = 0) then
+    begin
+      activity.Activity := tempWorlds[i].ActivityString;
+      activities += activity;
+    end;
+  end;
+
+  // Sort activities alphabetically
+  SetLength(activityStrings, Length(activities));
+  for i := 0 to High(activities) do
+    activityStrings[i] := activities[i].Activity;
+  
+  activityStrings.Sort();
+  
+  SetLength(sortedActivities, Length(activityStrings));
+  for i := 0 to High(activityStrings) do
+    sortedActivities[i].Activity := activityStrings[i];
+  
+  activities := sortedActivities;
+
+  for i := 0 to High(activities) do
+  begin
+    activityText := activities[i].Activity;
+    if activityText.Length > ACTIVITY_CHECKBOX_MAX_LENGTH then
+      activityText := activityText.CopyRange(1, ACTIVITY_CHECKBOX_TRUNCATE_LENGTH) + '...';
+
+    checkbox := TLazCheckBox.CreateEx(
+      Self.SpecificActivityPanel, activityText, '', 5, 25 + (i * 20), 180, 18
+    );
+    
+    // Check if this activity had a previous state
+    checkbox.Checked := Self.SelectAllActivitiesCheckbox.Checked; // Default
+    for j := 0 to High(previousStates) do
+      if previousStates[j].Activity = activities[i].Activity then
+      begin
+        checkbox.Checked := previousStates[j].Checked;
+        Break;
+      end;
+    
+    checkbox.Hint := activities[i].Activity;
+
+    Self.ActivityCheckboxes += checkbox;
+  end;
+
+  // Add "Normal" checkbox for worlds with no specific activity
+  checkbox := TLazCheckBox.CreateEx(
+    Self.SpecificActivityPanel, 'Normal (no activity)', '',
+    5, 25 + (Length(activities) * 20), 180, 18
+  );
+  checkbox.Checked := Self.SelectAllActivitiesCheckbox.Checked;
+  for j := 0 to High(previousStates) do
+    if previousStates[j].Activity = '' then
+    begin
+      checkbox.Checked := previousStates[j].Checked;
+      Break;
+    end;
+  checkbox.Hint := '';
+  Self.ActivityCheckboxes += checkbox;
+end;
+
+
+(*
+## TProfileForm.OnSaveClick
+```pascal
+procedure TProfileForm.OnSaveClick(sender: TLazObject);
+```
+Handles the Save button click event. Validates and saves the profile data from the edit form.
+*)
+{$H-}
+procedure TProfileForm.OnSaveClick(sender: TLazObject);
+var
+  profile: TProfile;
+  validationError: String;
+  i: Integer;
+begin
+  profile.Name := Self.NameEdit.Text.Trim();
+  profile.Username := Self.UsernameEdit.Text.Trim();
+  profile.Password := Self.PasswordEdit.Text;
+  profile.Pin := Self.BankPinEdit.Text.Trim();
+
+  for i := 0 to High(Self.FilteredWorlds) do
+    profile.Worlds += Self.FilteredWorlds[i].WorldNumber;
+
+  validationError := Self.ValidateInput(profile);
+  if validationError <> '' then
+  begin
+    ShowDialog(EDialogIcon.ERROR, [EDialogButton.OK], 'Invalid Profile', validationError);
+    Exit;
+  end;
+  
+  if Self.IsNewProfile then
+  begin
+    if not Self.AddProfile(profile) then
+    begin
+      ShowDialog(EDialogIcon.ERROR, [EDialogButton.OK], 'Duplicate Profile', 'Failed to add profile.' + LINE_SEP + 'A profile with this name may already exist.');
+      Exit;
+    end;
+  end
+  else
+  begin
+    if not Self.UpdateProfile(Self.EditIndex, profile) then
+    begin
+      ShowDialog(EDialogIcon.ERROR, [EDialogButton.OK], 'Profile Error', 'Failed to update profile.' + LINE_SEP + 'Please check your input.');
+      Exit;
+    end;
+  end;
+    
+  Self.EditForm.Close();
+end;
+
+(*
+## TProfileForm.OnDeleteClick
+```pascal
+procedure TProfileForm.OnDeleteClick(sender: TLazObject);
+```
+Handles the Delete button click event. Shows confirmation dialog before deleting the profile.
+*)
+procedure TProfileForm.OnDeleteClick(sender: TLazObject);
+begin
+  if ShowDialog(EDialogIcon.WARNING, [EDialogButton.YES, EDialogButton.NO], 'Delete Profile', 'Are you sure you want to delete this profile?') = EDialogButton.YES then
+  begin
+    Self.DeleteProfile(Self.EditIndex);
+    Self.EditForm.Close();
+  end;
+end;
+
+(*
+## TProfileForm.OnCloseClick
+```pascal
+procedure TProfileForm.OnCloseClick(sender: TLazObject);
+```
+Handles the Close button click event. Closes the edit dialog without saving.
+*)
+procedure TProfileForm.OnCloseClick(sender: TLazObject);
+begin
+  Self.EditForm.Close();
+end;
+
+(*
+## TProfileForm.OnGenerateClick
+```pascal
+procedure TProfileForm.OnGenerateClick(sender: TLazObject);
+```
+Handles the Generate Worlds button click. Applies current filter settings and refreshes the world list.
+*)
+procedure TProfileForm.OnGenerateClick(sender: TLazObject);
+var
+  settings: TWorldFetcherSettings;
+begin
+  settings := Self.BuildFilterSettings();
+
+  if Length(Self.AllWorldsCache) = 0 then
+  begin
+    Self.StatsLabel.Caption := 'Fetching...';
+    Self.EditForm.Update();
+
+    WorldFetcher.Setup();
+    WorldFetcher.Settings.ExcludeActivities := [];
+
+    if not WorldFetcher.FetchAll() then
+    begin
+      Self.StatsLabel.Caption := 'Fetch failed!';
+      Exit;
+    end;
+
+    Self.AllWorldsCache := WorldFetcher.GetFilteredWorlds();
+  end;
+
+  WorldFetcher.Worlds := Self.AllWorldsCache;
+
+  Self.RefreshActivities();
+
+  Self.FilteredWorlds := WorldFetcher.FilterBySettings(settings);
+  Self.ApplyActivityFilters();
+
+  case Self.SortCombo.ItemIndex of
+    0: Self.FilteredWorlds := WorldFetcher.SortWorlds(Self.FilteredWorlds, EWorldSort.WORLD_NUMBER);
+    1: Self.FilteredWorlds := WorldFetcher.SortWorlds(Self.FilteredWorlds, EWorldSort.PLAYER_COUNT_ASC);
+    2: Self.FilteredWorlds := WorldFetcher.SortWorlds(Self.FilteredWorlds, EWorldSort.PLAYER_COUNT_DESC);
+  end;
+
+  Self.DisplayResults();
+end;
+
+(*
+## TProfileForm.OnSelectAllActivitiesClick
+```pascal
+procedure TProfileForm.OnSelectAllActivitiesClick(sender: TLazObject);
+```
+Handles the Select/Deselect All checkbox click. Toggles all activity checkboxes to match the master checkbox state.
+*)
+procedure TProfileForm.OnSelectAllActivitiesClick(sender: TLazObject);
+var
+  i: Integer;
+  newState: Boolean;
+begin
+  newState := Self.SelectAllActivitiesCheckbox.Checked;
+
+  for i := 0 to High(Self.ActivityCheckboxes) do
+    Self.ActivityCheckboxes[i].Checked := newState;
+end;
+
+(*
+## TProfileForm.OnSortChange
+```pascal
+procedure TProfileForm.OnSortChange(sender: TLazObject);
+```
+Handles sort order combo box change. Re-generates the world list with the new sort order.
+*)
+procedure TProfileForm.OnSortChange(sender: TLazObject);
+begin
+  if Length(Self.FilteredWorlds) > 0 then
+    Self.OnGenerateClick(Self.GenerateButton);
+end;
+{$H+}
+
+
+(*
+## TProfileForm.SetupWorldTypePanel
+```pascal
+procedure TProfileForm.SetupWorldTypePanel();
+```
+Sets up the world type filter panel with F2P and Members checkboxes.
+*)
+procedure TProfileForm.SetupWorldTypePanel();
+var
+  typeY: Integer;
+  checkboxHeight: Integer;
+begin
+  checkboxHeight := 18;
+  typeY := 10;
+
+  Self.F2PCheckbox := TLazCheckBox.CreateEx(
+    Self.TypePanel, 'Free-to-play', '', 10, typeY, 130, checkboxHeight
+  );
+  Self.F2PCheckbox.Checked := True;
+
+  typeY += checkboxHeight + 3;
+  Self.MembersCheckbox := TLazCheckBox.CreateEx(
+    Self.TypePanel, 'Members', '', 10, typeY, 130, checkboxHeight
+  );
+  Self.MembersCheckbox.Checked := True;
+end;
+
+(*
+## TProfileForm.SetupLocationPanel
+```pascal
+procedure TProfileForm.SetupLocationPanel();
+```
+Sets up the location filter panel with checkboxes for Germany, UK, USA, and Australia.
+*)
+procedure TProfileForm.SetupLocationPanel();
+var
+  locY: Integer;
+  checkboxHeight: Integer;
+begin
+  checkboxHeight := 18;
+  locY := 10;
+
+  Self.GermanyCheckbox := TLazCheckBox.CreateEx(
+    Self.LocationPanel, 'Germany', '', 10, locY, 100, checkboxHeight
+  );
+  Self.GermanyCheckbox.Checked := True;
+
+  locY += checkboxHeight + 3;
+  Self.UKCheckbox := TLazCheckBox.CreateEx(
+    Self.LocationPanel, 'UK', '', 10, locY, 100, checkboxHeight
+  );
+  Self.UKCheckbox.Checked := True;
+
+  locY += checkboxHeight + 3;
+  Self.USCheckbox := TLazCheckBox.CreateEx(
+    Self.LocationPanel, 'USA', '', 10, locY, 100, checkboxHeight
+  );
+  Self.USCheckbox.Checked := True;
+
+  locY += checkboxHeight + 3;
+  Self.AustraliaCheckbox := TLazCheckBox.CreateEx(
+    Self.LocationPanel, 'Australia', '', 10, locY, 100, checkboxHeight
+  );
+  Self.AustraliaCheckbox.Checked := True;
+
+  locY += checkboxHeight + 3;
+  Self.BrazilCheckbox := TLazCheckBox.CreateEx(
+    Self.LocationPanel, 'Brazil', '', 10, locY, 100, checkboxHeight
+
+  );
+  Self.BrazilCheckbox.Checked := True;
+end;
+
+(*
+## TProfileForm.SetupActivityPanel
+```pascal
+procedure TProfileForm.SetupActivityPanel();
+```
+Sets up the activity type filter panel with checkboxes for Normal, Dangerous, Restricted, and Skill Total worlds.
+*)
+procedure TProfileForm.SetupActivityPanel();
+var
+  actY: Integer;
+  checkboxHeight: Integer;
+begin
+  checkboxHeight := 18;
+  actY := 10;
+
+  Self.NormalCheckbox := TLazCheckBox.CreateEx(
+    Self.ActivityPanel, 'Normal', '', 10, actY, 130, checkboxHeight
+  );
+  Self.NormalCheckbox.Checked := True;
+
+  actY += checkboxHeight + 3;
+  Self.DangerousCheckbox := TLazCheckBox.CreateEx(
+    Self.ActivityPanel, 'Dangerous', '', 10, actY, 130, checkboxHeight
+  );
+  Self.DangerousCheckbox.Checked := False;
+
+  actY += checkboxHeight + 3;
+  Self.RestrictedCheckbox := TLazCheckBox.CreateEx(
+    Self.ActivityPanel, 'Restricted', '', 10, actY, 130, checkboxHeight
+  );
+  Self.RestrictedCheckbox.Checked := False;
+
+  actY += checkboxHeight + 3;
+  Self.SkillTotalCheckbox := TLazCheckBox.CreateEx(
+    Self.ActivityPanel, 'Skill Total', '', 10, actY, 130, checkboxHeight
+  );
+  Self.SkillTotalCheckbox.Checked := True;
+end;
+
+(*
+## TProfileForm.SetupSpecificActivityPanel
+```pascal
+procedure TProfileForm.SetupSpecificActivityPanel();
+```
+Sets up the specific activities panel with a master select/deselect all checkbox. Individual activity checkboxes are added dynamically by RefreshActivities.
+*)
+procedure TProfileForm.SetupSpecificActivityPanel();
+begin
+  Self.SelectAllActivitiesCheckbox := TLazCheckBox.CreateEx(
+    Self.SpecificActivityPanel, 'Select/Deselect All', '',
+    5, 5, 200, 18
+  );
+  Self.SelectAllActivitiesCheckbox.Checked := True;
+  Self.SelectAllActivitiesCheckbox.OnClick := @Self.OnSelectAllActivitiesClick;
+end;
+
+
+(*
+## TProfileForm.LoadWorldData
+```pascal
+procedure TProfileForm.LoadWorldData();
+```
+Fetches all available worlds from the world fetcher and caches them. Automatically generates the initial world list after fetching.
+*)
+procedure TProfileForm.LoadWorldData();
+begin
+  Self.StatsLabel.Caption := 'Fetching...';
+  Self.EditForm.Update();
+
+  WorldFetcher.Setup();
+  WorldFetcher.Settings.ExcludeActivities := [];
+
+  if WorldFetcher.FetchAll() then
+  begin
+    Self.AllWorldsCache := WorldFetcher.GetFilteredWorlds();
+    Self.RefreshActivities();
+    Self.StatsLabel.Caption := Format('Ready: %d worlds', [Length(Self.AllWorldsCache)]);
+    Self.OnGenerateClick(Self.GenerateButton);
+  end
+  else
+    Self.StatsLabel.Caption := 'Fetch failed!';
+end;
+
+(*
+## TProfileForm.LoadSavedWorlds
+```pascal
+procedure TProfileForm.LoadSavedWorlds(worldsStr: String);
+```
+Loads saved world numbers and displays them. Unchecks filter checkboxes but keeps activity options visible.
+*)
+procedure TProfileForm.LoadSavedWorlds(worlds: TIntegerArray);
+begin
+  if worlds = [] then
+    Exit;
+
+  WorldFetcher.Setup();
+  if not WorldFetcher.Fetch(worlds) then
+    Exit;
+
+  Self.FilteredWorlds := WorldFetcher.Worlds;
+  Self.DisplayResults();
+
+  Self.F2PCheckbox.Checked := False;
+  Self.MembersCheckbox.Checked := False;
+  Self.GermanyCheckbox.Checked := False;
+  Self.UKCheckbox.Checked := False;
+  Self.USCheckbox.Checked := False;
+  Self.AustraliaCheckbox.Checked := False;
+  Self.NormalCheckbox.Checked := False;
+  Self.DangerousCheckbox.Checked := False;
+  Self.RestrictedCheckbox.Checked := False;
+  Self.SkillTotalCheckbox.Checked := False;
+  Self.SelectAllActivitiesCheckbox.Checked := False;
+end;
+
+
+(*
+## TProfileForm.SetupEditDialog
+```pascal
+procedure TProfileForm.SetupEditDialog(
+  const profile: TProfile; isNew: Boolean; editIndex: Integer
+);
+```
+Sets up the modal edit dialog for profile details.
+*)
+procedure TProfileForm.SetupEditDialog(
+  const profile: TProfile; isNew: Boolean; editIndex: Integer
+);
+const
+  EDIT_FORM_WIDTH = 700;
+  EDIT_FORM_HEIGHT = 520;
+  FIELD_WIDTH = 172;
+  FIELD_HEIGHT = 25;
+  BUTTON_WIDTH = 100;
+  BUTTON_HEIGHT = 30;
+  PANEL_HEIGHT = 120;
+var
+  currentX, fieldY, worldY: Integer;
+begin
+  Self.IsNewProfile := isNew;
+  Self.EditIndex := editIndex;
+
+  Self.EditForm := TLazForm.Create(nil);
+  Self.EditForm.Width := EDIT_FORM_WIDTH;
+  Self.EditForm.Height := EDIT_FORM_HEIGHT;
+
+  if isNew then
+    Self.EditForm.Caption := ' New Account Profile'
+  else
+    Self.EditForm.Caption := ' Edit Account Profile: ' + profile.Name;
+  Self.EditForm.Position := ELazFormPosition.OwnerFormCenter;
+  Self.EditForm.BorderStyle := ELazFormBorderStyle.Dialog;
+
+  currentX := 15;
+  fieldY := 35;
+
+  Self.NameEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Profile Name*:', '',
+    currentX, fieldY, FIELD_WIDTH, FIELD_HEIGHT
+  );
+  Self.NameEdit.MaxLength := 50;
+  Self.NameEdit.Text := profile.Name;
+  currentX += 187;
+
+  Self.UsernameEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Username (optional):', 'Optional for Jagex accounts',
+    currentX, fieldY, FIELD_WIDTH, FIELD_HEIGHT
+  );
+  Self.UsernameEdit.MaxLength := 50;
+  Self.UsernameEdit.Text := profile.Username;
+  currentX += 187;
+
+  Self.PasswordEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Password (optional):', 'Optional for Jagex accounts',
+    currentX, fieldY, FIELD_WIDTH, FIELD_HEIGHT
+  );
+  Self.PasswordEdit.PasswordChar := '*';
+  Self.PasswordEdit.MaxLength := 100;
+  Self.PasswordEdit.Text := profile.Password;
+  currentX += 187;
+
+  Self.BankPinEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Bank PIN:', '', currentX, fieldY, 102, FIELD_HEIGHT
+  );
+  Self.BankPinEdit.PasswordChar := '*';
+  Self.BankPinEdit.OnKeyPress := @FormUtils.NumberField;
+  Self.BankPinEdit.MaxLength := 4;  //Bank PIN must be 4 digits
+  Self.BankPinEdit.Text := profile.Pin;
+
+  worldY := fieldY + 65;
+
+  Self.TypePanel := TLazScrollBox.CreateEx(
+    Self.EditForm, 'World Type', '', 15, worldY, 125, PANEL_HEIGHT
+  );
+  Self.SetupWorldTypePanel();
+
+  Self.LocationPanel := TLazScrollBox.CreateEx(
+    Self.EditForm, 'Location', '',
+    145, worldY, 115, PANEL_HEIGHT
+  );
+  Self.SetupLocationPanel();
+
+  Self.ActivityPanel := TLazScrollBox.CreateEx(
+    Self.EditForm, 'Activity', '',
+    265, worldY, 145, PANEL_HEIGHT
+  );
+  Self.SetupActivityPanel();
+
+  Self.SpecificActivityPanel := TLazScrollBox.CreateEx(
+    Self.EditForm, 'Specific Activities', '',
+    415, worldY, 265, PANEL_HEIGHT
+  );
+  Self.SetupSpecificActivityPanel();
+
+  worldY += 125;
+
+  Self.StatsLabel := TLazLabel.CreateEx(
+    Self.EditForm, 'Found: 0 worlds', '', 15, worldY, 120, 20
+  );
+
+  worldY += 25;
+
+  Self.GenerateButton := TLazButton.CreateEx(
+    Self.EditForm, 'Generate Worlds', '', 15, worldY, 150, 25
+  );
+  Self.GenerateButton.OnClick := @Self.OnGenerateClick;
+
+  Self.SortCombo := TLazComboBox.CreateEx(
+    Self.EditForm, 'Sort by:', '', 170, worldY, 130, 22
+  );
+  Self.SortCombo.Style := ELazComboBoxStyle.DropDownList;
+  Self.SortCombo.Items.Add('World Number');
+  Self.SortCombo.Items.Add('Players (Lo/Hi)');
+  Self.SortCombo.Items.Add('Players (Hi/Lo)');
+  Self.SortCombo.ItemIndex := 0;
+  Self.SortCombo.OnChange := @Self.OnSortChange;
+
+  Self.MinPlayersEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Players Min/Max', '0', 305, worldY, 50, 22
+  );
+  Self.MinPlayersEdit.OnKeyPress := @FormUtils.NumberField;
+  Self.MinPlayersEdit.MaxLength := 4;
+  Self.MinPlayersEdit.Text := '0';
+
+  TLazLabel.CreateEx(Self.EditForm, '-', '', 365, worldY + 2, 10, 20);
+
+  Self.MaxPlayersEdit := TLazEdit.CreateEx(
+    Self.EditForm, '', '2000', 375, worldY, 50, 22
+  );
+  Self.MaxPlayersEdit.OnKeyPress := @FormUtils.NumberField;
+  Self.MaxPlayersEdit.MaxLength := 4;
+  Self.MaxPlayersEdit.Text := '2000';
+
+  Self.ExcludeWorldsEdit := TLazEdit.CreateEx(
+    Self.EditForm, 'Exclude worlds:', 'e.g., 301, 302', 450, worldY, 230, 22
+  );
+
+  worldY += 45;
+
+  Self.WorldList := TLazListBox.CreateEx(
+    Self.EditForm, '', '', 15, worldY, 665, 160
+  );
+  Self.WorldList.Font.Name := 'Courier New';
+  Self.WorldList.Font.Size := 12;
+
+  worldY += 175;
+
+  Self.SaveButton := TLazButton.CreateEx(
+    Self.EditForm, 'Save Profile', 'Save this profile',
+    15, worldY, BUTTON_WIDTH, BUTTON_HEIGHT
+  );
+  Self.SaveButton.OnClick := @Self.OnSaveClick;
+
+  if not isNew then
+  begin
+    Self.DeleteButton := TLazButton.CreateEx(
+      Self.EditForm, 'Delete', 'Delete this profile',
+      125, worldY, 80, BUTTON_HEIGHT
+    );
+    Self.DeleteButton.OnClick := @Self.OnDeleteClick;
+  end;
+
+  Self.CloseButton := TLazButton.CreateEx(
+    Self.EditForm, 'Close', 'Close dialog', 600, worldY, 80, BUTTON_HEIGHT
+  );
+  Self.CloseButton.OnClick := @Self.OnCloseClick;
+
+  Self.LoadWorldData();
+
+  if not isNew and (profile.Worlds <> []) then
+    Self.LoadSavedWorlds(profile.Worlds);
+end;
+
+
+(*
+## TProfileForm.OnEditClick
+```pascal
+procedure TProfileForm.OnEditClick(sender: TLazObject);
+```
+Handles the Edit button click event. Opens the profile edit dialog for the selected profile or creates a new one.
+*)
+{$H-}
+procedure TProfileForm.OnEditClick(sender: TLazObject);
+var
+  selectedIndex: Integer;
+  profile: TProfile;
+  isNewProfile: Boolean;
+begin
+  selectedIndex := Self.ProfileCombo.ItemIndex;
+  isNewProfile := (selectedIndex = Self.ProfileCombo.Items.Count - 1); // Last item is "New Profile"
+
+  if isNewProfile then
+  begin
+    profile := Default(TProfile);
+    Self.SetupEditDialog(profile, True, -1);
+  end
+  else if InRange(selectedIndex, 0, High(Profiles)) then
+  begin
+    profile := Profiles[selectedIndex];
+    Self.SetupEditDialog(profile, False, selectedIndex);
+  end
+  else
+    Exit;
+
+  Self.EditForm.ShowModal();
+end;
+{$H+}
+
+
+procedure TProfileForm.OnProfileChange(sender: TLazObject);
+var
+  i: Integer;
+begin
+  ProfileIndex := TLazComboBox(sender).ItemIndex;
+  for i := 0 to High(Self.ProfileUpdateTasks) do
+    Self.ProfileUpdateTasks[i]();
+end;
+
+
+(*
+## TProfileForm.SetupUI
+```pascal
+procedure TProfileForm.SetupUI(combo: TLazComboBox; button: TLazButton);
+```
+Sets up the UI components provided by the parent form.
+*)
+procedure TProfileForm.SetupUI(parent: TLazComponent);
+var
+  lbl: TLazLabel;
+begin
+  Self.EditButton := TLazButton.CreateEx(parent, 'Edit Profile');
+  Self.EditButton.Align := ELazAlign.Left;
+  Self.EditButton.BorderSpacing.Top := 2;
+  Self.EditButton.BorderSpacing.Bottom := 4;
+  Self.EditButton.BorderSpacing.Left:= 8;
+  Self.EditButton.Width := 90;
+  Self.EditButton.OnClick := @Self.OnEditClick;
+
+  Self.ProfileCombo := TLazComboBox.CreateEx(parent);
+  Self.ProfileCombo.Align := ELazAlign.Left;
+  Self.ProfileCombo.BorderSpacing.Top := -2;
+  Self.ProfileCombo.Width := 240;
+  Self.ProfileCombo.BorderSpacing.Around := 6;
+  Self.ProfileCombo.OnChange := @Self.OnProfileChange;
+
+  lbl := TLazLabel.CreateEx(parent, 'Profile:', '');
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Top := 8;
+  lbl.BorderSpacing.Left := 8;
+  lbl.BorderSpacing.Bottom := 11;
+  
+  Self.UpdateProfileCombo();
+  
+  if Self.ProfileCombo.Items.Count > 0 then
+    Self.ProfileCombo.ItemIndex := 0;
+end;
+
+var
+  ProfileForm: TProfileForm;

@@ -1,0 +1,497 @@
+//!PACKAGE SCRIPT
+(*
+(Video Player)=
+# Tool: Video Player
+Displays image sequences rapidly to create smooth motion, like a flipbook.
+Works with image frame sequences (not video files) and provides interactive controls.
+
+- Credits: Developed by TazE
+- Acknowledgement: Slackydev for the original prototype concept
+
+Requirements:
+- Individual image files (PNG, BMP, JPG) with numbers in filenames
+- Example: `frame_001.bmp`, `002.bmp` (last number is used for ordering)
+- **FPS Note**: Set playback FPS to match how frames were extracted for accurate speed
+
+Video to Frames:
+```bash
+# Extract all frames at original framerate
+ffmpeg -i video.mp4 -vsync 0 frame_%04d.bmp
+```
+Note: Frames from recorder.simba videos will have compression artifacts and won't match screenshot quality.
+
+## Video Player Getting Started
+
+Creating frame sequences:
+Use the {ref}`framerecorder` utility to capture frames.
+
+Playing frame sequences:
+```pascal
+{$I WaspLib/main.simba}
+{$I Wasplib/tools/videoplayer.simba}
+var
+  player: TVideoPlayer;
+begin
+  player.Init(25); // 25 FPS
+  player.Play();
+end;
+```
+
+## Keyboard Controls
+
+- **Space**: Pause/Resume playback
+- **Left/Right**: Step through frames (when paused)
+- **Shift + Left/Right**: Jump by FPS amount (when paused)
+- **Q/E**: Decrease/Increase playback speed
+- **Home/End**: Jump to first/last frame
+- **R**: Toggle reverse playback
+- **H**: Toggle overlay display
+- **L**: Toggle loop mode
+*)
+
+{$DEFINE WL_VIDEOPLAYER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+type
+(*
+(TVideoPlayer)=
+## type TVideoPlayer
+```pascal
+TVideoPlayer = record
+  Frames: TStringArray;
+  FrameIndex: Int32;
+  Directory: String;
+  FPS: Int32;
+  Loop: Boolean;
+  IsPaused: Boolean;
+  PlaybackSpeed: Single;
+  IsReversed: Boolean;
+  ShowOverlay: Boolean;
+end;
+```
+Main record for video playback functionality. Handles frame sequences with interactive controls.
+
+Fields:
+- `Frames`: Array of file paths for each frame
+- `FrameIndex`: Current frame being displayed
+- `Directory`: Source directory containing frames
+- `FPS`: Frames per second for playback
+- `Loop`: Whether to loop playback
+- `IsPaused`: Current pause state
+- `PlaybackSpeed`: Playback speed multiplier (0.25x to 16x)
+- `IsReversed`: Whether playing in reverse
+- `ShowOverlay`: Whether to display frame info overlay
+*)
+  TVideoPlayer = record
+    Frames: TStringArray;
+    FrameIndex: Int32;
+    Directory: String;
+    FPS: Int32;
+    Loop: Boolean;
+    IsPaused: Boolean;
+    PlaybackSpeed: Single;
+    IsReversed: Boolean;
+    ShowOverlay: Boolean;
+    const PAUSE_BUTTON = EKeyCode.SPACE;
+    const REWIND_FRAME = EKeyCode.LEFT;
+    const FORWARD_FRAME = EKeyCode.RIGHT;
+    const SHIFT_KEY = EKeyCode.SHIFT;
+    const SPEED_DOWN = EKeyCode.Q;
+    const SPEED_UP = EKeyCode.E;
+    const JUMP_START = EKeyCode.HOME;
+    const JUMP_END = EKeyCode.END_KEY;
+    const REVERSE_KEY = EKeyCode.R;
+    const TOGGLE_OVERLAY = EKeyCode.H;
+    const TOGGLE_LOOP = EKeyCode.L;
+  end;
+
+{%codetools off}
+// Forward declarations
+function _GetFrameNumber(filename: String): Int32; forward;
+function _CompareFrameNumbers(constref left, right: String): Int32; forward;
+function TVideoPlayer._SelectVideoDirectory(title: String = 'Select Video Frames Directory'; initialDir: String = ''): String; forward;
+function TVideoPlayer._GetFrameCount(): Int32; forward;
+function TVideoPlayer._GetCurrentFrameNumber(): Int32; forward;
+procedure TVideoPlayer._ShowCurrentFrame(); forward;
+function TVideoPlayer._IsKeyPressed(key: EKeyCode): Boolean; forward;
+procedure TVideoPlayer._AdvanceFrames(count: Int32); forward;
+procedure TVideoPlayer._HandleControls(); forward;
+procedure TVideoPlayer._PrintControls(); forward;
+procedure TVideoPlayer._CycleSpeed(increase: Boolean); forward;
+procedure TVideoPlayer._NextFrame(); forward;
+procedure TVideoPlayer._Pause(); forward;
+procedure TVideoPlayer._Resume(); forward;
+{%codetools on}
+
+(*
+## TVideoPlayer.Init
+```pascal
+procedure TVideoPlayer.Init(dir: String = ''; fps: Int32 = 25; pattern: String = '*.*');
+```
+Initializes the video player with a directory of frame files.
+
+Parameters:
+- `fps`: Frames per second (default: 25)
+- `dir`: Directory containing frame files (default: '' shows dialog)
+- `pattern`: File pattern to match (default: '*.*')
+*)
+procedure TVideoPlayer.Init(fps: Int32 = 25; dir: String = ''; pattern: String = '*.*');
+begin
+  if dir = '' then
+  begin
+    ShowMessage('VideoPlayer needs a directory containing image frames.' + #10 + 
+                'Please select the folder with your frame sequence (PNG, BMP, or JPG files).');
+    dir := Self._SelectVideoDirectory('Select directory containing video frames');
+    if dir = '' then
+      raise 'No directory selected - VideoPlayer initialization cancelled';
+  end;
+  
+  Self.Directory := dir;
+  Self.FPS := fps;
+  Self.FrameIndex := 0;
+  Self.Loop := True;
+  Self.IsPaused := False;
+  Self.PlaybackSpeed := 1.0;
+  Self.IsReversed := False;
+  Self.ShowOverlay := True;
+  Self.Frames := DirSearch(dir, pattern);
+
+  if Length(Self.Frames) = 0 then
+    raise 'No frames found in ' + dir + #10 + 
+          'Expected image files matching pattern: ' + pattern + #10 + 
+          'Supported formats: PNG, BMP, JPG';
+
+  // Sort frames by number using QuickSort with custom comparator
+  Self.Frames.Sort(@_CompareFrameNumbers);
+end;
+
+(*
+## TVideoPlayer.Play
+```pascal
+procedure TVideoPlayer.Play();
+```
+Starts video playback. This is the main method that handles the playback loop and user input.
+*)
+procedure TVideoPlayer.Play();
+begin
+  Self._PrintControls();
+  Self.IsPaused := False;
+  
+  repeat
+    Self._HandleControls();
+    
+    if not Self.IsPaused then
+    begin
+      Self._ShowCurrentFrame();
+      Self._NextFrame();
+    end;
+    
+    Sleep(Round(1000 / (Self.FPS * Self.PlaybackSpeed)));
+  until Self.FrameIndex = -1;
+  
+  WriteLn('Playback completed');
+end;
+
+{%codetools off}
+// Extracts last number from filename (e.g., 'frame_123.png' -> 123)
+function _GetFrameNumber(filename: String): Int32;
+var
+  numbers: TStringArray;
+  name: String;
+begin
+  // Extract just the filename without path
+  name := PathExtractNameWithoutExt(filename);
+  numbers := name.ExtractNumbers();
+  if Length(numbers) > 0 then
+    Result := numbers[High(numbers)].ToInt(0)  // Use last number in filename
+  else
+    Result := 0;
+end;
+
+// Comparator for sorting frames by extracted numbers
+function _CompareFrameNumbers(constref left, right: String): Int32;
+begin
+  Result := _GetFrameNumber(left) - _GetFrameNumber(right);
+end;
+{%codetools on}
+
+// Open file explorer
+function TVideoPlayer._SelectVideoDirectory(title: String = 'Select Video Frames Directory'; initialDir: String = ''): String;
+var
+  selectedDir: String;
+  imagesDir: String;
+begin
+  if initialDir = '' then
+  begin
+    imagesDir := SimbaEnv.SimbaPath + 'Images';
+    if not DirExists(imagesDir) then
+      DirCreate(imagesDir);
+    initialDir := imagesDir;
+  end;
+    
+  if ShowDirectoryDialog(title, initialDir, selectedDir) then
+    Result := selectedDir
+  else
+    Result := '';
+end;
+
+// Returns total frames loaded from directory
+function TVideoPlayer._GetFrameCount(): Int32;
+begin
+  Result := Length(Self.Frames);
+end;
+
+// Gets frame number from current frame's filename
+function TVideoPlayer._GetCurrentFrameNumber(): Int32;
+begin
+  if (Self.FrameIndex >= 0) and (Self.FrameIndex < Length(Self.Frames)) then
+    Result := _GetFrameNumber(Self.Frames[Self.FrameIndex])
+  else
+    Result := 0;
+end;
+
+// Renders frame with optional overlay (speed, loop, pause status)
+procedure TVideoPlayer._ShowCurrentFrame();
+const
+  OVERLAY_START_Y = 25;
+  OVERLAY_LINE_HEIGHT = 20;
+var
+  frame: TImage;
+  frameInfo: String;
+  yPos: Int32;
+begin
+  frame := new TImage();
+  try
+    frame.Load(Self.Frames[Self.FrameIndex]);
+    
+    if Self.ShowOverlay then
+    begin
+      frame.DrawColor := $FFFFFF;  // White text
+      yPos := OVERLAY_START_Y;
+      
+      // Frame counter
+      frameInfo := 'Frame: ' + IntToStr(Self.FrameIndex + 1) + '/' + IntToStr(Length(Self.Frames));
+      frame.DrawText(frameInfo, [10, yPos]);
+      yPos += OVERLAY_LINE_HEIGHT;
+      
+      // Status indicators
+      if Self.PlaybackSpeed <> 1.0 then
+      begin
+        frame.DrawText('Speed: ' + FloatToStr(Self.PlaybackSpeed) + 'x', [10, yPos]);
+        yPos += OVERLAY_LINE_HEIGHT;
+      end;
+      
+      if Self.IsReversed then
+      begin
+        frame.DrawText('[REVERSE]', [10, yPos]);
+        yPos += OVERLAY_LINE_HEIGHT;
+      end;
+      
+      if Self.Loop then
+      begin
+        frame.DrawText('[LOOP]', [10, yPos]);
+        yPos += OVERLAY_LINE_HEIGHT;
+      end;
+      
+      if Self.IsPaused then
+      begin
+        frame.DrawColor := $00FFFF;  // Yellow for paused
+        frame.DrawText('[PAUSED]', [10, yPos]);
+      end;
+    end;
+    
+    frame.Show();
+  finally
+    frame.Destroy();
+  end;
+end;
+
+// Waits for key release to prevent key repeat
+function TVideoPlayer._IsKeyPressed(key: EKeyCode): Boolean;
+begin
+  if not Target.KeyPressed(key) then
+    Exit(False);
+
+  while Target.KeyPressed(key) do
+    Sleep(1);
+
+  Result := True;
+end;
+
+// Safely moves frame index by count with bounds checking
+procedure TVideoPlayer._AdvanceFrames(count: Int32);
+begin
+  if count < 0 then
+    Self.FrameIndex := Max(0, Self.FrameIndex + count)
+  else
+    Self.FrameIndex := Min(High(Self.Frames), Self.FrameIndex + count);
+end;
+
+// Processes all keyboard shortcuts during playback
+procedure TVideoPlayer._HandleControls();
+var
+  frameStep: Int32;
+begin
+  // Pause/Resume
+  if Self._IsKeyPressed(Self.PAUSE_BUTTON) then
+  begin
+    Self.IsPaused := not Self.IsPaused;
+    if Self.IsPaused then
+    begin
+      WriteLn('Paused at frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+      Self._ShowCurrentFrame();  // Update display to show [PAUSED]
+    end
+    else
+      WriteLn('Resumed');
+  end;
+
+  // Speed controls
+  if Self._IsKeyPressed(Self.SPEED_DOWN) then
+    Self._CycleSpeed(False);
+  if Self._IsKeyPressed(Self.SPEED_UP) then
+    Self._CycleSpeed(True);
+    
+  // Jump to start/end
+  if Self._IsKeyPressed(Self.JUMP_START) then
+  begin
+    Self.FrameIndex := 0;
+    WriteLn('Jumped to start - Frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+  end;
+  if Self._IsKeyPressed(Self.JUMP_END) then
+  begin
+    Self.FrameIndex := High(Self.Frames);
+    WriteLn('Jumped to end - Frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+  end;
+  
+  // Reverse toggle
+  if Self._IsKeyPressed(Self.REVERSE_KEY) then
+  begin
+    Self.IsReversed := not Self.IsReversed;
+    if Self.IsReversed then
+      WriteLn('Reverse playback enabled')
+    else
+      WriteLn('Forward playback enabled');
+  end;
+  
+  // Overlay toggle
+  if Self._IsKeyPressed(Self.TOGGLE_OVERLAY) then
+  begin
+    Self.ShowOverlay := not Self.ShowOverlay;
+    if Self.ShowOverlay then
+      WriteLn('Overlay enabled')
+    else
+      WriteLn('Overlay disabled');
+    if Self.IsPaused then
+      Self._ShowCurrentFrame();  // Update display when paused
+  end;
+  
+  // Loop toggle
+  if Self._IsKeyPressed(Self.TOGGLE_LOOP) then
+  begin
+    Self.Loop := not Self.Loop;
+    if Self.Loop then
+      WriteLn('Loop enabled')
+    else
+      WriteLn('Loop disabled');
+    if Self.IsPaused then
+      Self._ShowCurrentFrame();  // Update display when paused
+  end;
+  
+
+  // Frame stepping (when paused)
+  if Self.IsPaused then
+  begin
+    if Target.KeyPressed(Self.SHIFT_KEY) then
+      frameStep := Self.FPS
+    else
+      frameStep := 1;
+
+    if Self._IsKeyPressed(Self.REWIND_FRAME) then
+    begin
+      Self._AdvanceFrames(-frameStep);
+      WriteLn('Frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+      Self._ShowCurrentFrame();
+    end
+    else if Self._IsKeyPressed(Self.FORWARD_FRAME) then
+    begin
+      Self._AdvanceFrames(frameStep);
+      WriteLn('Frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+      Self._ShowCurrentFrame();
+    end;
+  end;
+end;
+
+// Displays keyboard shortcuts to console on startup
+procedure TVideoPlayer._PrintControls();
+begin
+  WriteLn('Playing ', Length(Self.Frames), ' frames at ', Self.FPS, ' FPS');
+  WriteLn('Controls:');
+  WriteLn('- Space: Pause/Play');
+  WriteLn('- Left/Right: Single frame');
+  WriteLn('- Shift + Left/Right: Jump ', Self.FPS, ' frames');
+  WriteLn('- Q/E: Decrease/Increase speed');
+  WriteLn('- Home/End: Jump to start/end');
+  WriteLn('- R: Toggle reverse playback');
+  WriteLn('- H: Toggle overlay display');
+  WriteLn('- L: Toggle loop mode');
+end;
+
+// Cycles through speed presets: 0.25x to 16x
+procedure TVideoPlayer._CycleSpeed(increase: Boolean);
+const
+  SPEEDS: array of Single = [0.25, 0.5, 1.0, 2.0, 4.0, 8.0, 16.0];
+var
+  i: Int32;
+begin
+  for i := 0 to High(SPEEDS) do
+    if Abs(Self.PlaybackSpeed - SPEEDS[i]) < 0.01 then
+    begin
+      if increase and (i < High(SPEEDS)) then
+        Self.PlaybackSpeed := SPEEDS[i + 1]
+      else if (not increase) and (i > 0) then
+        Self.PlaybackSpeed := SPEEDS[i - 1];
+      Break;
+    end;
+    
+  WriteLn('Playback speed: ', FloatToStr(Self.PlaybackSpeed), 'x');
+end;
+
+// Advances frame with loop/reverse logic, returns -1 when done
+procedure TVideoPlayer._NextFrame();
+var
+  atEnd: Boolean;
+begin
+  if Self.IsReversed then
+  begin
+    atEnd := Self.FrameIndex <= 0;
+    if atEnd and Self.Loop then
+      Self.FrameIndex := High(Self.Frames)
+    else if atEnd then
+      Self.FrameIndex := -1  // Signal end of playback
+    else
+      Self._AdvanceFrames(-1);
+  end
+  else
+  begin
+    atEnd := Self.FrameIndex >= High(Self.Frames);
+    if atEnd and Self.Loop then
+      Self.FrameIndex := 0
+    else if atEnd then
+      Self.FrameIndex := -1  // Signal end of playback
+    else
+      Self._AdvanceFrames(1);
+  end;
+end;
+
+// Sets pause state and logs current frame
+procedure TVideoPlayer._Pause();
+begin
+  Self.IsPaused := True;
+  WriteLn('Paused at frame: ', _GetFrameNumber(Self.Frames[Self.FrameIndex]));
+end;
+
+// Clears pause state
+procedure TVideoPlayer._Resume();
+begin
+  Self.IsPaused := False;
+  WriteLn('Resumed');
+end;

@@ -1,0 +1,249 @@
+//Design by olly.
+{$DEFINE WL_SETUP_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+procedure SetupInterfaces();
+{$IFDEF WL_DEBUG_INTERFACES}
+var
+  t: UInt64;
+{$ENDIF}
+begin
+  if Client.Client = EClient.UNKNOWN then
+    Exit;
+
+  {$IFDEF WL_DEBUG_INTERFACES}
+  t := Time();
+  {$ENDIF}
+
+  //interfaces that depend on other's bounds need to be in the right order
+  //e.g., gametabs need to go after GameTab and GameTab after GameTabs.
+  MainScreen.SetupInterface();
+  Minimap.SetupInterface();
+
+  GameTabs.SetupInterface(); //Has to be before gametab
+  GameTab.SetupInterface();  //Has to be before all gametabs
+
+  Sailing.SetupGameTab();
+  Combat.SetupGameTab();
+  Stats.SetupGameTab();
+  Achievements.SetupGameTab();
+  Inventory.SetupGameTab();
+  Equipment.SetupGameTab();
+  Prayer.SetupGameTab();
+  Grouping.SetupGameTab();
+  Friends.SetupGameTab();
+  Account.SetupGameTab();
+  WorldSwitcher.SetupGameTab();
+  Logout.SetupGameTab();
+  HouseOptions.SetupGameTab();
+  Options.SetupGameTab();
+  Emotes.SetupGameTab();
+  Music.SetupGameTab();
+
+  Projection.Setup();
+
+  Chat.SetupInterface();
+  Make.SetupInterface();
+
+  MSInterface.SetupInterface();
+  XPBar.SetupInterface();
+  XPBarMenu.SetupInterface();
+
+  HouseViewer.SetupInterface();
+
+  BankPin.SetupInterface();
+  Bank.SetupInterface();
+  CollectionBox.SetupInterface();
+  Anvil.SetupInterface();
+  GoldScreen.SetupInterface();
+  SilverScreen.SetupInterface();
+  DepositBox.SetupInterface();
+  Lamp.SetupInterface();
+  GrandExchange.SetupInterface();
+  GrandExchangeHistory.SetupInterface();
+  GrandExchangeChat.SetupInterface();
+  GrandExchangeOffer.SetupInterface();
+  FairyRing.SetupInterface();
+  Shop.SetupInterface();
+  CargoHold.SetupInterface();
+
+  {$IFDEF WL_DEBUG_INTERFACES}
+  DebugLn('Client', 'Interface setup took ' + ToStr(Time()-t) + 'ms to calculate.');
+  {$ENDIF}
+end;
+
+{$H-}
+procedure TargetResized(sender: TTarget; data: TTargetEventData);
+var
+  rads: Single;
+begin
+  DebugLn('Client', 'Client was resized, updating coordinates.');
+  Client.Mode := EMode.UNKNOWN;
+  Client.Clear();
+
+  LoginWorldSwitcher.Setup();
+  Lobby.Setup();
+  Login.Setup();
+
+  Sleep(80);
+  Client.IsLoggedIn();
+  if Client.Mode = EMode.UNKNOWN then
+    Client.Mode := EMode.FIXED;
+
+  SetupInterfaces();
+
+  Projection.Setup();
+  if Options.ZoomLevel > -1 then
+  begin
+    rads := Minimap.CompassRadians;
+    MM2MS.Update(Options.ZoomLevel, rads);
+    RSCamera.Update(Options.ZoomLevel, rads);
+  end;
+end;
+{$H+}
+
+
+procedure SaveAnonymousScreenshot(filename: String);
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  img.DrawColor := $FFFFFF;
+
+  if Chat.IsOpen() then
+    img.DrawBoxFilled(Chat.GetDisplayNameBox());
+
+  if XPBar.IsOpen() and XPBar.Setup() then
+    img.DrawBoxFilled(XPBar.Bounds);
+
+  img.Save(filename);
+end;
+
+procedure OnLogin(sender: PClient; mode: EMode);
+var
+  zoom: Integer;
+begin
+  if mode <> sender^.Mode then
+  begin
+    DebugLn('Client', 'Client mode changed: ' + ToStr(mode), ELogLevel.SUCCESS);
+    sender^.Mode := mode;
+    SetupInterfaces();
+  end;
+
+  {$IFNDEF WL_TEST}
+  if not MainScreen.HighestPitch and (RSCamera.Pitch = RSCamera.MAX_PITCH) then
+    MainScreen.SetHighestPitch();
+
+  if not Options.MaxBrightness then
+    Options.SetMaxBrightness();
+
+  if not RSMouseZoom.SettingChecked or (Options.ZoomLevel = -1) then
+    Options.OpenTab(EOptionsTab.DISPLAY);
+
+  if (Options.ZoomLevel > -1) and not InRange(Options.ZoomLevel, Antiban.Zoom.Min, Antiban.Zoom.Max) then
+  begin
+    zoom := Min(Antiban.Zoom.Max, Max(Antiban.Zoom.Min, Options.ZoomLevel));
+    zoom := Biometrics.RandomModeInteger(zoom, Antiban.Zoom.Min, Antiban.Zoom.Max);
+    RSMouseZoom.SetZoomLevel(zoom);
+  end;
+
+  if not Options.RoofsHidden then
+    Options.HideRoofs();
+
+  if XPBar.Tracker.Current = 0 then
+    XPBar.Read();
+  {$ENDIF}
+end;
+
+//Setup process, for some things the order matters.
+procedure WaspLibSetup();
+begin
+  if not DirCreate(WLEnv.ConfigsDir) then
+    raise GetDebugLn('WaspLib', 'Failed to create path: ' + WLEnv.ConfigsDir);
+  if not DirCreate(WLEnv.CacheDir) then
+    raise GetDebugLn('WaspLib', 'Failed to create path: ' + WLEnv.CacheDir);
+  if not DirCreate(WLEnv.LogsDir) then
+    raise GetDebugLn('WaspLib', 'Failed to create path: ' + WLEnv.LogsDir);
+  if not DirCreate(WLEnv.AssetsDir) then
+    raise GetDebugLn('WaspLib', 'Failed to create path: ' + WLEnv.AssetsDir);
+  if not DirCreate(WLEnv.VideosDir) then
+    raise GetDebugLn('WaspLib', 'Failed to create path: ' + WLEnv.VideosDir);
+
+  WaspClient.Setup();
+  WLAssets.Update();
+  Map.Loader.Init();
+
+  Target.AddEvent(ETargetEvent.TARGET_RESIZE, @TargetResized);
+  FormUtils.Setup();
+  Fonts.Setup();
+  Logger.Init();
+  WebGraphGenerator.Setup(16, 12);
+
+  {$IFDEF WL_TEST}
+  Client.Client := EClient.RUNELITE;
+  {$ELSE}
+  Client.Client := Client.GetClient();
+  Client.InjectInput();
+  {$ENDIF}
+
+  Mouse.Setup();
+  Keyboard.Setup();
+  ASyncMouse := new TASyncMouse(Target);
+
+  CacheParser.Setup();
+
+  ItemFinder.Setup();
+  SpellFinder.Setup();
+  PrayerFinder.Setup();
+  OverheadFinder.Setup();
+  HouseLayoutFinder.Setup();
+  GoalsForm.Setup();
+  Consumables.Init();
+
+  GameTabs.KeybindsEnabled := True;
+  GameTabs.AvailableKeys := [
+    EKeyCode.ESCAPE, EKeyCode.F1, EKeyCode.F2, EKeyCode.F3, EKeyCode.F4,
+    EKeyCode.F5, EKeyCode.F6, EKeyCode.F7, EKeyCode.F8, EKeyCode.F9,
+    EKeyCode.F10, EKeyCode.F11, EKeyCode.F12
+  ];
+
+  MainScreen.UptextOCR.Tolerance := 25;
+  MainScreen.UptextOCR.ShadowTolerance := 65;
+  MainScreen.UptextOCR.Whitelist := ['a'..'z', 'A'..'Z', '0'..'9', '-', '>', '(', ')', '/'];
+
+  Minimap.Compass.Accuracy := 0.03*PI;
+  SetLength(Minimap.Orbs, Ord(High(EMinimapOrb))+1);
+
+  Options.Setup();
+  RSMouseZoom.ZoomLevel := -1;
+  WorldSwitcher.Setup();
+  FairyRing.Setup();
+
+  Antiban.WalkCameraAdjustments := True;
+  Antiban.TimeRunning.Start();
+  Antiban.TimeRunning.Pause();
+  Antiban.Zoom.Max := 100;
+
+  ItemData.Setup();
+  ObjectsJSON.Setup(EMapJSON.OBJECTS);
+  NPCsJSON.Setup(EMapJSON.NPCS);
+  Profiles.Load();
+
+  Fonts.WaitUnzipping();
+
+  ItemFinder.WaitUnzipping();
+
+  Client.OnLogin := [@OnLogin];
+  Client.IsLoggedIn();
+  if Client.Mode = EMode.UNKNOWN then
+    Client.Mode := EMode.FIXED;
+  SetupInterfaces();
+
+  Activity.Start(5*MINUTE);
+end;
+
+{$IFNDEF WL_TEST}
+begin
+  WaspLibSetup();
+end;
+{$ENDIF}

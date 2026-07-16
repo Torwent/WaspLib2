@@ -1,0 +1,982 @@
+(*
+# RSEntities
+This file is responsible for interacting with `RSEntities`.
+
+`RSEntities` is anything in the game that has a {ref}`EDot` assign to
+it on the {ref}`Minimap`.
+
+These are functionally very similar to {ref}`RSObjects` and you create and
+interact with them almost the same way.
+
+They only differ in the fact that `TEntity` can use a {ref}`EDot` to
+help find them and/or {ref}`TDotFilters`.
+Also, due to the unpredictability of entities that move, unlike {ref}`RSObjects`
+these do not have a rotation field.
+*)
+
+{$DEFINE WL_ENTITIES_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{$R-}
+
+{$IFDEF RANGECHECKS}
+begin
+  WriteLn GetDebugLn('TEntity', 'Range checks are enabled for TEntity, these should be disabled in production!', ELogLevel.WARN);
+end;
+{$ENDIF}
+
+type
+  ENPCData = enum(ID, NAME, LEVEL, CATEGORY, MINIMAPDOT, ACTIONS, SIZE, COORDINATES, COLORS);
+
+(*
+## TEntity
+Main type to handle {ref}`RSEntity`.
+*)
+  TEntity = record
+    UpText: TStringArray;
+    Size, Offset: TVector3;
+    Model: TModel;
+    Coordinates: TPointArray;
+    Filter: TDotFilterArray;
+    Finder: TColorFinder;
+    MinimapDots: EDots;
+    LastCoordinate, DotOffset: TPoint;
+    Walker: PRSWalker;
+    MinDistance: Integer;
+  end;
+
+  PRSEntity = ^TEntity;
+
+(*
+## TEntityArray
+Array of {ref}`TEntity`.
+*)
+  TEntityArray = array of TEntity;
+
+(*
+## TEntity.Create
+```pascal
+function TEntity.Create(var walker: TWalker; size: TVector3; coordinates: TPointArray; uptext: TStringArray = []; dots: EDots = []): TEntity; static;
+function TEntity.Create(var walker: TWalker; json: TJSONObject): TEntity; static; overload;
+```
+Create function to create your {ref}`TEntity`.
+
+Assuming you create the `RSEntity` manually, the create function will provide
+you with a fully built `TEntity` without a finder.
+
+You may optionally assign one later if you want:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([EChunk.VARROCK]);             //varrock west southern most banker
+  npc := TEntity.Create(Map.Walker, [1,1,7], [[8652,36686]], ['Banker'], [EDot.NPC]);
+  //npc.Finder.Colors += [$543B3B, 10.121, EColorSpace.HSV, [0.528, 1.275, 1.199]];
+end;
+```
+
+The `json` version of the function expects a specific json structure which is
+the one that {ref}`Map JSONs` provide:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([EChunk.VARROCK]);
+  //Item[0] because this returns a JSON array. For more info read Map JSONs documentation.
+  npc := TEntity.Create(Map.Walker, NPCsJSON.GetByName('banker', 1).Item[0]);
+end;
+```
+*)
+function TEntity.Create(var walker: TWalker; size: TVector3; radius: Integer; coordinates: TPointArray; uptext: TStringArray = []; dots: EDots = []): TEntity; static;
+var
+  pt: TPoint;
+begin
+  Result.Coordinates := coordinates;
+  Result.Size := size;
+
+  if dots <> [] then
+    Result.MinimapDots := dots;
+  if uptext <> [] then
+    Result.UpText := uptext;
+
+  Result.Finder := Default(TColorFinder);
+  Result.Walker := @walker;
+  Result.MinDistance := 32;
+  Result.DotOffset := [1,1];
+
+  for pt in coordinates do
+    Result.Filter.SetupCircle(TCircle.Create(pt.X, pt.Y, radius), True);
+end;
+
+function TEntity.Create(var walker: TWalker; json: TJSONObject): TEntity; static; overload;
+var
+  i, j, l: Integer;
+  unique: array of TColorArray;
+  color: TColor;
+  best: TBestColor;
+  coord: TJSONArray;
+begin
+  if json.Typ <> EJSONType.OBJ then
+    raise GetDebugLn('TEntity', 'JSON Object expected, got ' + ToStr(json.Typ) + '.');
+
+  with json.Item[Ord(ENPCData.NAME)] do
+    if AsString <> 'null' then
+      Result.UpText := [AsString];
+
+  if json.Item[Ord(ENPCData.MINIMAPDOT)].AsBool then
+    Result.MinimapDots := [EDot.NPC];
+
+  with json.Item[Ord(ENPCData.SIZE)] do
+  begin
+    Result.Size.X := Item[0].AsInt * 0.8;
+    Result.Size.Y := Item[1].AsInt * 0.8;
+    Result.Size.Z := Item[2].AsInt / 128;
+  end;
+
+  if Abs(Result.Size.Z) < 0.05 then
+    Result.Size.Z := 3.0;
+
+  with json.Item[Ord(ENPCData.COORDINATES)] do
+  begin
+    SetLength(Result.Coordinates, Count);
+    SetLength(Result.Filter, Count);
+
+    for i := 0 to Count-1 do
+    begin
+      coord := Item[i];
+      Result.Coordinates[i] := [coord.Item[0].AsInt, coord.Item[1].AsInt];
+      Result.Filter[i] := TDotFilter.Create(
+        Default(TPolygon),
+        TCircle.Create(coord.Item[0].AsInt, coord.Item[1].AsInt, 40),
+        True
+      );
+    end;
+  end;
+
+  with json.Item[Ord(ENPCData.COLORS)] do
+    for i := 0 to Count-1 do
+    begin
+      color := Item[i].AsInt;
+
+      for j := 0 to High(unique) do
+      begin
+        for l := 0 to High(unique[j]) do
+          if ColorDistance(color, unique[j, l], EColorSpace.HSL, [1.5, 1.5, 1.5]) < 15 then
+          begin
+            unique[j] += color;
+            Continue(3);
+          end;
+      end;
+
+      unique += [color];
+    end;
+
+  SetLength(Result.Finder.Colors, Length(unique));
+  for i := 0 to High(unique) do
+  begin
+    best := GetBestColor(EColorSpace.HSL, unique[i]);
+    Result.Finder.Colors[i] := [best.Color, best.Tolerance*1.5, EColorSpace.HSL, [best.Mods[0]*1.5, best.Mods[1]*1.5, best.Mods[2]*1.5]];
+  end;
+
+  Result.Walker := @walker;
+  Result.MinDistance := 32;
+  Result.DotOffset := [1,1];
+end;
+
+(*
+## TEntityArray.Create
+```pascal
+function TEntityArray.Create(json: TJSONArray): TEntityArray; static;
+```
+Create function to build your {ref}`TEntityArray`.
+
+This only accepts a `json` array and it expects a specific json structure which is
+the one that {ref}`Map JSONs` provide.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+
+var
+  entities: TEntityArray;
+begin
+  Map.Setup([EChunk.VARROCK]);
+  entities := TEntityArray.Create(Map.Walker, NPCsJSON.GetByName('Banker'));
+end;
+```
+*)
+function TEntityArray.Create(var walker: TWalker; json: TJSONArray): TEntityArray; static;
+var
+  i: Integer;
+begin
+  if json.Typ <> EJSONType.ARR then
+    raise GetDebugLn('TEntity', 'JSON Array expected, got ' + ToStr(json.Typ) + '.');
+
+  SetLength(Result, json.Count);
+  for i := 0 to High(Result) do
+    Result[i] := TEntity.Create(walker, json.Item[i]);
+end;
+
+
+(*
+## Entity._GetBounds
+```pascal
+function TEntity._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians: Single): TCuboid;
+```
+Internal helper function for {ref}`TEntity.GetBoundsArray`.
+*)
+function TEntity._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians: Single): TPolygon;
+var
+  corners: TVector3Array;
+  pt: TPoint;
+  c0, c1, c2, c3: TPoint;
+  h0, h1, h2, h3: Single;
+begin
+  pt := me + vector.ToPoint() - Minimap.Center;
+  if Self.Model <> nil then
+    Exit(Self.Model.GetArea(Projection.ProjectModel(Self.Model, vector.ToVec3(Self.Walker^.Height(pt, False) - height), 0, radians)));
+
+  if Abs(size.X - 0) < 0.005 then
+    raise GetDebugLn('TEntity', 'Your entity has a size.X of 0 or is simply too small! An entity can''t be ' + ToStr(size.X) + ' tiles wide.');
+  if Abs(size.Y - 0) < 0.005 then
+    raise GetDebugLn('TEntity', 'Your entity has a size.Y of 0 or is simply too small! An entity can''t be ' + ToStr(size.Y) + ' tiles wide.');
+
+  size.X := size.X*2;
+  size.Y := size.Y*2;
+
+  c0 := [Round(pt.X-size.X), Round(pt.Y-size.Y)];
+  c1 := [Round(pt.X+size.X), Round(pt.Y-size.Y)];
+  c2 := [Round(pt.X+size.X), Round(pt.Y+size.Y)];
+  c3 := [Round(pt.X-size.X), Round(pt.Y+size.Y)];
+
+  h0 := Self.Walker^.Height(c0, False) - height + Self.Offset.Z;
+  h1 := Self.Walker^.Height(c1, False) - height + Self.Offset.Z;
+  h2 := Self.Walker^.Height(c2, False) - height + Self.Offset.Z;
+  h3 := Self.Walker^.Height(c3, False) - height + Self.Offset.Z;
+
+  corners := [
+    [vector.X-size.X+Self.Offset.X, vector.Y-size.Y+Self.Offset.Y, h0],
+    [vector.X+size.X+Self.Offset.X, vector.Y-size.Y+Self.Offset.Y, h1],
+    [vector.X+size.X+Self.Offset.X, vector.Y+size.Y+Self.Offset.Y, h2],
+    [vector.X-size.X+Self.Offset.X, vector.Y+size.Y+Self.Offset.Y, h3],
+    [vector.X-size.X+Self.Offset.X, vector.Y-size.Y+Self.Offset.Y, h0+size.Z],
+    [vector.X+size.X+Self.Offset.X, vector.Y-size.Y+Self.Offset.Y, h1+size.Z],
+    [vector.X+size.X+Self.Offset.X, vector.Y+size.Y+Self.Offset.Y, h2+size.Z],
+    [vector.X-size.X+Self.Offset.X, vector.Y+size.Y+Self.Offset.Y, h3+size.Z]
+  ];
+
+  Result := Projection.Run(corners, radians).ConvexHull();
+end;
+
+(*
+## Entity.GetBoundsArray
+```pascal
+function TEntity.GetBoundsArray(me: TPoint; angle: Single = $FFFF): TCuboidArray;
+```
+Internal function that returns an array of cuboids of the entity if it's visible
+on the {ref}`MainScreen`.
+*)
+function TEntity.GetBoundsArray(me: TPoint; out coordinates: TPointArray; radians: Single): TPolygonArray;
+var
+  weights: TDoubleArray;
+  meLocal, pt: TPoint;
+  i: Integer;
+  h, dist: Double;
+  vector: TVector2;
+  dots: TPointArray;
+begin
+  coordinates := [];
+  if radians = $FFFF then
+    radians := Minimap.CompassRadians;
+
+  meLocal := Self.Walker^.GetLocal(me);
+
+  h := Self.Walker^.Height(meLocal - [1,3], False) + Self.Walker^.Height(meLocal + [3,-3], False) +
+       Self.Walker^.Height(meLocal + [3,1], False) + Self.Walker^.Height(meLocal - [1,1], False);
+  h := h/4;
+
+  if not Self.Filter.IsEmpty then
+  begin
+    dots := Minimap.GetFilteredDotArray(
+      Self.MinimapDots, Self.Walker^.FiltersToMM(me, Self.Filter, radians), False
+    );
+
+    if dots.IsEmpty then
+      Exit;
+
+    dots := dots.SortFrom(Minimap.Center);
+    for i := 0 to High(dots) do
+    begin
+      pt := Self.Walker^.MM2Map(me, dots[i] + Self.DotOffset, radians);
+      coordinates += pt;
+
+      vector := Self.Walker^.Point2MMVec(me, pt, radians);
+      vector := vector.Rotate(-radians, Minimap.Center);
+      Result += Self._GetBounds(meLocal, vector, Self.Size, h, radians);
+    end;
+    Exit;
+  end;
+
+  for i := 0 to High(Self.Coordinates) do
+  begin
+    pt := Self.Coordinates[i];
+    dist := me.DistanceTo(pt);
+    if dist > 85 then
+      Continue;
+
+    weights += dist;
+    coordinates += pt;
+
+    vector := Self.Walker^.Point2MMVec(me, pt, radians);
+    vector := vector.Rotate(-radians, Minimap.Center);
+    Result += Self._GetBounds(meLocal, vector, Self.Size, h, radians);
+  end;
+
+  if Result <> [] then
+  begin
+    Sort(Result, weights, True);
+    coordinates.Sort(weights, True);
+  end;
+end;
+
+(*
+## TEntity.Find
+```pascal
+function TEntity.Find(cuboidArray: TCuboidArray): T2DPointArray;
+```
+Internal TEntity method responsible for filtering a TCuboidArray by what's visible in the mainscren.
+This is meant to filter TEntity.GetBoundsArray() so targets that are outside of the mainscreen are filtered out.
+You will probably never need to use this directly.
+*)
+function TEntity.FindOnMainScreen(out coordinates: TPointArray; boundsArray: TPolygonArray): T2DPointArray;
+var
+  i: Integer;
+  found: TBooleanArray;
+begin
+  if Self.Finder <> Default(TColorFinder) then
+  begin
+    Self.Finder.FindEx(Result, found, boundsArray, Self.Model = nil);
+
+    for i := High(found) downto 0 do
+      if not found[i] then
+        Delete(coordinates, i, 1);
+
+    Exit;
+  end;
+
+  if Self.Model <> nil then
+    Exit(boundsArray);
+
+  for i := 0 to High(boundsArray) do
+    Result += TPointArray(boundsArray[i]).Connect().ShapeFill();
+end;
+{$R-}
+
+(*
+## TEntity.FindEx
+```pascal
+function TEntity.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+```
+Internal {ref}`TEntity` method used to find a {ref}`RSEntity`.
+
+You also have {ref}`RSEntity.Find` to find entities, this version of the method
+is internal because it returns extra information about the found entities for
+internal use, like it's `cuboids` for example.
+
+This also returns an `atpa` containing the colors of the entity that were found
+assuming the entity has a {ref}`TColorFinder` setup.
+If not, the cuboids area are returned as the match.
+*)
+function TEntity.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+begin
+  boundsArray := Self.GetBoundsArray(me, coordinates, Minimap.CompassRadians);
+  if boundsArray = [] then Exit;
+  atpa := Self.FindOnMainScreen(coordinates, boundsArray);
+
+  Result := atpa <> [];
+end;
+
+
+(*
+## RSEntity.Find
+```pascal
+function TEntity.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+function TEntity.Find(out atpa: T2DPointArray): Boolean; overload;
+```
+{ref}`TEntity` method used to find a {ref}`RSEntity`.
+This returns True/False if the entity was found and it's `atpa` which cointains
+the colors of it that were found.
+
+For more information on this refer to {ref}`TEntity.FindEx`, it's an internal
+function but is used within this one and will go into more detail.
+*)
+function TEntity.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+var
+  boundsArray: TPolygonArray;
+begin
+  Result := Self.FindEx(Self.Walker^.Position(), boundsArray, coordinates, atpa);
+end;
+
+function TEntity.Find(out atpa: T2DPointArray): Boolean; overload;
+var
+  coordinates: TPointArray;
+  boundsArray: TPolygonArray;
+begin
+  Result := Self.FindEx(Self.Walker^.Position(), boundsArray, coordinates, atpa);
+end;
+
+
+(*
+## Entity.IsVisible
+```pascal
+function TEntity.IsVisible(): Boolean;
+```
+Returns a boolean whether the entity is currently visible or not.
+*)
+function TEntity.IsVisible(): Boolean;
+var
+  coordinates: TPointArray;
+  boundsArray: TPolygonArray;
+  atpa: T2DPointArray;
+begin
+  Result := Self.FindEx(Self.Walker^.Position(), boundsArray, coordinates, atpa);
+end;
+
+
+function TEntity.FindFrom(position: TPoint; out atpa: T2DPointArray): Boolean;
+var
+  boundsArray: TPolygonArray;
+  coordinates: TPointArray;
+begin
+  Result := Self.FindEx(position, boundsArray, coordinates, atpa);
+end;
+
+(*
+## TEntity._UpTextCheck
+```pascal
+function TEntity._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
+```
+Internal TEntity helper method that is used by all hovering methods.
+You probably don't need to use this directly.
+*)
+function TEntity._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
+var
+  text: String;
+begin
+  shouldExit := True;
+
+  if (Client.Mode = EMode.FIXED) and MSInterface.IsOpen() then
+    Exit;
+
+  if Self.UpText <> [] then
+    Self.Walker^.TargetUpText := Copy(Self.UpText);
+
+  text := MainScreen.UpText;
+
+  if text.Contains('>') and not action.Contains(['>']) then
+  begin
+    ChooseOption.Close();
+    Exit;
+  end;
+
+  if (Self.UpText <> []) and text.ContainsAny(Self.UpText) then
+    Exit(True);
+
+  shouldExit := False;
+end;
+
+
+(*
+## TEntity._ClickHelper
+```pascal
+function TEntity._ClickHelper(leftClick: Boolean): Boolean;
+```
+Internal TEntity helper method that is used by other clicking methods.
+You probably don't need to use this directly.
+
+This is what's responsible for deciding if we click a target we are hovering or not.
+*)
+function TEntity._ClickHelper(leftClick: Boolean): Boolean;
+begin
+  if Self.Walker^.RedClicked then
+  begin
+    Self.Walker^.RedClicked := False;
+    Exit(True);
+  end;
+
+  if ChooseOption.IsOpen() then
+  begin
+    if (Self.UpText <> []) and ChooseOption.Select(Self.UpText) then
+      Exit(True);
+    ChooseOption.Close();
+    Exit;
+  end;
+
+  if leftClick and Biometrics.RedClick(EMouseButton.LEFT, 2) then
+    Exit(True);
+
+  Result := not leftClick and (Self.UpText <> []) and ChooseOption.Select(Self.UpText);
+end;
+
+(*
+## TEntity._SelectHelper
+```pascal
+function TEntity._SelectHelper(action: TStringArray): Boolean;
+```
+Internal TEntity helper method that is used by other select methods.
+You probably don't need to use this directly.
+
+This is what is responsible for deciding if we just left click a target we are hovering or right click it and choose an option.
+*)
+function TEntity._SelectHelper(action: TStringArray): Boolean;
+begin
+  if Self.Walker^.RedClicked then
+  begin
+    Self.Walker^.RedClicked := False;
+    Exit(True);
+  end;
+
+  if ChooseOption.IsOpen() and ChooseOption.Select(action) then
+    Exit(True);
+
+  if MainScreen.IsUpText(action) then
+    Exit(Biometrics.RedClick(EMouseButton.LEFT, 2));
+
+  Result := ChooseOption.Select(action);
+end;
+
+
+(*
+## TEntity.Hover
+```pascal
+function TEntity.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+```
+Method used to hover a TEntity target if it's found on the {ref}`MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.Hover();
+end.
+```
+*)
+function TEntity.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+var
+  me: TPoint;
+  shouldExit: Boolean;
+  attempt, i: Integer;
+  atpa: T2DPointArray;
+  coordinates, tpa: TPointArray;
+begin
+  if ChooseOption.IsOpen() then
+  begin
+    if MainScreen.Bounds.Contains(Mouse.Position) then
+      if (Self.UpText <> []) and ChooseOption.ContainsAny(Self.UpText) then
+        Exit(True);
+    ChooseOption.Close();
+  end;
+
+  if Self.Walker = nil then
+    raise GetDebugLn('TEntity', 'Missing the walker pointer.');
+  if Self.Coordinates = [] then
+    raise GetDebugLn('TEntity', 'FindFrom requires the entity to have coordinates.');
+
+  me := Self.Walker^.Position();
+  if not TWalker.MakePointVisibleEx(me, Self.Coordinates.NearestPoint(me)) then
+    Exit;
+
+  Result := Self._UpTextCheck(shouldExit, action);
+  if shouldExit then Exit;
+
+  for attempt := 0 to attempts do
+  begin
+    if Self.Find(coordinates, atpa) then
+    begin
+      if attempt < 2 then i := 0
+      else if Length(atpa) > (attempt - 2) then i := attempt - 2
+      else i := Random(Low(atpa), High(atpa));
+
+      tpa := atpa[i].ExtractBox(MainScreen.Bounds);
+      if tpa = [] then
+        Continue;
+
+      Self.LastCoordinate := coordinates[i];
+
+      Mouse.Move(tpa.RandomMean());
+
+      if Self.UpText = [] then Exit(True);
+    end;
+
+    if TGObject._HoverHelper(Self.UpText + action, attempt, attempts) then
+      Exit(True);
+  end;
+end;
+
+(*
+## TEntity.WalkHover
+```pascal
+function TEntity.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+```
+Method used to walk and hover a TEntity target if it's found on the
+{ref}`MainScreen` after walking.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.WalkHover();
+end.
+```
+*)
+function TEntity.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+var
+  me, closest: TPoint;
+  shouldExit: Boolean;
+  attempt, i: Integer;
+  atpa: T2DPointArray;
+  coordinates, tpa: TPointArray;
+begin
+  if ChooseOption.IsOpen() then
+  begin
+    if MainScreen.Bounds.Contains(Mouse.Position) then
+      if (Self.UpText <> []) and ChooseOption.ContainsAny(Self.UpText) then
+        Exit(True);
+    ChooseOption.Close();
+  end;
+
+  me :=  Self.Walker^.Position();
+  closest := Self.Walker^.Graph^.NearestPathable(me, Self.Coordinates);
+
+  Self.Walker^.TargetUpText := Copy(Self.UpText);
+  Self.Walker^.ActionUpText := action;
+
+  try
+    if not TWalker.MakePointVisibleEx(me, closest) then
+    begin
+      if not Self.Walker^.WebWalkEx(me, closest, Self.MinDistance, 0.33) then
+        Exit;
+
+      me := Self.Walker^.Position();
+      if not TWalker.MakePointVisibleEx(me, Self.Coordinates.NearestPoint(me)) then
+        Exit;
+    end;
+
+    Result := Self._UpTextCheck(shouldExit, action) or Self.Walker^.RedClicked;
+    if shouldExit then Exit;
+
+    for attempt := 0 to attempts do
+    begin
+      if Self.Find(coordinates, atpa) then
+      begin
+        if attempt < 2 then i := 0
+        else if Length(atpa) > (attempt - 2) then i := attempt - 2
+        else i := Random(Low(atpa), High(atpa));
+
+        tpa := atpa[i].ExtractBox(MainScreen.Bounds);
+        if tpa = [] then
+          Continue;
+
+        Self.LastCoordinate := coordinates[i];
+
+        Mouse.Move(tpa.RandomMean());
+
+        if Self.UpText = [] then
+          Exit(True);
+        Sleep(50); //give uptext 1~ frame time to update
+      end;
+
+      if TGObject._WalkHoverHelper(Self.UpText + action, Self.Walker, Self.MinDistance, attempt, attempts, Self.Coordinates) then
+        Exit(True);
+    end;
+  finally
+    Self.Walker^.TargetUpText := [];
+    Self.Walker^.ActionUpText := [];
+  end;
+end;
+
+
+(*
+## TEntity.Click
+```pascal
+function TEntity.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+```
+Method used to click a TEntity target if it's found on the {ref}`MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.Click();
+end.
+```
+*)
+function TEntity.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+begin
+  Result := Self.Hover([], attempts) and Self._ClickHelper(leftClick);
+end;
+
+(*
+## TEntity.Interact
+```pascal
+function TEntity.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
+```
+Method used to select an option on a TEntity target if it's found on the
+{ref}`MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.Interact(['Dream']);
+end.
+```
+*)
+function TEntity.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
+begin
+  Result := Self.Hover(action, attempts) and Self._SelectHelper(action);
+end;
+
+(*
+## TEntity.WalkClick
+```pascal
+function TEntity.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+```
+Method used to walk and click a TEntity target if it's found on the
+{ref}`MainScreen`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.WalkClick();
+end.
+```
+*)
+function TEntity.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+begin
+  if Self.Walker = nil then
+    raise GetDebugLn('TEntity', 'Missing the walker pointer.');
+  if Self.Coordinates = [] then
+    raise GetDebugLn('TEntity', 'FindFrom requires the object to have coordinates.');
+
+  Result := Self.WalkHover([], attempts) and Self._ClickHelper(leftClick);
+end;
+
+(*
+## TEntity.WalkInteract
+```pascal
+function TEntity.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
+```
+Method used to walk and select an option on a TEntity target if it's found on
+the mainscreen.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  npc: TEntity;
+begin
+  Map.Setup([Chunk(Box(40,49,41,48), 0)]);
+  npc := TEntity.Create(Map.Walker, [1,1,7], 8, [[10432, 37966]], ['Dominic Onion'], [EDot.NPC]);
+  WriteLn npc.WalkInteract(['Dream']);
+end.
+```
+*)
+function TEntity.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
+begin
+  if Self.Walker = nil then
+    raise GetDebugLn('TEntity', 'Missing the walker pointer.');
+  if Self.Coordinates = [] then
+    raise GetDebugLn('TEntity', 'FindFrom requires the object to have coordinates.');
+
+  Result := Self.WalkHover(action, attempts) and Self._SelectHelper(action);
+end;
+
+
+function TEntity.DistanceTo(pt: TPoint): Double;
+var
+  dist: Double;
+  i: Integer;
+begin
+  Result := $FFFFFF;
+  for i := 0 to High(Self.Coordinates) do
+  begin
+    dist := Self.Coordinates[i].DistanceTo(pt);
+    if dist < Result then
+      Result := dist;
+  end;
+end;
+
+function TEntityArray.ClosestIndex(pt: TPoint): Integer;
+var
+  closest, dist: Double;
+  i, j: Integer;
+begin
+  closest := $FFFFFF;
+  for i := 0 to High(Self) do
+    for j := 0 to High(Self[i].Coordinates) do
+    begin
+      dist := Self[i].Coordinates[j].DistanceTo(pt);
+      if dist >= closest then Continue;
+
+      closest := dist;
+      Result := i;
+    end;
+end;
+
+(*
+## DrawEntity
+```pascal
+procedure TImage.DrawEntity(const entity: TEntity; alpha: Byte = $C8);
+procedure TExternalCanvas.DrawEntity(const entity: TEntity; alpha: Byte = $C8);
+```
+Helper methods to debug TEntitys.
+*)
+procedure TImage.DrawEntity(const entity: TEntity; alpha: Byte = $C8);
+var
+  me: TPoint;
+  atpa: T2DPointArray;
+  boundsArray: TPolygonArray;
+  i: Integer;
+  filters: TDotFilterArray;
+  filter: TDotFilter;
+  coordinates: TPointArray;
+begin
+  me := entity.Walker^.Position();
+  filters := entity.Walker^.FiltersToMM(me, entity.Filter, Minimap.CompassRadians);
+
+  for filter in filters do
+  begin
+    if not Minimap.Bounds.Overlap(filter.Poly.Bounds()) and
+       not Minimap.Bounds.Overlap(filter.Circle.Bounds) then Continue;
+
+    if filter.Inside then
+      Self.DrawColor := $00FF00
+    else
+      Self.DrawColor := $0000FF;
+
+    Self.DrawPolygon(filter.Poly);
+    Self.DrawCircle(filter.Circle);
+  end;
+
+  if entity.FindEx(me, boundsArray, coordinates, atpa) then
+  begin
+    Self.DrawColor := TColor.Random();
+    Self.DrawAlpha := alpha;
+    Self.DrawATPA(atpa);
+  end;
+
+  Self.DrawAlpha := $FF;
+  Self.DrawColor := $FFFFF;
+  for i := 0 to High(boundsArray) do
+    Self.DrawTPA(boundsArray[i].Connect());
+end;
+
+procedure TExternalCanvas.DrawEntity(const entity: TEntity; alpha: Byte = $C8);
+var
+  me: TPoint;
+  atpa: T2DPointArray;
+  boundsArray: TPolygonArray;
+  i: Integer;
+  filters: TDotFilterArray;
+  filter: TDotFilter;
+  coordinates: TPointArray;
+begin
+  me := entity.Walker^.Position();
+  filters := entity.Walker^.FiltersToMM(me, entity.Filter, Minimap.CompassRadians);
+
+  for filter in filters do
+  begin
+    if not Minimap.Bounds.Overlap(filter.Poly.Bounds()) and
+       not Minimap.Bounds.Overlap(filter.Circle.Bounds) then Continue;
+
+    if filter.Inside then
+      Self.DrawColor := $00FF00
+    else
+      Self.DrawColor := $0000FF;
+
+    Self.DrawPolygon(filter.Poly);
+    Self.DrawCircle(filter.Circle.Center, filter.Circle.Radius);
+  end;
+
+  if entity.FindEx(me, boundsArray, coordinates, atpa) then
+  begin
+    Self.DrawColor := TColor.Random();
+    Self.DrawAlpha := alpha;
+    Self.DrawATPA(atpa);
+  end;
+
+  Self.DrawAlpha := $FF;
+  Self.DrawColor := $FFFFF;
+  for i := 0 to High(boundsArray) do
+    Self.DrawTPA(boundsArray[i].Connect());
+end;
+
+
+(*
+## ShowOnTarget TEntity
+```pascal
+procedure ShowOnTarget(entity: TEntity); overload;
+```
+Shows an image of the target with the `TEntity` drawn on it.
+*)
+procedure ShowOnTarget(entity: TEntity); overload;
+var
+  img: TImage;
+begin
+  img := Target.GetImage();
+  img.DrawEntity(entity);
+  img.Show();
+end;
+
+(*
+## ShowOnTarget TEntityArray
+```pascal
+procedure ShowOnTarget(entities: TEntityArray); overload;
+```
+Shows an image of the target with the `TEntityArray` drawn on it.
+*)
+
+procedure ShowOnTarget(entities: TEntityArray); overload;
+var
+  img: TImage;
+  i: Integer;
+begin
+  img := Target.GetImage();
+  for i := 0 to High(entities) do
+    img.DrawEntity(entities[i]);
+  img.Show();
+end;
+
+
+function ToString(constref entity: TEntity): String; override;
+begin
+  Result := '[' + ToString(entity.UpText) + ', ' +
+                  ToString(entity.Size) + ', ' +
+                  ToString(entity.Coordinates) + ', ' +
+                  ToString(entity.Finder) + ', ' +
+                  ToString(entity.MinimapDots) + ']';
+end;

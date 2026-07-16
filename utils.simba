@@ -1,0 +1,39 @@
+{$SCOPEDENUMS ON}
+{$AUTOINVOKE OFF}
+
+{$IFNDEF WL_ENV_INCLUDED}             {$INCLUDE_ONCE utils/env.simba}
+{$IFNDEF WL_GEOMETRY_INCLUDED}        {$INCLUDE_ONCE utils/math/geometry.simba}
+{$IFNDEF WL_RANDOM_INCLUDED}          {$INCLUDE_ONCE utils/math/random.simba}
+{$IFNDEF WL_VECTOR_INCLUDED}          {$INCLUDE_ONCE utils/math/vector.simba}
+{$IFNDEF WL_TIME_INCLUDED}            {$INCLUDE_ONCE utils/time.simba}
+{$IFNDEF WL_LOGGER_INCLUDED}          {$INCLUDE_ONCE utils/logger.simba}
+{$IFNDEF WL_PROGRESS_REPORT_INCLUDED} {$INCLUDE_ONCE utils/progressreport.simba}
+{$IFNDEF WL_STRINGS_INCLUDED}         {$INCLUDE_ONCE utils/strings.simba}
+{$IFNDEF WL_WASPCLIENT_INCLUDED}      {$INCLUDE_ONCE utils/clients/waspclient.simba}   
+{$IFNDEF WL_CONFIG_INCLUDED}          {$INCLUDE_ONCE utils/config.simba}
+{$IFNDEF WL_ASSETS_INCLUDED}          {$INCLUDE_ONCE utils/assets.simba}
+{$IFNDEF WL_MISC_INCLUDED}            {$INCLUDE_ONCE utils/misc.simba}
+{$IFNDEF WL_MOUSE_INCLUDED}           {$INCLUDE_ONCE utils/input/mouse.simba}
+{$IFNDEF WL_KEYBOARD_INCLUDED}        {$INCLUDE_ONCE utils/input/keyboard.simba}
+{$IFNDEF WL_OCR_INCLUDED}             {$INCLUDE_ONCE utils/ocr.simba}
+{$IFNDEF WL_ITEM_INCLUDED}            {$INCLUDE_ONCE utils/item.simba}
+{$IFNDEF WL_DATABASE_INCLUDED}        {$INCLUDE_ONCE utils/database.simba}
+{$IFNDEF WL_IMAGECOMPARE_INCLUDED}    {$INCLUDE_ONCE utils/imagecompare.simba}
+{$IFNDEF WL_TRANSLATOR_INCLUDED}      {$INCLUDE_ONCE utils/math/rstranslator.simba}
+{$IFNDEF WL_WEBGRAPH_INCLUDED}        {$INCLUDE_ONCE utils/webgraph.simba}
+{$IFNDEF WL_WEBGRAPHGEN_INCLUDED}     {$INCLUDE_ONCE utils/webgraphgen.simba}
+{$IFNDEF WL_CHUNKS_INCLUDED}          {$INCLUDE_ONCE utils/rschunks.simba}
+{$IFNDEF WL_FORMUTILS_INCLUDED}       {$INCLUDE_ONCE utils/forms/formutils.simba}
+{$IFNDEF WL_DISCORD_INCLUDED}         {$INCLUDE_ONCE utils/clients/discord.simba}
+{$IFNDEF WL_WORLDFETCHER_INCLUDED}    {$INCLUDE_ONCE utils/worldfetcher.simba}
+{$IFNDEF WL_PROFILES_INCLUDED}        {$INCLUDE_ONCE utils/profiles.simba}
+{$IFNDEF WL_PROFILE_FORM_INCLUDED}    {$INCLUDE_ONCE utils/forms/profile_form.simba}
+{$IFNDEF WL_SCRIPTFORM_INCLUDED}      {$INCLUDE_ONCE utils/forms/scriptform.simba}
+{$IFNDEF WL_MODEL_INCLUDED}           {$INCLUDE_ONCE utils/math/model.simba}
+{$IFNDEF WL_LLMCLIENT_INCLUDED}       {$INCLUDE_ONCE utils/clients/llmclient.simba}
+{$IFNDEF WL_CONVERSIONS_INCLUDED}     {$INCLUDE_ONCE utils/math/conversions.simba}
+
+{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}
+{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}{$ENDIF}

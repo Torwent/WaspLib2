@@ -1,0 +1,266 @@
+(*
+# PrayerFinder
+Methods to find and compare spell images
+*)
+
+{$DEFINE WL_PRAYERFINDER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## EPrayer
+```pascal
+EPrayer = enum(UNKNOWN, THICK_SKIN..PIETY, RIGOUR, AUGURY);
+```
+An enumeration representing different prayers in game.
+*)
+  EPrayer = enum(
+    THICK_SKIN,           BURST_OF_STRENGTH,  CLARITY_OF_THOUGHT,
+    SHARP_EYE,            MYSTIC_WILL,        ROCK_SKIN,
+    SUPERHUMAN_STRENGTH,  IMPROVED_REFLEXES,  RAPID_RESTORE,
+    RAPID_HEAL,           PROTECT_ITEM,       HAWK_EYE,
+    MYSTIC_LORE,          STEEL_SKIN,         ULTIMATE_STRENGTH,
+    INCREDIBLE_REFLEXES,  PROTECT_FROM_MAGIC, PROTECT_FROM_MISSILES,
+    PROTECT_FROM_MELEE,   EAGLE_EYE,          MYSTIC_MIGHT,
+    RETRIBUTION,          REDEMPTION,         SMITE,
+    PRESERVE,             CHIVALRY,           PIETY,
+    RIGOUR,               AUGURY
+  );
+
+(*
+## TPrayerFinder
+A record for finding and managing prayer images.
+
+## Fields:
+- `PrayerImages`: Stores images for each prayer type
+- `Version`: Stores the version hash of the image set
+- `Similarity`: Threshold for image comparison
+- `ImageCompare`: Utility for comparing images
+- `CacheDir`: Directory for storing cached prayer images
+- `ZIP`: Path to the zip file containing prayer images
+*)
+  TPrayerFinder = record
+    PrayerImages: array [EPrayer] of TImage;
+    Version: String;
+    Similarity: Single;
+    ImageCompare: TImageCompareUtils;
+    CacheDir: String;
+  end;
+
+(*
+## PrayerFinder.Clean
+```pascal
+procedure TPrayerFinder.Clean(image, template: TImage);
+```
+Cleans the template image by drawing its black-colored points.
+
+ Example:
+```pascal
+PrayerFinder.Clean(sourceImage, templateImage);
+```
+*)
+procedure TPrayerFinder.Clean(image, template: TImage);
+begin
+  template.DrawColor := $0;
+  template.DrawTPA(image.FindColor($0, 0));
+end;
+
+(*
+## PrayerFinder.Setup
+```pascal
+procedure TPrayerFinder.Setup();
+```
+Sets up the PrayerFinder, including cache management and similarity settings.
+
+Example:
+```pascal
+PrayerFinder.Setup();
+```
+*)
+procedure TPrayerFinder.Setup();
+var
+  path, tmp: String;
+begin
+  Self.Version := WLAssets.JSON.Item['finders/prayer.zip'].AsString;
+  Self.CacheDir := WLEnv.CacheDir + 'prayerfinder' + PATH_SEP;
+
+  //Delete old cache files if they exist
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
+    if tmp = Self.Version then Continue;
+    DirDelete(path, False);
+  end;
+
+  Self.CacheDir += Self.Version + PATH_SEP;
+
+  if not DirCreate(Self.CacheDir) then
+    raise GetDebugLn('PrayerFinder', 'Failed to create cache directory: ' + Self.CacheDir);
+
+  //only set similarity if the user didn't set it already
+  if Self.Similarity = 0 then
+    Self.Similarity := 0.97;
+
+  Self.ImageCompare.Clean := @Self.Clean;
+end;
+
+(*
+## PrayerFinder.GetImage
+```pascal
+function TPrayerFinder.GetImage(prayer: EPrayer): TImage;
+```
+Retrieves the image for a specific `prayer`, loading it from cache or extracting from ZIP if needed.
+
+Example:
+```pascal
+img := PrayerFinder.GetImage(EPrayer.PIETY);
+img.Show();
+```
+*)
+function TPrayerFinder.GetImage(prayer: EPrayer): TImage;
+var
+  name, path: String;
+begin
+  if Self.PrayerImages[prayer] <> nil then
+    Exit(Self.PrayerImages[prayer]);
+
+  name := LowerCase(ToStr(prayer).After('.')) + '.png';
+  path := Self.CacheDir + name;
+
+  if not FileExists(path) then
+    ZipExtract(WLEnv.AssetsDir + 'finders' + PATH_SEP + 'prayer.zip', Self.CacheDir, [name]);
+
+  Self.PrayerImages[prayer] := new TImage(path);
+
+  Result := Self.PrayerImages[prayer];
+end;
+
+(*
+## PrayerFinder.FindAll
+```pascal
+function TPrayerFinder.FindAll(prayers: array of EPrayer; boxes: TBoxArray; maxToFind: Integer = 0): TImageMatchArray;
+function TPrayerFinder.FindAll(prayers: array of EPrayer; boxes: TBoxArray; out matches: TImageMatchArray): Boolean; overload;
+```
+Finds matches for specified prayers within given boxes.
+
+Example:
+```pascal
+if PrayerFinder.FindAll(prayers, boxes, matches) then
+  for match in matches do
+    ShowOnTarget(matches.Box);
+```
+*)
+function TPrayerFinder.FindAll(prayers: array of EPrayer; boxes: TBoxArray; maxToFind: Integer = 0): TImageMatchArray;
+var
+  prayer: EPrayer;
+  img: TImage;
+  i: Integer;
+  skip: TBooleanArray;
+  match: Single;
+begin
+  SetLength(skip, Length(boxes));
+
+  for prayer in prayers do
+  begin
+    img := Self.GetImage(prayer);
+    for i := 0 to High(boxes) do
+    begin
+      if skip[i] then Continue;
+
+      match := Self.Similarity;
+      if Self.ImageCompare.Compare(img, boxes[i], match) then
+      begin
+        Result += [i, boxes[i], match];
+        if (maxToFind > 0) and (Length(Result) >= maxToFind) then
+          Exit;
+        skip[i] := True;
+      end;
+    end;
+  end;
+end;
+
+function TPrayerFinder.FindAll(prayers: array of EPrayer; boxes: TBoxArray; out matches: TImageMatchArray): Boolean; overload;
+var
+  prayer: EPrayer;
+  results: TImageMatchArray;
+  i: Integer;
+  img: TImage;
+  match: Single;
+  skip: TBooleanArray;
+begin
+  SetLength(skip, Length(boxes));
+
+  for prayer in prayers do
+  begin
+    img := Self.GetImage(prayer);
+
+    for i := 0 to High(boxes) do
+    begin
+      if skip[i] then Continue;
+
+      match := Self.Similarity;
+      if Self.ImageCompare.Compare(img, boxes[i], match) then
+      begin
+        results += [i, boxes[i], match];
+        skip[i] := True;
+      end;
+    end;
+
+    if results = [] then
+      Exit;
+
+    matches += results;
+    results := [];
+  end;
+
+  Result := True;
+end;
+
+(*
+## PrayerFinder.Find
+```pascal
+function TPrayerFinder.Find(prayers: array of EPrayer; boxes: TBoxArray; out match: TImageMatch): Boolean;
+```
+Finds the first match for specified `prayers` within given `boxes`.
+
+
+Example:
+```pascal
+if PrayerFinder.Find([EPrayer.PIETY], boxes, match) then
+  ShowOnTarget(match.Box);
+```
+*)
+function TPrayerFinder.Find(prayers: array of EPrayer; boxes: TBoxArray; out match: TImageMatch): Boolean;
+var
+  prayer: EPrayer;
+  img: TImage;
+  i: Integer;
+  similarity: Single;
+  skip: TBooleanArray;
+begin
+  SetLength(skip, Length(boxes));
+
+  for prayer in prayers do
+  begin
+    img := Self.GetImage(prayer);
+    for i := 0 to High(boxes) do
+    begin
+      if skip[i] then Continue;
+
+      similarity := Self.Similarity;
+      if Self.ImageCompare.Compare(img, boxes[i], similarity) then
+      begin
+        match := [i, boxes[i], similarity];
+        Exit(True);
+      end;
+
+    end;
+  end;
+end;
+
+var
+(*
+## PrayerFinder variable
+Global {ref}`TPrayerFinder` variable.
+*)
+  PrayerFinder: TPrayerFinder;

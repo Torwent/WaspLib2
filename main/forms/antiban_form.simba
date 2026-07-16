@@ -1,0 +1,1521 @@
+(*
+# Antiban Form
+This page is about {ref}`Antiban` dedicated `TLazForm` utilities.
+
+This is meant to be used with {ref}`TScriptForm` with
+{ref}`TScriptForm.CreateAntibanTab` and will setup a a `TLazTabSheet` on it
+with several controls to configure {ref}`Antiban`:
+```{figure} ../../images/antibanform.png
+```
+*)
+{$DEFINE WL_ANTIBAN_FORM_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TAntibanFormHelper
+The `TAntibanFormHelper` type is, as it's name implies a helper type for the
+`Antiban Form`.
+
+It has a lot of methods and callbacks that are hidden by default and won't be
+mentioned on this page because they are internal methods you shouldn't touch.
+
+Do feel free to read the source code though if you so desire.
+*)
+  TAntibanFormHelper = record
+    TaskCheckbox, BreaksCheckbox, SleepCheckbox, WalkCheckbox, WalkAdjustmentsCheckbox: TLazCheckBox;
+    TaskList, BreakList, WalkList: TLazListBox;
+
+    PageControl: TLazPageControl;
+
+    TaskCombobox: TLazComboBox;
+    TaskIntervalSpinner: TLazFloatSpinEdit;
+    TaskVariationSpinner: TLazSpinEdit;
+    TaskDelButton, TaskEditButton, TaskAddButton, TaskPresetButton: TLazButton;
+
+    BreakIntervalSpinner, BreakLengthSpinner: TLazFloatSpinEdit;
+    BreakVariationSpinner, BreakLogoutSpinner: TLazSpinEdit;
+    BreakDelButton, BreakEditButton, BreakAddButton, BreakPresetButton: TLazButton;
+
+    SleepTimeEdit: TLazTimeEdit;
+    SleepLengthSpinner: TLazFloatSpinEdit;
+    SleepVariationSpinner, SleepLogoutSpinner: TLazSpinEdit;
+    SleepPresetButton: TLazButton;
+
+    WalkCombobox: TLazComboBox;
+    WalkIntervalSpinner: TLazFloatSpinEdit;
+    WalkVariationSpinner: TLazSpinEdit;
+    WalkDelButton, WalkEditButton, WalkAddButton, WalkPresetButton: TLazButton;
+
+    Config: TConfigJSON;
+  end;
+
+procedure TAntibanFormHelper.OnSleepChange(sender: TLazObject); forward;
+
+function TAntibanFormHelper.GetTaskListString(a, b, c: String): String;
+begin
+  Result := a.PadRight(22) + ' | ' + b.PadCenter(14) + ' | ' + c.PadCenter(14);
+end;
+
+function TAntibanFormHelper.GetBreakListString(a, b, c, d: String): String;
+begin
+  Result := a.PadRight(12) + ' | ' + b.PadCenter(12) + ' | ' + c.PadCenter(12) + ' | ' + d.PadCenter(12);
+end;
+
+
+procedure TAntibanFormHelper.SetDefaultTasks();
+var
+  tasks, taskObj: TJSONObject;
+  arr: TJSONArray;
+  i: Integer;
+begin
+  Self.TaskList.Clear();
+  Antiban.Tasks := [];
+
+  tasks := new TJSONObject();
+  tasks.AddBool('enabled', True);
+
+  arr := new TJSONArray();
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'AdjustZoom');
+  taskObj.AddFloat('interval', 3);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('AdjustZoom', '3 mins', '33%'));
+  Antiban.AddTask(@Antiban.AdjustZoom, 3*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomCameraTask');
+  taskObj.AddFloat('interval', 7);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('RandomCameraTask', '7 mins', '33%'));
+  Antiban.AddTask(@Antiban.RandomCameraTask, 7*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomMouseTask');
+  taskObj.AddFloat('interval', 8);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('RandomMouseTask', '8 mins', '33%'));
+  Antiban.AddTask(@Antiban.RandomMouseTask, 8*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomChatTask');
+  taskObj.AddFloat('interval', 9);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('RandomChatTask', '9 mins', '33%'));
+  Antiban.AddTask(@Antiban.RandomChatTask, 9*MINUTE, 0.33);
+
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'LoseFocus');
+  taskObj.AddFloat('interval', 10);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('LoseFocus', '10 mins', '33%'));
+  Antiban.AddTask(@Antiban.LoseFocus, 10*MINUTE, 0.33);
+
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomGameTabTask');
+  taskObj.AddFloat('interval', 12);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('RandomGameTabTask', '12 mins', '33%'));
+  Antiban.AddTask(@Antiban.RandomGameTabTask, 12*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomBankTask');
+  taskObj.AddFloat('interval', 13);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('RandomBankTask', '13 mins', '33%'));
+  Antiban.AddTask(@Antiban.RandomBankTask, 13*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'HoverSkills');
+  taskObj.AddFloat('interval', 18);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.TaskList.Items.Add(Self.GetTaskListString('HoverSkills', '18 mins', '33%'));
+  Antiban.AddTask(@Antiban.HoverSkills, 18*MINUTE, 0.33);
+
+  tasks.AddArray('tasks', arr);
+
+  for i := 0 to Self.Config.Data.Count-1 do
+    if Self.Config.Data.Key[i] = 'tasks' then
+    begin
+      Self.Config.Data.Delete(Self.Config.Data.Item[i]);
+      Break;
+    end;
+
+  Self.Config.Data.Add('tasks', tasks);
+end;
+
+procedure TAntibanFormHelper.SetDefaultBreaks();
+var
+  breaks, breakObj: TJSONObject;
+  arr: TJSONArray;
+  i: Integer;
+  value: Double;
+begin
+  Self.BreakList.Clear();
+  Antiban.Breaks := [];
+
+  breaks := new TJSONObject();
+  breaks.AddBool('enabled', True);
+
+  arr := new TJSONArray();
+
+  breakObj := new TJSONObject();
+  breakObj.AddFloat('length', 2);
+  breakObj.AddFloat('interval', 30);
+  breakObj.AddFloat('variation', 0.33);
+  breakObj.AddFloat('logout', 0.01);
+  arr.Add('break', breakObj);
+  Self.BreakList.Items.Add(Self.GetBreakListString('2 mins', '30 mins', '33%', '1%'));
+  Antiban.AddBreak(30*MINUTE,2*MINUTE, 0.33, 0.01);
+
+  breakObj := new TJSONObject(); 
+  breakObj.AddFloat('length', 5);
+  breakObj.AddFloat('interval', 45);
+  breakObj.AddFloat('variation', 0.33);
+  breakObj.AddFloat('logout', 0.02);
+  arr.Add('break', breakObj);
+  Self.BreakList.Items.Add(Self.GetBreakListString('5 mins', '45 mins', '33%', '2%'));
+  Antiban.AddBreak(45*MINUTE,5*MINUTE, 0.33, 0.02);
+
+  breakObj := new TJSONObject();  
+  breakObj.AddFloat('length', 10);
+  breakObj.AddFloat('interval', 90);
+  breakObj.AddFloat('variation', 0.33);
+  value := Round(0.05 * Biometrics.RandomDouble(1.0), 2);
+  breakObj.AddFloat('logout', value);
+  arr.Add('break', breakObj);
+  Self.BreakList.Items.Add(Self.GetBreakListString('10 mins', '60 mins', '33%', ToStr(Round(value*100, 2)) + '%'));
+  Antiban.AddBreak(60*MINUTE,10*MINUTE, 0.33, value);
+
+  breakObj := new TJSONObject();    
+  breakObj.AddFloat('length', 20);
+  breakObj.AddFloat('interval', 250);
+  breakObj.AddFloat('variation', 0.33);
+  value := Round(0.5 * Biometrics.RandomDouble(1.3), 2);
+  breakObj.AddFloat('logout', value);
+  arr.Add('break', breakObj);
+  Self.BreakList.Items.Add(Self.GetBreakListString('20 mins', '250 mins', '33%', ToStr(Round(value*100, 2)) + '%'));
+  Antiban.AddBreak(250*MINUTE,20*MINUTE, 0.33, value);
+
+  breaks.AddArray('breaks', arr);
+
+  for i := 0 to Self.Config.Data.Count-1 do
+    if Self.Config.Data.Key[i] = 'breaks' then
+    begin
+      Self.Config.Data.Delete(Self.Config.Data.Item[i]);
+      Break;
+    end;
+
+  Self.Config.Data.Add('breaks', breaks);
+end;
+
+procedure TAntibanFormHelper.SetDefaultSleep();
+var
+  sleepObj: TJSONObject;
+  i: integer;
+  len: Double;
+begin
+  Antiban.Sleeps := [];
+  Antiban.AddSleep(Biometrics.GetSleepHour(), Biometrics.GetSleepLength() * HOUR, 0.1, 0.8 * Biometrics.RandomDouble(1.3));
+
+  len := Round(Antiban.Sleeps[0].Length / HOUR, 2);
+  sleepObj := new TJSONObject();
+  sleepObj.AddBool('enabled', True);
+  sleepObj.AddString('time', Antiban.Sleeps[0].Time);
+  sleepObj.AddFloat('length', len);
+  sleepObj.AddFloat('variation', Antiban.Sleeps[0].StdVar);
+  sleepObj.AddFloat('logout', Antiban.Sleeps[0].LogoutChance);
+
+  for i := 0 to Self.Config.Data.Count-1 do
+    if Self.Config.Data.Key[i] = 'sleep' then
+    begin
+      Self.Config.Data.Delete(Self.Config.Data.Item[i]);
+      Break;
+    end;
+
+  Self.Config.Data.Add('sleep', sleepObj);
+
+  Self.SleepTimeEdit.OnChange         := nil;
+  Self.SleepLengthSpinner.OnChange    := nil;
+  Self.SleepVariationSpinner.OnChange := nil;
+  Self.SleepLogoutSpinner.OnChange    := nil;
+
+  Self.SleepTimeEdit.Text          := Antiban.Sleeps[0].Time;
+  Self.SleepLengthSpinner.Value    := len;
+  Self.SleepVariationSpinner.Value := Round(Antiban.Sleeps[0].StdVar * 100);
+  Self.SleepLogoutSpinner.Value    := Round(Antiban.Sleeps[0].LogoutChance * 100);
+
+  Self.SleepTimeEdit.OnChange         := @Self.OnSleepChange;
+  Self.SleepLengthSpinner.OnChange    := @Self.OnSleepChange;
+  Self.SleepVariationSpinner.OnChange := @Self.OnSleepChange;
+  Self.SleepLogoutSpinner.OnChange    := @Self.OnSleepChange;
+  Self.OnSleepChange(nil);
+end;
+
+procedure TAntibanFormHelper.SetDefaultWalks();
+var
+  walk, taskObj: TJSONObject;
+  arr: TJSONArray;
+  i: Integer;
+begin
+  Self.WalkList.Clear();
+  Antiban.WalkTasks := [];
+
+  walk := new TJSONObject();
+  walk.AddBool('enabled', True);
+  walk.AddBool('camera_adjustments', True);
+
+  arr := new TJSONArray();
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'AdjustZoom');
+  taskObj.AddFloat('interval', 2);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.WalkList.Items.Add(Self.GetTaskListString('AdjustZoom', '2 mins', '33%'));
+  Antiban.AddWalkTask(@Antiban.AdjustZoom, 2*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomChatTab');
+  taskObj.AddFloat('interval', 3);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.WalkList.Items.Add(Self.GetTaskListString('RandomChatTab', '3 mins', '33%'));
+  Antiban.AddWalkTask(@Antiban.RandomChatTab, 3*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'SmallCameraRotation');
+  taskObj.AddFloat('interval', 4);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.WalkList.Items.Add(Self.GetTaskListString('SmallCameraRotation', '4 mins', '33%'));
+  Antiban.AddWalkTask(@Antiban.SmallCameraRotation, 4*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomRightClick');
+  taskObj.AddFloat('interval', 5);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.WalkList.Items.Add(Self.GetTaskListString('RandomRightClick', '5 mins', '33%'));
+  Antiban.AddWalkTask(@Antiban.RandomRightClick, 5*MINUTE, 0.33);
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', 'RandomTab');
+  taskObj.AddFloat('interval', 6);
+  taskObj.AddFloat('variation', 0.33);
+  arr.Add('task', taskObj);
+  Self.WalkList.Items.Add(Self.GetTaskListString('RandomTab', '6 mins', '33%'));
+  Antiban.AddWalkTask(@Antiban.RandomTab, 6*MINUTE, 0.33);
+
+  walk.AddArray('tasks', arr);
+
+  for i := 0 to Self.Config.Data.Count-1 do
+    if Self.Config.Data.Key[i] = 'walk' then
+    begin
+      Self.Config.Data.Delete(Self.Config.Data.Item[i]);
+      Break;
+    end;
+
+  Self.Config.Data.Add('walk', walk);
+end;
+
+
+procedure TAntibanFormHelper.LoadTasks(obj: TJSONObject; updateList: Boolean = True);
+var
+  tasks: TJSONObject;
+  i, j: Integer;
+  name: String;
+begin
+  tasks := obj.Item['tasks'];
+
+  if updateList then
+  begin
+    for i := 0 to tasks.Count-1 do
+    begin
+      name := tasks.Item[i].Item['task'].AsString;
+
+      Self.TaskList.Items.Add(
+        Self.GetTaskListString(
+          name,
+          ToStr(tasks.Item[i].Item['interval'].AsFloat) + ' mins',
+          ToStr(tasks.Item[i].Item['variation'].AsFloat * 100) + '%'
+        )
+      );
+
+      j := ANTIBAN_TASKS.IndexOf(name);
+      if j = -1 then Continue;
+
+      Antiban.AddTask(
+        @ANTIBAN_TASKS[j].Method,
+        tasks.Item[i].Item['interval'].AsFloat * MINUTE,
+        tasks.Item[i].Item['variation'].AsFloat
+      );
+    end;
+
+    Self.TaskCheckbox.Checked := obj.Item['enabled'].AsBool;
+    Exit;
+  end;
+
+  for i := 0 to tasks.Count-1 do
+  begin
+    name := tasks.Item[i].Item['task'].AsString;
+    j := ANTIBAN_TASKS.IndexOf(name);
+    if j = -1 then Continue;
+
+    Antiban.AddTask(
+      @ANTIBAN_TASKS[j].Method,
+      tasks.Item[i].Item['interval'].AsFloat * MINUTE,
+      tasks.Item[i].Item['variation'].AsFloat
+    );
+  end;
+end;
+
+procedure TAntibanFormHelper.LoadBreaks(obj: TJSONObject; updateList: Boolean = True);
+var
+  breaks: TJSONObject;
+  i: Integer;
+begin
+  breaks := obj.Item['breaks'];
+
+  if updateList then
+  begin
+    for i := 0 to breaks.Count-1 do
+    begin
+      Self.BreakList.Items.Add(
+        Self.GetBreakListString(
+          ToStr(breaks.Item[i].Item['length'].AsFloat) + ' mins',
+          ToStr(breaks.Item[i].Item['interval'].AsFloat) + ' mins',
+          ToStr(breaks.Item[i].Item['variation'].AsFloat * 100) + '%',
+          ToStr(breaks.Item[i].Item['logout'].AsFloat * 100) + '%'
+        )
+      );
+
+      Antiban.AddBreak(
+        breaks.Item[i].Item['interval'].AsFloat*MINUTE,
+        breaks.Item[i].Item['length'].AsFloat*MINUTE,
+        breaks.Item[i].Item['variation'].AsFloat,
+        breaks.Item[i].Item['logout'].AsFloat
+      );
+    end;
+
+    Self.BreaksCheckbox.Checked := obj.Item['enabled'].AsBool;
+    Exit;
+  end;
+
+  for i := 0 to breaks.Count-1 do
+    Antiban.AddBreak(
+      breaks.Item[i].Item['interval'].AsFloat*MINUTE, breaks.Item[i].Item['length'].AsFloat*MINUTE,
+      breaks.Item[i].Item['variation'].AsFloat, breaks.Item[i].Item['logout'].AsFloat
+    );
+end;
+
+procedure TAntibanFormHelper.LoadSleep(obj: TJSONObject; updateList: Boolean = True);
+begin
+  Antiban.AddSleep(
+    obj.Item['time'].AsString, obj.Item['length'].AsFloat * HOUR,
+    obj.Item['variation'].AsFloat, obj.Item['logout'].AsFloat
+  );
+
+  if updateList then
+  begin
+    Self.SleepTimeEdit.OnChange         := nil;
+    Self.SleepLengthSpinner.OnChange    := nil;
+    Self.SleepVariationSpinner.OnChange := nil;
+    Self.SleepLogoutSpinner.OnChange    := nil;
+
+    Self.SleepCheckbox.Checked := obj.Item['enabled'].AsBool;
+    Self.SleepTimeEdit.Text          := obj.Item['time'].AsString;
+    Self.SleepLengthSpinner.Value    := obj.Item['length'].AsFloat;
+    Self.SleepVariationSpinner.Value := Round(obj.Item['variation'].AsFloat * 100);
+    Self.SleepLogoutSpinner.Value    := Round(obj.Item['logout'].AsFloat * 100);
+
+    Self.SleepTimeEdit.OnChange         := @Self.OnSleepChange;
+    Self.SleepLengthSpinner.OnChange    := @Self.OnSleepChange;
+    Self.SleepVariationSpinner.OnChange := @Self.OnSleepChange;
+    Self.SleepLogoutSpinner.OnChange    := @Self.OnSleepChange;
+    Self.OnSleepChange(nil);
+  end;
+end;
+
+procedure TAntibanFormHelper.LoadWalks(obj: TJSONObject; updateList: Boolean = True);
+var
+  walks: TJSONObject;
+  i, j: Integer;
+  name: String;
+begin
+  if obj.Has('walk_adjustments') then
+  begin
+    Self.WalkAdjustmentsCheckbox.Checked := obj.Item['walk_adjustments'].AsBool;
+    Antiban.WalkCameraAdjustments := obj.Item['walk_adjustments'].AsBool;
+  end
+  else
+  begin
+    obj.AddBool('walk_adjustments', True);
+    Self.WalkAdjustmentsCheckbox.Checked := obj.Item['walk_adjustments'].AsBool;
+    Antiban.WalkCameraAdjustments := True;
+  end;
+
+  walks := obj.Item['tasks'];
+
+  if updateList then
+  begin
+    for i := 0 to walks.Count-1 do
+    begin
+      name := walks.Item[i].Item['task'].AsString;
+
+      Self.WalkList.Items.Add(
+        Self.GetTaskListString(
+          name,
+          ToStr(walks.Item[i].Item['interval'].AsFloat) + ' mins',
+          ToStr(walks.Item[i].Item['variation'].AsFloat * 100) + '%'
+        )
+      );
+
+      j := ANTIBAN_WALKING_TASKS.IndexOf(name);
+      if j = -1 then Continue;
+
+      Antiban.AddWalkTask(
+        @ANTIBAN_WALKING_TASKS[j].Method,
+        walks.Item[i].Item['interval'].AsFloat * MINUTE,
+        walks.Item[i].Item['variation'].AsFloat
+      );
+    end;
+
+    Self.WalkCheckbox.Checked := obj.Item['enabled'].AsBool;
+    Exit;
+  end;
+
+  for i := 0 to walks.Count-1 do
+  begin
+    name := walks.Item[i].Item['task'].AsString;
+    j := ANTIBAN_WALKING_TASKS.IndexOf(name);
+    if j = -1 then Continue;
+
+    Antiban.AddWalkTask(
+      @ANTIBAN_WALKING_TASKS[j].Method,
+      walks.Item[i].Item['interval'].AsFloat * MINUTE,
+      walks.Item[i].Item['variation'].AsFloat
+    );
+  end;
+end;
+
+
+procedure TAntibanFormHelper.Setup();
+var
+  tasks, breaks, sleep, walks: TJSONObject;
+  i: Integer;
+begin
+  Self.Config.Setup('antiban' + PATH_SEP + ToStr(ProfileIndex));
+
+  Antiban.Tasks := [];
+  Antiban.Breaks := [];
+  Antiban.Sleeps := [];
+  Antiban.WalkTasks := [];
+
+  Self.TaskList.Clear();
+  Self.BreakList.Clear();
+  Self.WalkList.Clear();
+
+  for i := 0 to Self.Config.Data.Count-1 do
+  begin
+    case Self.Config.Data.Key[i] of
+      'tasks':  tasks  := Self.Config.Data.Item[i];
+      'breaks': breaks := Self.Config.Data.Item[i];
+      'sleep':  sleep  := Self.Config.Data.Item[i];
+      'walk':  walks  := Self.Config.Data.Item[i];
+    end;
+  end;
+
+  if tasks = nil then Self.SetDefaultTasks()
+  else Self.LoadTasks(tasks);
+
+  if breaks = nil then Self.SetDefaultBreaks()
+  else Self.LoadBreaks(breaks);
+
+  if sleep = nil then Self.SetDefaultSleep()
+  else Self.LoadSleep(sleep);
+
+  if walks = nil then Self.SetDefaultWalks()
+  else Self.LoadWalks(walks);
+
+  if (tasks=nil) or (breaks=nil) or (sleep=nil) or (walks=nil) then
+    Self.Config.Save();
+end;
+
+
+procedure TAntibanFormHelper.OnCheckboxToggle(sender: TLazObject);
+var
+  checkbox: TLazCheckBox;
+  checked: Boolean;
+  parent: TLazWinControl;
+  i: Integer;
+  control: TLazComponent;
+begin
+  checkbox := TLazCheckBox(sender);
+  checked := checkbox.Checked;
+
+  parent := checkbox.Parent;
+
+  for i := 0 to parent.ComponentCount-1 do
+  begin
+    control := parent.GetComponent(i);
+    if checkbox <> control then
+      TLazControl(control).Enabled := checked;
+  end;
+
+  case checkbox of
+    Self.TaskCheckbox:
+    begin
+      Self.Config.Data.Item['tasks'].Item['enabled'].AsBool := checked;
+      if checked then
+        Self.LoadTasks(Self.Config.Data.Item['tasks'], False)
+      else
+        Antiban.Tasks := [];
+    end;
+
+    Self.BreaksCheckbox:
+    begin          
+      Self.Config.Data.Item['breaks'].Item['enabled'].AsBool := checked;
+      if checked then
+        Self.LoadBreaks(Self.Config.Data.Item['breaks'], False)
+      else
+        Antiban.Breaks := [];
+    end;
+
+    Self.SleepCheckbox:
+    begin
+      Self.Config.Data.Item['sleep'].Item['enabled'].AsBool := checked;
+      if checked then
+        Self.LoadSleep(Self.Config.Data.Item['sleep'], False)
+      else
+        Antiban.Sleeps := [];
+    end;
+
+    Self.WalkCheckbox:
+    begin
+      Self.Config.Data.Item['walk'].Item['enabled'].AsBool := checked;
+      if checked then
+        Self.LoadWalks(Self.Config.Data.Item['walk'], False)
+      else
+      begin
+        Antiban.WalkTasks := [];
+        Antiban.WalkCameraAdjustments := False;
+      end;
+    end;
+  end;
+
+  Self.Config.Save();
+end;
+
+procedure TAntibanFormHelper.OnAdjustementsCheckboxToggle(sender: TLazObject);
+var
+  checked: Boolean;
+begin
+  checked := TLazCheckBox(sender).Checked;
+  if not Self.Config.Data.Item['walk'].Has('camera_adjustments') then
+    Self.Config.Data.Item['walk'].AddBool('camera_adjustments', checked)
+  else
+    Self.Config.Data.Item['walk'].Item['camera_adjustments'].AsBool := checked;
+  Antiban.WalkCameraAdjustments := checked;
+
+  Self.Config.Save();
+end;
+
+
+{$H-}
+procedure TAntibanFormHelper.OnTaskSelected(sender: TLazObject; user: Boolean);
+var
+  i, idx: Integer;
+  strings: TStringArray;
+begin
+  i := TLazListBox(sender).ItemIndex;
+  if i = -1 then
+  begin
+    Self.TaskDelButton.Enabled  := False;
+    Self.TaskEditButton.Enabled := False;
+    Exit;
+  end;
+
+  Self.TaskDelButton.Enabled  := True;
+  Self.TaskEditButton.Enabled := True;
+
+  strings := TLazListBox(sender).Items.Strings[i].Split('|');
+  if Length(strings) <> 3 then
+    raise GetDebugLn('AntibanForm', 'Error parsing tasks list.');
+
+  Self.TaskCombobox.ItemIndex     := Self.TaskCombobox.Items.IndexOf(strings[0].Trim());
+  Self.TaskIntervalSpinner.Value  := Antiban.Tasks[i].Interval / MINUTE;
+  Self.TaskVariationSpinner.Value := Round(Antiban.Tasks[i].StdVar * 100);
+end;
+
+procedure TAntibanFormHelper.OnTaskAdd(sender: TLazObject);
+var
+  taskObj: TJSONObject;
+  idx, i: Integer;
+  interval: Double;
+  oldArray, newArray: TJSONArray;
+begin
+  interval := Self.TaskIntervalSpinner.Value * MINUTE;
+
+  for idx := 0 to High(Antiban.Tasks) do
+    if Antiban.Tasks[idx].Interval > interval then
+      Break;
+
+  Self.TaskList.Items.Insert(
+    idx,
+    Self.GetTaskListString(
+      Self.TaskCombobox.Text,
+      ToStr(Self.TaskIntervalSpinner.Value) + ' mins',
+      Self.TaskVariationSpinner.Text  + '%'
+    )
+  );
+
+  Antiban.Tasks.Insert(Default(TAntibanTask), idx);
+  Antiban._UpdateTask(
+    idx, @ANTIBAN_TASKS[Self.TaskCombobox.ItemIndex].Method,
+    interval, Self.TaskVariationSpinner.Value / 100
+  );
+
+  Self.TaskList.ItemIndex := idx;
+
+  oldArray := Self.Config.Data.Item['tasks'].Item['tasks'];
+  newArray := new TJSONArray();
+  for i := 0 to Min(idx, oldArray.Count-1) do
+    newArray.Add('task', oldArray.Item[i].Clone());
+
+  taskObj := new TJSONObject();
+  taskObj.AddString('task', Self.TaskCombobox.Text);
+  taskObj.AddFloat('interval', Self.TaskIntervalSpinner.Value);
+  taskObj.AddFloat('variation', Round(Self.TaskVariationSpinner.Value/100, 3));
+  newArray.Add('task', taskObj);
+
+  for i := idx+1 to oldArray.Count-1 do
+    newArray.Add('task', oldArray.Item[i].Clone());
+
+  Self.Config.Data.Item['tasks'].Delete(oldArray);
+  Self.Config.Data.Item['tasks'].AddArray('tasks', newArray);
+  Self.Config.Save();
+end;
+
+procedure TAntibanFormHelper.OnTaskEdit(sender: TLazObject);
+var
+  i: Integer;
+  item: TJSONItem;
+begin
+  i := Self.TaskList.ItemIndex;
+  if i = -1 then Exit;
+
+  Self.TaskList.Items.Delete(i);
+  Delete(Antiban.Tasks, i, 1);
+  item := Self.Config.Data.Item['tasks'].Item['tasks'].Item[i];
+  Self.Config.Data.Item['tasks'].Item['tasks'].Delete(item);
+
+  Self.OnTaskAdd(sender);
+end;
+
+procedure TAntibanFormHelper.OnTaskRemove(sender: TLazObject);
+var
+  idx: Integer;
+  item: TJSONItem;
+begin
+  idx := Self.TaskList.ItemIndex;
+
+  Self.TaskList.Items.Delete(idx);
+  Delete(Antiban.Tasks, idx, 1);
+  item := Self.Config.Data.Item['tasks'].Item['tasks'];
+  item.Delete(item.Item[idx]);
+  Self.Config.Save();
+  Self.TaskList.ItemIndex := idx-1;
+  Self.OnTaskSelected(Self.TaskList, False);
+end;
+
+procedure TAntibanFormHelper.OnTaskPreset(sender: TLazObject);
+begin
+  Self.SetDefaultTasks();
+  Self.Config.Save();
+end;
+
+
+procedure TAntibanFormHelper.OnBreakSelected(sender: TLazObject; user: Boolean);
+var
+  i: Integer;
+begin
+  i := TLazListBox(sender).ItemIndex;
+  if i = -1 then
+  begin
+    Self.BreakDelButton.Enabled  := False;
+    Self.BreakEditButton.Enabled := False;
+    Exit;
+  end;
+
+  Self.BreakDelButton.Enabled  := True;
+  Self.BreakEditButton.Enabled := True;
+
+  Self.BreakIntervalSpinner.Value  := Antiban.Breaks[i].Interval / MINUTE;
+  Self.BreakLengthSpinner.Value    := Antiban.Breaks[i].Length / MINUTE;
+  Self.BreakVariationSpinner.Value := Round(Antiban.Breaks[i].StdVar * 100);
+  Self.BreakLogoutSpinner.Value    := Round(Antiban.Breaks[i].LogoutChance * 100);
+end;
+
+procedure TAntibanFormHelper.OnBreakAdd(sender: TLazObject);
+var
+  breakObj: TJSONObject;
+  idx, i: Integer;
+  interval: Double;
+  oldArray, newArray: TJSONArray;
+begin
+  interval := Self.BreakIntervalSpinner.Value * MINUTE;
+
+  for idx := 0 to High(Antiban.Breaks) do
+    if Antiban.Breaks[idx].Interval > interval then
+      Break;
+
+  Self.BreakList.Items.Insert(
+    idx,
+    Self.GetBreakListString(                        
+      ToStr(Self.BreakLengthSpinner.Value) + ' mins',
+      ToStr(Self.BreakIntervalSpinner.Value) + ' mins',
+      Self.BreakVariationSpinner.Text + '%',
+      Self.BreakLogoutSpinner.Text + '%'
+    )
+  );
+
+  Antiban.Breaks.Insert(Default(TBreakTask), idx);
+  Antiban._UpdateBreak(
+    idx, interval, Self.BreakLengthSpinner.Value * MINUTE,
+    Self.BreakVariationSpinner.Value / 100,
+    Self.BreakLogoutSpinner.Value / 100
+  );
+
+  Self.BreakList.ItemIndex := idx;
+
+  oldArray := Self.Config.Data.Item['breaks'].Item['breaks'];
+  newArray := new TJSONArray();
+  for i := 0 to Min(idx, oldArray.Count-1) do
+    newArray.Add('break', oldArray.Item[i].Clone());
+
+  breakObj := new TJSONObject();
+  breakObj.AddFloat('interval', Self.BreakIntervalSpinner.Value);
+  breakObj.AddFloat('length', Self.BreakLengthSpinner.Value);
+  breakObj.AddFloat('variation', Self.BreakVariationSpinner.Value / 100);
+  breakObj.AddFloat('logout', Self.BreakLogoutSpinner.Value / 100);
+  newArray.Add('break', breakObj);
+
+  for i := idx+1 to oldArray.Count-1 do
+    newArray.Add('break', oldArray.Item[i].Clone());
+
+  Self.Config.Data.Item['breaks'].Delete(oldArray);
+  Self.Config.Data.Item['breaks'].AddArray('breaks', newArray);
+  Self.Config.Save();
+end;
+
+procedure TAntibanFormHelper.OnBreakEdit(sender: TLazObject);
+var
+  i: Integer;
+  item: TJSONItem;
+begin
+  i := Self.BreakList.ItemIndex;
+  if i = -1 then Exit;
+
+  Self.BreakList.Items.Delete(i);
+  Delete(Antiban.Breaks, i, 1);
+  item := Self.Config.Data.Item['breaks'].Item['breaks'].Item[i];
+  Self.Config.Data.Item['breaks'].Item['breaks'].Delete(item);
+
+  Self.OnBreakAdd(sender);
+end;
+
+procedure TAntibanFormHelper.OnBreakRemove(sender: TLazObject);
+var
+  idx: Integer;
+  item: TJSONItem;
+begin
+  idx := Self.BreakList.ItemIndex;
+
+  Self.BreakList.Items.Delete(idx);
+  Delete(Antiban.Breaks, idx, 1);
+  item := Self.Config.Data.Item['breaks'].Item['breaks'];
+  item.Delete(item.Item[idx]);
+  Self.Config.Save();
+  Self.BreakList.ItemIndex := idx-1;
+  Self.OnBreakSelected(Self.BreakList, False);
+end;
+
+procedure TAntibanFormHelper.OnBreakPreset(sender: TLazObject);
+begin
+  Self.SetDefaultBreaks();
+  Self.Config.Save();
+end;
+
+
+procedure TAntibanFormHelper.OnSleepChange(sender: TLazObject);
+var
+  str: String;
+begin
+  if not Self.SleepCheckbox.Checked then
+    Exit;
+  str := Self.SleepTimeEdit.Text;
+
+  Antiban._UpdateSleep(
+    0, str, Self.SleepLengthSpinner.Value * HOUR,
+    Self.SleepVariationSpinner.Value/100, Self.SleepLogoutSpinner.Value/100
+  );
+
+  Self.Config.Data.Item['sleep'].Item['time'].AsString     := str;
+  Self.Config.Data.Item['sleep'].Item['length'].AsFloat    := Self.SleepLengthSpinner.Value;
+  Self.Config.Data.Item['sleep'].Item['variation'].AsFloat := Self.SleepVariationSpinner.Value/100;
+  Self.Config.Data.Item['sleep'].Item['logout'].AsFloat    := Self.SleepLogoutSpinner.Value/100;
+  Self.Config.Save();
+end;
+
+procedure TAntibanFormHelper.OnSleepPreset(sender: TLazObject);
+begin
+  Self.SetDefaultSleep();
+  Self.Config.Save();
+end;
+
+
+procedure TAntibanFormHelper.OnWalkSelected(sender: TLazObject; user: Boolean);
+var
+  i, idx: Integer;
+  strings: TStringArray;
+begin
+  i := TLazListBox(sender).ItemIndex;
+  if i = -1 then
+  begin
+    Self.WalkDelButton.Enabled  := False;
+    Self.WalkEditButton.Enabled := False;
+    Exit;
+  end;
+
+  Self.WalkDelButton.Enabled  := True;
+  Self.WalkEditButton.Enabled := True;
+
+  strings := TLazListBox(sender).Items.Strings[i].Split('|');
+  if Length(strings) <> 3 then
+    raise GetDebugLn('AntibanForm', 'Error parsing walking tasks list.');
+
+  Self.WalkCombobox.ItemIndex     := Self.WalkCombobox.Items.IndexOf(strings[0].Trim());
+  Self.WalkIntervalSpinner.Value  := Antiban.WalkTasks[i].Interval / MINUTE;
+  Self.WalkVariationSpinner.Value := Round(Antiban.WalkTasks[i].StdVar * 100);
+end;
+
+procedure TAntibanFormHelper.OnWalkAdd(sender: TLazObject);
+var
+  walkObj: TJSONObject;
+  idx, i: Integer;
+  interval: Double;
+  oldArray, newArray: TJSONArray;
+begin
+  interval := Self.WalkIntervalSpinner.Value * MINUTE;
+
+  for idx := 0 to High(Antiban.WalkTasks) do
+    if Antiban.WalkTasks[idx].Interval > interval then
+      Break;
+
+  Self.WalkList.Items.Insert(
+    idx,
+    Self.GetTaskListString(
+      Self.WalkCombobox.Text,
+      ToStr(Self.WalkIntervalSpinner.Value) + ' mins',
+      Self.WalkVariationSpinner.Text  + '%'
+    )
+  );
+
+  Antiban.WalkTasks.Insert(Default(TAntibanTask), idx);
+  Antiban._UpdateWalkTask(
+    idx,
+    @ANTIBAN_WALKING_TASKS[Self.WalkCombobox.ItemIndex].Method,
+    interval,
+    Self.WalkVariationSpinner.Value / 100
+  );
+
+  Self.WalkList.ItemIndex := idx;
+
+  oldArray := Self.Config.Data.Item['walk'].Item['tasks'];
+  newArray := new TJSONArray();
+  for i := 0 to Min(idx, oldArray.Count-1) do
+    newArray.Add('task', oldArray.Item[i].Clone());
+
+  walkObj := new TJSONObject();
+  walkObj.AddString('task', Self.WalkCombobox.Text);
+  walkObj.AddFloat('interval', Self.WalkIntervalSpinner.Value);
+  walkObj.AddFloat('variation', Round(Self.WalkVariationSpinner.Value/100, 3));
+  newArray.Add('task', walkObj);
+
+  for i := idx+1 to oldArray.Count-1 do
+    newArray.Add('task', oldArray.Item[i].Clone());
+
+  Self.Config.Data.Item['walk'].Delete(oldArray);
+  Self.Config.Data.Item['walk'].AddArray('tasks', newArray);
+  Self.Config.Save();
+end;
+
+procedure TAntibanFormHelper.OnWalkEdit(sender: TLazObject);
+var
+  i: Integer;
+  item: TJSONItem;
+begin
+  i := Self.WalkList.ItemIndex;
+  if i = -1 then Exit;
+
+  Self.WalkList.Items.Delete(i);
+  Delete(Antiban.WalkTasks, i, 1);
+  item := Self.Config.Data.Item['walk'].Item['tasks'].Item[i];
+  Self.Config.Data.Item['walk'].Item['tasks'].Delete(item);
+
+  Self.OnWalkAdd(sender);
+end;
+
+procedure TAntibanFormHelper.OnWalkRemove(sender: TLazObject);
+var
+  idx: Integer;
+  item: TJSONItem;
+begin
+  idx := Self.WalkList.ItemIndex;
+
+  Self.WalkList.Items.Delete(idx);
+  Delete(Antiban.WalkTasks, idx, 1);
+  item := Self.Config.Data.Item['walk'].Item['tasks'];
+  item.Delete(item.Item[idx]);
+  Self.Config.Save();
+  Self.WalkList.ItemIndex := idx-1;
+  Self.OnWalkSelected(Self.WalkList, False);
+end;
+
+procedure TAntibanFormHelper.OnWalkPreset(sender: TLazObject);
+begin
+  Self.SetDefaultWalks();
+  Self.Config.Save();
+end;
+
+
+
+procedure TAntibanFormHelper.OnListKeyDown(sender: TLazObject; var key: UInt16; shift: ELazShiftStates);
+begin
+  if EKeyCode(key) <> EKeyCode.DELETE then
+    Exit;
+
+  case sender of
+    Self.TaskList:  Self.OnTaskRemove(sender);
+    Self.BreakList: Self.OnBreakRemove(sender);
+    Self.WalkList:  Self.OnWalkRemove(sender);
+  end;
+end;
+{$H+}
+
+
+procedure TAntibanFormHelper.SetupTaskPanel(parent: TLazComponent);
+var
+  lPanel, rPanel: TLazPanel;
+  lbl: TLazLabel;
+  i: Integer;
+begin
+  Self.TaskCheckbox := TLazCheckBox.CreateEx(parent, 'Enable Tasks', 'Enable/Disable antiban tasks.');
+  Self.TaskCheckbox.State := ELazCheckBoxState.Checked;
+  Self.TaskCheckbox.OnChange := @Self.OnCheckboxToggle;
+  Self.TaskCheckbox.Align := ELazAlign.Top;
+  Self.TaskCheckbox.BorderSpacing.Around := 10;
+
+  lPanel := TLazPanel.CreateEx(parent);
+  lPanel.Width := 220;
+  lPanel.Align := ELazAlign.Left;
+  lPanel.BorderSpacing.Around := 10;
+  lPanel.BevelWidth := 0;
+
+  rPanel := TLazPanel.CreateEx(parent);
+  rPanel.Align := ELazAlign.Client;
+  rPanel.BorderSpacing.Around := 10;
+  rPanel.BevelWidth := 0;
+
+  lbl := TLazLabel.CreateEx(
+          rPanel,
+          Self.GetTaskListString('Task', 'Interval', 'Variation'),
+          'List of currently active antiban tasks.'
+         );
+  lbl.Font.Name := 'Courier New';
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 13;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.TaskList := TLazListBox.CreateEx(rPanel);
+  Self.TaskList.Font.Name := 'Courier New';
+  Self.TaskList.OnSelectionChange := @Self.OnTaskSelected;
+  Self.TaskList.OnKeyDown := @Self.OnListKeyDown;
+  Self.TaskList.Align := ELazAlign.Client;
+  Self.TaskList.BorderSpacing.Left := 10;
+  Self.TaskList.BorderSpacing.Right := 10;
+  Self.TaskList.BorderSpacing.Bottom := 10;
+
+  Self.TaskAddButton := TLazButton.CreateEx(lPanel, 'Add', 'Add a new task.');
+  Self.TaskAddButton.OnClick := @Self.OnTaskAdd;
+  Self.TaskAddButton.Align := ELazAlign.Bottom;
+  Self.TaskAddButton.BorderSpacing.Top := 10;
+  Self.TaskAddButton.BorderSpacing.Left := 10;
+  Self.TaskAddButton.BorderSpacing.Right := 10;
+  Self.TaskAddButton.BorderSpacing.Bottom := 5;
+
+  Self.TaskEditButton := TLazButton.CreateEx(lPanel, 'Update', 'Update the current task.');
+  Self.TaskEditButton.Enabled := False;
+  Self.TaskEditButton.OnClick := @Self.OnTaskEdit;
+  Self.TaskEditButton.Align := ELazAlign.Bottom;
+  Self.TaskEditButton.BorderSpacing.Top := 5;
+  Self.TaskEditButton.BorderSpacing.Left := 10;
+  Self.TaskEditButton.BorderSpacing.Right := 10;
+  Self.TaskEditButton.BorderSpacing.Bottom := 5;
+
+  Self.TaskDelButton := TLazButton.CreateEx(lPanel, 'Remove', 'Remove the current task.');
+  Self.TaskDelButton.Enabled := False;
+  Self.TaskDelButton.OnClick := @Self.OnTaskRemove;
+  Self.TaskDelButton.Align := ELazAlign.Bottom;
+  Self.TaskDelButton.BorderSpacing.Top := 5;
+  Self.TaskDelButton.BorderSpacing.Left := 10;
+  Self.TaskDelButton.BorderSpacing.Right := 10;
+  Self.TaskDelButton.BorderSpacing.Bottom := 30;
+
+  Self.TaskPresetButton := TLazButton.CreateEx(lPanel, 'Preset', 'Reset the task list with a preset.');
+  Self.TaskPresetButton.OnClick := @Self.OnTaskPreset;
+  Self.TaskPresetButton.Align := ELazAlign.Bottom;
+  Self.TaskPresetButton.BorderSpacing.Around := 10;
+
+
+  Self.TaskVariationSpinner := TLazSpinEdit.CreateEx(lPanel, '', 'Edit the currently selected task interval variation.');
+  Self.TaskVariationSpinner.Value := 33;
+  Self.TaskVariationSpinner.MinValue := 0;
+  Self.TaskVariationSpinner.MaxValue := 100;
+  Self.TaskVariationSpinner.Increment := 5;
+  Self.TaskVariationSpinner.ValueEmpty := False;
+  Self.TaskVariationSpinner.Align := ELazAlign.Top;
+  Self.TaskVariationSpinner.BorderSpacing.Left := 10;
+  Self.TaskVariationSpinner.BorderSpacing.Right := 10;
+  Self.TaskVariationSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Variation (%):', 'Edit the currently selected task interval variation.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.TaskIntervalSpinner := TLazFloatSpinEdit.CreateEx(lPanel, '', 'Edit the currently selected task interval.');
+  Self.TaskIntervalSpinner.Text := '5';
+  Self.TaskIntervalSpinner.Align := ELazAlign.Top;
+  Self.TaskIntervalSpinner.BorderSpacing.Left := 10;
+  Self.TaskIntervalSpinner.BorderSpacing.Right := 10;
+  Self.TaskIntervalSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Interval (mins):', 'Edit the currently selected task interval.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.TaskCombobox := TLazComboBox.CreateEx(lPanel, '', 'Edit the currently selected task.');
+
+  for i := 0 to High(ANTIBAN_TASKS) do
+    Self.TaskCombobox.Items.Add(ANTIBAN_TASKS[i].Name);
+
+  Self.TaskCombobox.ItemIndex := 0;
+  Self.TaskCombobox.Align := ELazAlign.Top;
+  Self.TaskCombobox.BorderSpacing.Left := 10;
+  Self.TaskCombobox.BorderSpacing.Right := 10;
+  Self.TaskCombobox.BorderSpacing.Bottom := 10;
+
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Task:', 'Edit the currently selected task.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+end;
+
+procedure TAntibanFormHelper.SetupBreaksPanel(parent: TLazComponent);
+var
+  lPanel, rPanel: TLazPanel;
+  lbl: TLazLabel;
+begin
+  Self.BreaksCheckbox := TLazCheckBox.CreateEx(parent, 'Enable Breaks', 'Enable/Disable antiban breaks.');
+  Self.BreaksCheckbox.State := ELazCheckBoxState.Checked;
+  Self.BreaksCheckbox.OnChange := @Self.OnCheckboxToggle;
+  Self.BreaksCheckbox.Align := ELazAlign.Top;
+  Self.BreaksCheckbox.BorderSpacing.Around := 10;
+
+  lPanel := TLazPanel.CreateEx(parent);
+  lPanel.Width := 220;
+  lPanel.Align := ELazAlign.Left;
+  lPanel.BorderSpacing.Around := 10;
+  lPanel.BevelWidth := 0;
+
+  rPanel := TLazPanel.CreateEx(parent);
+  rPanel.Align := ELazAlign.Client;
+  rPanel.BorderSpacing.Around := 10;
+  rPanel.BevelWidth := 0;
+
+  lbl := TLazLabel.CreateEx(
+           rPanel,
+           Self.GetBreakListString('Length', 'Interval', 'Variation', 'Logout Chance'),
+           'List of currently active antiban breaks.'
+         );
+  lbl.Font.Name := 'Courier New';
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 13;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.BreakList := TLazListBox.CreateEx(rPanel);
+  Self.BreakList.Font.Name := 'Courier New';
+  Self.BreakList.OnSelectionChange := @Self.OnBreakSelected;
+  Self.BreakList.OnKeyDown := @Self.OnListKeyDown;
+  Self.BreakList.Align := ELazAlign.Client;
+  Self.BreakList.BorderSpacing.Left := 10;
+  Self.BreakList.BorderSpacing.Right := 10;
+  Self.BreakList.BorderSpacing.Bottom := 10;
+
+  Self.BreakAddButton := TLazButton.CreateEx(lPanel, 'Add', 'Add a new break.');
+  Self.BreakAddButton.OnClick := @Self.OnBreakAdd;
+  Self.BreakAddButton.Align := ELazAlign.Bottom;
+  Self.BreakAddButton.BorderSpacing.Top := 10;
+  Self.BreakAddButton.BorderSpacing.Left := 10;
+  Self.BreakAddButton.BorderSpacing.Right := 10;
+  Self.BreakAddButton.BorderSpacing.Bottom := 5;
+
+
+  Self.BreakEditButton := TLazButton.CreateEx(lPanel, 'Update', 'Update the current break.');
+  Self.BreakEditButton.Enabled := False;
+  Self.BreakEditButton.OnClick := @Self.OnBreakEdit;
+  Self.BreakEditButton.Align := ELazAlign.Bottom;
+  Self.BreakEditButton.BorderSpacing.Top := 5;
+  Self.BreakEditButton.BorderSpacing.Left := 10;
+  Self.BreakEditButton.BorderSpacing.Right := 10;
+  Self.BreakEditButton.BorderSpacing.Bottom := 5;
+
+  Self.BreakDelButton := TLazButton.CreateEx(lPanel, 'Remove', 'Remove the current break.');
+  Self.BreakDelButton.Enabled := False;
+  Self.BreakDelButton.OnClick := @Self.OnBreakRemove;
+  Self.BreakDelButton.Align := ELazAlign.Bottom;
+  Self.BreakDelButton.BorderSpacing.Top := 5;
+  Self.BreakDelButton.BorderSpacing.Left := 10;
+  Self.BreakDelButton.BorderSpacing.Right := 10;
+  Self.BreakDelButton.BorderSpacing.Bottom := 30;
+
+  Self.BreakPresetButton := TLazButton.CreateEx(lPanel, 'Preset', 'Reset the break list with a preset.');
+  Self.BreakPresetButton.OnClick := @Self.OnBreakPreset;
+  Self.BreakPresetButton.Align := ELazAlign.Bottom;
+  Self.BreakPresetButton.BorderSpacing.Around := 10;
+
+  Self.BreakLogoutSpinner := TLazSpinEdit.CreateEx(lPanel);
+  Self.BreakLogoutSpinner.MinValue  := 0;
+  Self.BreakLogoutSpinner.MaxValue  := 100;
+  Self.BreakLogoutSpinner.Increment := 5;
+  Self.BreakLogoutSpinner.Value := 5;
+  Self.BreakLogoutSpinner.ValueEmpty := False;
+  Self.BreakLogoutSpinner.Align := ELazAlign.Top;
+  Self.BreakLogoutSpinner.BorderSpacing.Left := 10;
+  Self.BreakLogoutSpinner.BorderSpacing.Right := 10;
+  Self.BreakLogoutSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Logout chance (%):', 'Edit the currently selected break logout chance.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.BreakVariationSpinner := TLazSpinEdit.CreateEx(lPanel);
+  Self.BreakVariationSpinner.Value := 33;
+  Self.BreakVariationSpinner.MinValue := 0;
+  Self.BreakVariationSpinner.MaxValue := 100;
+  Self.BreakVariationSpinner.Increment := 5;
+  Self.BreakVariationSpinner.ValueEmpty := False;
+  Self.BreakVariationSpinner.Align := ELazAlign.Top;
+  Self.BreakVariationSpinner.BorderSpacing.Left := 10;
+  Self.BreakVariationSpinner.BorderSpacing.Right := 10;
+  Self.BreakVariationSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Variation (%):', 'Edit the currently selected break interval variation.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.BreakLengthSpinner := TLazFloatSpinEdit.CreateEx(lPanel);
+  Self.BreakLengthSpinner.Text := '5';
+  Self.BreakLengthSpinner.Align := ELazAlign.Top;
+  Self.BreakLengthSpinner.BorderSpacing.Left := 10;
+  Self.BreakLengthSpinner.BorderSpacing.Right := 10;
+  Self.BreakLengthSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Length (mins):', 'Edit the currently selected break length in minutes.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.BreakIntervalSpinner := TLazFloatSpinEdit.CreateEx(lPanel);
+  Self.BreakIntervalSpinner.Text := '10';
+  Self.BreakIntervalSpinner.Align := ELazAlign.Top;
+  Self.BreakIntervalSpinner.BorderSpacing.Left := 10;
+  Self.BreakIntervalSpinner.BorderSpacing.Right := 10;
+  Self.BreakIntervalSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Interval (mins):', 'Edit the currently selected break interval in minutes.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+end;
+
+procedure TAntibanFormHelper.SetupSleepsPanel(parent: TLazComponent);
+var
+  lbl: TLazLabel;
+begin
+  Self.SleepCheckbox := TLazCheckBox.CreateEx(parent, 'Enable Sleeps', 'Enable/Disable antiban sleeps.');
+  Self.SleepCheckbox.State := ELazCheckBoxState.Checked;
+  Self.SleepCheckbox.OnChange := @Self.OnCheckboxToggle;
+  Self.SleepCheckbox.Align := ELazAlign.Top;
+  Self.SleepCheckbox.BorderSpacing.Around := 10;
+
+  lbl := TLazLabel.CreateEx(parent, 'Sleep Time:', 'Pick an aproximated day time for your sleeps.');
+  lbl.AnchorVertically(Self.SleepCheckbox, 60);
+
+  Self.SleepTimeEdit := TLazTimeEdit.CreateEx(parent, '', 'Pick an aproximated day time for your sleeps.', 0, 0, 120);
+  Self.SleepTimeEdit.DirectInput := False;
+  Self.SleepTimeEdit.TimeFormat := 'hh:mm:ss';
+  Self.SleepTimeEdit.OnChange := @Self.OnSleepChange;
+  Self.SleepTimeEdit.AnchorVertically(lbl);
+
+  Self.SleepLengthSpinner := TLazFloatSpinEdit.CreateEx(parent, 'Sleep Length (hours):', 'Pick an aproximated length of sleep.', 0, 0, 120);
+  Self.SleepLengthSpinner.OnChange := @Self.OnSleepChange;
+  Self.SleepLengthSpinner.AnchorHorizontally(Self.SleepTimeEdit, 60);
+
+  Self.SleepVariationSpinner := TLazSpinEdit.CreateEx(parent, 'Variation (%):', 'Edit the sleep variation.', 0, 0, 120);
+  Self.SleepVariationSpinner.Value := 10;
+  Self.SleepVariationSpinner.MinValue := 0;
+  Self.SleepVariationSpinner.MaxValue := 30;
+  Self.SleepVariationSpinner.Increment := 3;
+  Self.SleepVariationSpinner.ValueEmpty := False;
+  Self.SleepVariationSpinner.OnChange := @Self.OnSleepChange;
+  Self.SleepVariationSpinner.AnchorHorizontally(Self.SleepLengthSpinner, 60);
+
+  Self.SleepLogoutSpinner := TLazSpinEdit.CreateEx(parent, 'Logout chance (%):', 'Edit the sleep logout chance.', 0, 0, 120);
+  Self.SleepLogoutSpinner.Value := 65;
+  Self.SleepLogoutSpinner.MinValue := 0;
+  Self.SleepLogoutSpinner.MaxValue := 100;
+  Self.SleepLogoutSpinner.Increment := 5;
+  Self.SleepLogoutSpinner.ValueEmpty := False;
+  Self.SleepLogoutSpinner.OnChange := @Self.OnSleepChange;
+  Self.SleepLogoutSpinner.AnchorHorizontally(Self.SleepVariationSpinner, 60);
+
+  Self.SleepPresetButton := TLazButton.CreateEx(parent, 'Preset', 'Reset the task list with a preset.', 0, 0, 100);
+  Self.SleepPresetButton.AnchorVertically(Self.SleepTimeEdit, 60);
+  Self.SleepPresetButton.OnClick := @Self.OnSleepPreset;
+end;
+
+procedure TAntibanFormHelper.SetupWalkPanel(parent: TLazComponent);
+var
+  lPanel, rPanel: TLazPanel;
+  lbl: TLazLabel;
+  i: Integer;
+begin
+  Self.WalkAdjustmentsCheckbox := TLazCheckBox.CreateEx(parent, 'Enable Walking Camera Adjustments', 'Enable/Disable antiban walking camera adjustments.');
+  Self.WalkAdjustmentsCheckbox.State := ELazCheckBoxState.Checked;
+  Self.WalkAdjustmentsCheckbox.OnChange := @Self.OnAdjustementsCheckboxToggle;
+  Self.WalkAdjustmentsCheckbox.Align := ELazAlign.Top;
+  Self.WalkAdjustmentsCheckbox.BorderSpacing.Around := 10;
+
+  Self.WalkCheckbox := TLazCheckBox.CreateEx(parent, 'Enable Walking Tasks', 'Enable/Disable antiban walking tasks.');
+  Self.WalkCheckbox.State := ELazCheckBoxState.Checked;
+  Self.WalkCheckbox.OnChange := @Self.OnCheckboxToggle;
+  Self.WalkCheckbox.Align := ELazAlign.Top;
+  Self.WalkCheckbox.BorderSpacing.Around := 10;
+
+  lPanel := TLazPanel.CreateEx(parent);
+  lPanel.Width := 220;
+  lPanel.Align := ELazAlign.Left;
+  lPanel.BorderSpacing.Around := 10;
+  lPanel.BevelWidth := 0;
+
+  rPanel := TLazPanel.CreateEx(parent);
+  rPanel.Align := ELazAlign.Client;
+  rPanel.BorderSpacing.Around := 10;
+  rPanel.BevelWidth := 0;
+
+  lbl := TLazLabel.CreateEx(
+    rPanel,
+    Self.GetTaskListString('Task', 'Interval', 'Variation'),
+    'List of currently active antiban walking tasks.'
+  );
+  lbl.Font.Name := 'Courier New';
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 13;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.WalkList := TLazListBox.CreateEx(rPanel);
+  Self.WalkList.Font.Name := 'Courier New';
+  Self.WalkList.OnSelectionChange := @Self.OnWalkSelected;
+  Self.WalkList.OnKeyDown := @Self.OnListKeyDown;
+  Self.WalkList.Align := ELazAlign.Client;
+  Self.WalkList.BorderSpacing.Left := 10;
+  Self.WalkList.BorderSpacing.Right := 10;
+  Self.WalkList.BorderSpacing.Bottom := 10;
+
+  Self.WalkAddButton := TLazButton.CreateEx(lPanel, 'Add', 'Add a new walking task.');
+  Self.WalkAddButton.OnClick := @Self.OnWalkAdd;
+  Self.WalkAddButton.Align := ELazAlign.Bottom;
+  Self.WalkAddButton.BorderSpacing.Top := 10;
+  Self.WalkAddButton.BorderSpacing.Left := 10;
+  Self.WalkAddButton.BorderSpacing.Right := 10;
+  Self.WalkAddButton.BorderSpacing.Bottom := 5;
+
+  Self.WalkEditButton := TLazButton.CreateEx(lPanel, 'Update', 'Update the current walking task.');
+  Self.WalkEditButton.Enabled := False;
+  Self.WalkEditButton.OnClick := @Self.OnWalkEdit;
+  Self.WalkEditButton.Align := ELazAlign.Bottom;
+  Self.WalkEditButton.BorderSpacing.Top := 5;
+  Self.WalkEditButton.BorderSpacing.Left := 10;
+  Self.WalkEditButton.BorderSpacing.Right := 10;
+  Self.WalkEditButton.BorderSpacing.Bottom := 5;
+
+  Self.WalkDelButton := TLazButton.CreateEx(lPanel, 'Remove', 'Remove the current walking task.');
+  Self.WalkDelButton.Enabled := False;
+  Self.WalkDelButton.OnClick := @Self.OnWalkRemove;
+  Self.WalkDelButton.Align := ELazAlign.Bottom;
+  Self.WalkDelButton.BorderSpacing.Top := 5;
+  Self.WalkDelButton.BorderSpacing.Left := 10;
+  Self.WalkDelButton.BorderSpacing.Right := 10;
+  Self.WalkDelButton.BorderSpacing.Bottom := 30;
+
+  Self.WalkPresetButton := TLazButton.CreateEx(lPanel, 'Preset', 'Reset the walking task list with a preset.');
+  Self.WalkPresetButton.OnClick := @Self.OnWalkPreset;
+  Self.WalkPresetButton.Align := ELazAlign.Bottom;
+  Self.WalkPresetButton.BorderSpacing.Around := 10;
+
+
+  Self.WalkVariationSpinner := TLazSpinEdit.CreateEx(lPanel, '', 'Edit the currently selected walk task interval variation.');
+  Self.WalkVariationSpinner.Value := 33;
+  Self.WalkVariationSpinner.MinValue := 0;
+  Self.WalkVariationSpinner.MaxValue := 100;
+  Self.WalkVariationSpinner.Increment := 5;
+  Self.WalkVariationSpinner.ValueEmpty := False;
+  Self.WalkVariationSpinner.Align := ELazAlign.Top;
+  Self.WalkVariationSpinner.BorderSpacing.Left := 10;
+  Self.WalkVariationSpinner.BorderSpacing.Right := 10;
+  Self.WalkVariationSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Variation (%):', 'Edit the currently selected walk task interval variation.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.WalkIntervalSpinner := TLazFloatSpinEdit.CreateEx(lPanel, '', 'Edit the currently selected walk task interval.');
+  Self.WalkIntervalSpinner.Text := '5';
+  Self.WalkIntervalSpinner.Align := ELazAlign.Top;
+  Self.WalkIntervalSpinner.BorderSpacing.Left := 10;
+  Self.WalkIntervalSpinner.BorderSpacing.Right := 10;
+  Self.WalkIntervalSpinner.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Interval (mins):', 'Edit the currently selected walk task interval.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+
+  Self.WalkCombobox := TLazComboBox.CreateEx(lPanel, '', 'Edit the currently selected walking task.');
+
+  for i := 0 to High(ANTIBAN_WALKING_TASKS) do
+    Self.WalkCombobox.Items.Add(ANTIBAN_WALKING_TASKS[i].Name);
+
+  Self.WalkCombobox.ItemIndex := 0;
+  Self.WalkCombobox.Align := ELazAlign.Top;
+  Self.WalkCombobox.BorderSpacing.Left := 10;
+  Self.WalkCombobox.BorderSpacing.Right := 10;
+  Self.WalkCombobox.BorderSpacing.Bottom := 10;
+
+  lbl := TLazLabel.CreateEx(lPanel, 'Walking Task:', 'Edit the currently selected walking task.');
+  lbl.Align := ELazAlign.Top;
+  lbl.BorderSpacing.Top := 10;
+  lbl.BorderSpacing.Left := 10;
+  lbl.BorderSpacing.Right := 10;
+end;
+
+
+var
+(*
+## AntibanForm variable
+Global {ref}`TAntibanFormHelper` variable.
+*)
+  AntibanForm: TAntibanFormHelper;
+
+(*
+## ScriptForm.CreateAntibanTab
+```pascal
+function TScriptForm.CreateAntibanTab(): TLazTabSheet;
+```
+Sets up a `TLazTabSheet` on your `TScriptForm` to configure your {ref}`Antiban`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+var
+  form: TScriptForm;
+begin
+  form.Setup();
+  form.CreateAntibanTab();
+  form.Run();
+end.
+```
+```{figure} ../../images/antibanform.gif
+```
+*)
+function TScriptForm.CreateAntibanTab(): TLazTabSheet;
+var
+  tab: TLazTabSheet;
+  lbl: TLazLabel;
+begin
+  Result := Self.CreateTab('Antiban');
+
+  AntibanForm.PageControl := TLazPageControl.CreateEx(Result);
+  AntibanForm.PageControl.Align := ELazAlign.Client;
+  AntibanForm.PageControl.BorderSpacing.Around := 10;
+
+  tab := AntibanForm.PageControl.AddTab();
+  tab.Caption := 'Tasks';
+  AntibanForm.SetupTaskPanel(tab);
+
+  tab := AntibanForm.PageControl.AddTab();
+  tab.Caption := 'Breaks';
+  AntibanForm.SetupBreaksPanel(tab);
+
+  tab := AntibanForm.PageControl.AddTab();
+  tab.Caption := 'Sleep';
+  AntibanForm.SetupSleepsPanel(tab);
+
+  tab := AntibanForm.PageControl.AddTab();
+  tab.Caption := 'Walking';
+  AntibanForm.SetupWalkPanel(tab);
+
+  lbl := TLazLabel.CreateEx(
+           Result,
+           'Everything in antiban will have randomization added/subtracted to the values you pick, roughly 25% + "Variation".' +
+           LINE_SEP +
+           'Each profile has it''s own antiban settings.'
+         );
+  lbl.Align := ELazAlign.Bottom;
+  lbl.Alignment := ELazAlignment.Center;
+  lbl.BorderSpacing.Around := 20;
+
+  AntibanForm.Setup();
+  ProfileForm.ProfileUpdateTasks += @AntibanForm.Setup;
+end;

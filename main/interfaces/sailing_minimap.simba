@@ -1,0 +1,174 @@
+(*
+# Sailing Minimap
+Methods to interact with the minimap interface while sailing:
+```{figure} ../../images/sailing_minimap.png
+```
+*)
+
+{$DEFINE WL_SAILING_MINIMAP_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## EBoat enum
+```pascal
+EBoat = enum(RAFT, SKIFF, SLOOP);
+```
+Enum representing the types of boat the player can own and use.
+*)
+  EBoat = enum(RAFT, SKIFF, SLOOP);
+
+function TMinimap._GetBoat(out black, brown: TPointArray): TPointArray;
+var
+  grown, tpa: TPointArray;
+  atpa: T2DPointArray;
+begin
+  black := Target.FindColor($010000, 0, Minimap.Bounds);
+  if black = [] then
+    Exit;
+
+  brown := Target.FindColor([$364E79, 0.9, EColorSpace.HSL, [1.888, 0.826, 0.288]], Minimap.Bounds);
+  if brown = [] then
+    Exit;
+
+  atpa := brown.Cluster(5);
+
+  brown := [];
+  for tpa in atpa do
+    if tpa.MinAreaRect().Contains(Minimap.Center) then
+    begin
+      brown := tpa;
+      Break;
+    end;
+
+  if brown = [] then
+    Exit;
+
+  grown := brown.Grow(2);
+
+  for tpa in black.Cluster(5) do
+    if tpa.Intersection(grown) <> [] then
+    begin
+      black := tpa;
+      Exit(black+brown);
+    end;
+end;
+
+(*
+## Minimap.GetBoat
+```pascal
+function TMinimap.GetBoat(): TPointArray;
+```
+Returns a `TPointArray` of the player's boat.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  while True do
+    ShowOnTarget(Minimap.GetBoat());
+end.
+```
+```{figure} ../../images/getboat.png
+```
+*)
+function TMinimap.GetBoat(): TPointArray;
+var
+  black, brown: TPointArray;
+begin
+  Result := Self._GetBoat(black, brown);
+end;
+
+(*
+## Minimap.BoatRadians
+```pascal
+property TMinimap.BoatRadians: Single;
+```
+Returns a the boat angle as radians.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Minimap.BoatRadians;
+end.
+```
+*)
+property TMinimap.BoatRadians: Single;
+var
+  boat, black, brown, tpa: TPointArray;
+  tipTPA: TVector2Array;
+  tip, center: TVector2;
+  i: Integer;
+begin
+  boat := Self._GetBoat(black, brown);
+  if boat = [] then
+    Exit;
+
+  tpa := black.Difference(black.PointsNearby(brown, 0, 5)).SortFrom(Minimap.Center);
+  for i := High(tpa) downto 0 do
+  begin
+    tipTPA += tpa[i];
+    if Length(tipTPA) > 3 then
+      Break;
+  end;
+
+  tip := tipTPA.Mean();
+
+  center := boat.MinAreaRect().Mean;
+
+  Result := Modulo(ArcTan2(Minimap.Center.Y-tip.Y, Minimap.Center.X-tip.X) - HALF_PI, TAU);
+end;
+
+(*
+## Minimap.BoatDegrees
+```pascal
+property TMinimap.BoatDegrees: Single;
+```
+Returns a the boat angle as degrees.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Minimap.BoatDegrees;
+end.
+```
+*)
+property TMinimap.BoatDegrees: Single;
+begin
+  Result := RadToDeg(Self.BoatRadians);
+end;
+
+(*
+## Minimap.BoatType
+```pascal
+property TMinimap.BoatType: EBoat;
+```
+Returns a the boat {ref}`EBoat` type.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn Minimap.BoatType;
+end.
+```
+*)
+property TMinimap.BoatType: EBoat;
+var
+  tpa: TPointArray;
+  size: Integer;
+begin
+  tpa := Self.GetBoat();
+  size := tpa.MinAreaRect().Area;
+
+  //todo:
+  if InRange(size, 0, 5) then
+    Exit(EBoat.RAFT);
+  //todo:
+  if InRange(size, 6, 20) then
+    Exit(EBoat.SKIFF);
+  if InRange(size, 800, 1100) then
+    Exit(EBoat.SLOOP);
+end;

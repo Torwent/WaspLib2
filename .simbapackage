@@ -1,0 +1,6 @@
+//https://github.com/Villavu/Simba/blob/simba2000/PACKAGES.md
+path=Includes/WaspLib
+flat=false
+ignore=.git,.gitignore,.gitmodules,.simbapackage,.gitattributes,wasplib-docs
+example=examples
+//script=

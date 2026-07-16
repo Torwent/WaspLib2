@@ -1,0 +1,399 @@
+(*
+# GameTabs
+Methods to interact with the gametab buttons.
+
+```{figure} ../../images/gametabs_compact.png
+```
+```{figure} ../../images/gametabs_flat.png
+```
+
+By default it will attempt to use "F-Keys" to open gametabs.
+You can turn this off by setting `TGameTabs.KeybindsEnabled` to `False`.
+
+The way keybindings work in WaspLib is that it will try a random "F-Key" everytime
+you want to open a gametab. Because it uses a random "F-Key", it will probably
+not open the gametab you want but whatever opens, gets cached and mapped to the
+random "F-Key" used.
+
+Next time you want to open a gametab that has already been mapped, it will use
+the correct "F-Key".
+*)
+{$DEFINE WL_GAMETABS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_KEYBINDS}
+{.$DEFINE WL_DEBUG_KEYBINDS}
+
+type
+(*
+(EGameTab)=
+## EGameTab enum
+```pascal
+EGameTab = enum(
+  COMBAT, STATS, ACHIEVEMENTS, INVENTORY, EQUIPMENT, PRAYER, MAGIC,
+  CLAN, FRIENDS, ACCOUNT, LOGOUT, OPTIONS, EMOTES, MUSIC, NONE
+);
+```
+*)
+  EGameTab = enum(
+    COMBAT, STATS, ACHIEVEMENTS, INVENTORY, EQUIPMENT, PRAYER, MAGIC,
+    CLAN, FRIENDS, ACCOUNT, LOGOUT, OPTIONS, EMOTES, MUSIC, NONE
+  );
+
+(*
+(TGameTabs)=
+## TGameTabs type
+Main record responsible for handling the gametabs.
+*)
+  TGameTabs = record
+    Bounds: TBox;
+    Tabs: TBoxArray;
+    Keybinds: array [EGameTab] of EKeyCode;
+    KeybindsEnabled: Boolean;
+    AvailableKeys: EKeycodeArray;
+    const ActiveColor: TColorTolerance =
+      [$14194A, 1.235, EColorSpace.HSL, [1.631, 1.084, 0.286]
+    ];
+  end;
+
+{$R-}
+(*
+## GameTabs.SetupInterface
+```pascal
+procedure TGameTabs.SetupInterface();
+```
+Internal method responsible for setting up coordinates for the {ref}`TGameTabs`.
+
+This is automatically called for you on the {ref}`GameTabs variable`.
+*)
+procedure TGameTabs.SetupInterface();
+var
+  bounds: TBox;
+  tab: EGameTab;
+begin
+  bounds := Client.Bounds;
+  Self.Bounds.Y2 := bounds.Y2;
+
+  MainScreen.Mask.DrawColor := $FFFFFF;
+
+  case Client.Mode of
+    EMode.FIXED:
+    begin
+      Self.Bounds.X1 := bounds.X2 - 242;
+      Self.Bounds.X2 := bounds.X2 - 2;
+      Self.Bounds.Y1 := bounds.Y2 - 334;
+      Self.Tabs := TBoxArray.Create(
+        Self.Bounds.TopLeft.Offset(6,1), 7, 2, 30, 33, [3, 265]
+      );
+      MainScreen.Mask.DrawBoxFilled(Self.Bounds);
+    end;
+
+    EMode.RESIZABLE:
+    begin
+      Self.Bounds.X1 := bounds.X2 - 240;
+      Self.Bounds.X2 := bounds.X2;
+      Self.Bounds.Y1 := bounds.Y2 - 334;
+      Self.Tabs := TBoxArray.Create(
+        Self.Bounds.TopLeft.Offset(6,1), 7, 2, 30, 33, [3, 265]
+      );
+      MainScreen.Mask.DrawBoxFilled(Self.Bounds);
+    end;
+
+    EMode.MODERN_COMPACT:
+    begin
+      Self.Bounds.X2 := bounds.X2;
+      Self.Bounds.X1 := bounds.X2 - 230;
+      Self.Bounds.Y1 := bounds.Y2 - 71;
+
+      Self.Tabs := TBoxArray.Create(
+        Self.Bounds.BottomLeft.Offset(0,-70), 7, 2, 30, 33, [3, 3]
+      );
+      //Logout button is moved to top right corner
+      Self.Tabs[7] := Self.Tabs[10];
+      Self.Tabs[10].X1 := bounds.X2 - 19;
+      Self.Tabs[10].Y1 := bounds.Y1 + 9;
+      Self.Tabs[10].X2 := bounds.X2 - 10;
+      Self.Tabs[10].Y2 := bounds.Y1 + 18;
+      MainScreen.Mask.DrawBoxFilled(Self.Bounds);
+      MainScreen.Mask.DrawBoxFilled(Self.Tabs[10].Expand(8));
+    end;
+
+    EMode.MODERN_WIDE:
+    begin
+      Self.Bounds.X2 := bounds.X2;
+      Self.Bounds.X1 := bounds.X2 - 428;
+      Self.Bounds.Y1 := bounds.Y2 - 35;
+
+      Self.Tabs := TBoxArray.Create(
+        Self.Bounds.BottomLeft.Offset(0,-35), 14, 1, 30, 33, [3, 0]
+      );
+
+      for tab := EGameTab.MUSIC downto EGameTab.FRIENDS do
+        Self.Tabs[tab] := Self.Tabs[tab-1];
+
+      //Logout button is moved to top right corner
+      Self.Tabs[7] := Self.Tabs[10];
+      Self.Tabs[10].X1 := bounds.X2 - 19;
+      Self.Tabs[10].Y1 := bounds.Y1 + 9;
+      Self.Tabs[10].X2 := bounds.X2 - 10;
+      Self.Tabs[10].Y2 := bounds.Y1 + 18;
+      MainScreen.Mask.DrawBoxFilled(Self.Bounds);
+      MainScreen.Mask.DrawBoxFilled(Self.Tabs[10].Expand(8));
+    end;
+  end;
+end;
+
+(*
+## GameTabs.GetCurrent
+```pascal
+function TGameTabs.GetCurrent(): EGametab;
+```
+Get the currently active EGameTab.
+
+Example:
+```pascal
+ShowOnTarget(GameTabs.Tabs[GameTabs.GetCurrent()]);
+```
+```{figure} ../../images/gametabs_selected.png
+```
+*)
+function TGameTabs.GetCurrent(): EGametab;
+var
+  tab: EGameTab;
+begin
+  if (Client.Mode = EMode.RESIZABLE) and
+     (Target.CountColor($83D4E3, 0, Self.Tabs[EGameTab.LOGOUT-1]) > 0) then
+    Exit(EGameTab.LOGOUT);
+
+  for tab := EGameTab.COMBAT to EGameTab.MUSIC do
+    if (Target.CountColor(Self.ActiveColor, Self.Tabs[tab]) > 50) then
+      Exit(tab);
+  Result := EGameTab.NONE;
+end;
+
+(*
+## GameTabs.IsOpen
+```pascal
+function TGameTabs.IsOpen(tab: EGameTab): Boolean;
+```
+Returns true/false if the specified `tab` is currently open.
+
+Example:
+```pascal
+WriteLn GameTabs.IsOpen(EGameTab.INVENTORY);
+```
+*)
+function TGameTabs.IsOpen(tab: EGameTab): Boolean;
+begin
+  Result := Self.GetCurrent() = tab;
+end;
+
+(*
+## GameTabs.WaitOpen
+```pascal
+function TGameTabs.WaitOpen(
+  tab: EGameTab; time: Integer = TICK; interval: Integer = -1
+): Boolean;
+```
+Returns true/false if the specified `tab` opens within the specified `time`.
+
+Example:
+```pascal
+Mouse.Click(GameTabs.Get(EGameTab.INVENTORY), EMouseButton.LEFT);
+WriteLn GameTabs.WaitOpen(EGameTab.INVENTORY);
+```
+*)
+function TGameTabs.WaitOpen(
+  tab: EGameTab; time: Integer = TICK; interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(tab), interval, time);
+end;
+
+
+(*
+## GameTabs.FKeyOpen
+```pascal
+function TGameTabs.FKeyOpen(tab: EGameTab): Boolean;
+```
+Attempts to open the specified `tab` gametab with an FKey.
+This works by randomly using FKeys that haven't been tried yet and slowly
+caching which gametabs they open. At first most times this is used it won't
+open the `tab` specified, but as more EKeyCode/EGameTab pairs get mapped
+this starts getting them right.
+
+Example:
+```pascal
+WriteLn GameTabs.FKeyOpen(EGameTab.INVENTORY);
+```
+*)
+function TGameTabs.FKeyOpen(tab: EGameTab): Boolean;
+var
+  current, newTab: EGameTab;
+  i: Integer;
+  switched: Boolean;
+begin
+  {$IFDEF WaspLib_KEYBINDS_DEBUG}
+  for current := EGameTab.COMBAT to EGameTab.MUSIC do
+    DebugLn(
+      'GameTabs',
+      'Keybinds -> ' + ToStr(current) + ' -> ' ToStr(Self.Keybinds[current])
+    );
+  {$ENDIF}
+
+  if Self.Keybinds[tab] <> EKeyCode.UNKNOWN then
+  begin
+    Keyboard.KeyPress(Self.Keybinds[tab]);
+    Exit(Self.WaitOpen(tab, 3*TICK));
+  end;
+
+  //all keys are already setup and there's no match
+  if Self.AvailableKeys = [] then
+    Exit;
+  i := Random(0, High(Self.AvailableKeys));
+
+  current := Self.GetCurrent();
+  Keyboard.KeyPress(Self.AvailableKeys[i]);
+
+  switched := SleepUntil(
+    current <> (newTab := Self.GetCurrent()), RandomMode(100, 50, 1500), TICK
+  );
+
+  if switched then //if tab switched we are sure of this key-gametab pair
+  begin
+   Self.Keybinds[newTab] := Self.AvailableKeys[i];
+   Delete(Self.AvailableKeys, i, 1);
+
+   {$IFDEF WL_DEBUG_KEYBINDS}
+   DebugLn(
+    'GameTabs',
+    'New keybind found: ' + ToStr(newTab) + ' = ' + ToStr(Self.Keybinds[newTab])
+   );
+   {$ENDIF}
+  end
+  else if Self.Keybinds[newTab] <> EKeyCode.UNKNOWN then
+    Delete(Self.AvailableKeys, i, 1); //This key has no pair
+
+  Result := newTab = Tab;
+end;
+
+
+(*
+## GameTabs.Open
+```pascal
+function TGameTabs.Open(tab: EGameTab; fkeyProbability: Single = -1): Boolean;
+```
+Attempts to open the specified `tab` gametab.
+If `TGameTabs.KeybindsEnabled` is true, we might attempt to open the tab
+with {ref}`GameTabs.FKeyOpen`, subject to `fkeyProbability`.
+
+Example:
+```pascal
+WriteLn GameTabs.Open(EGameTab.INVENTORY);
+```
+*)
+function TGameTabs.Open(tab: EGameTab; fkeyProbability: Single = -1): Boolean;
+begin
+  if Self.IsOpen(tab) then
+    Exit(True);
+  if Self.KeybindsEnabled then
+  begin
+    if fkeyProbability = -1 then fkeyProbability := Biometrics.RandomDouble(0.8);
+
+    if RandomBoolean(fkeyProbability) and Self.FKeyOpen(tab) then
+      Exit(True);
+  end;
+
+  for 1 to 3 do
+  begin
+    Mouse.Click(Self.Tabs[tab], EMouseButton.LEFT);
+    if Self.WaitOpen(tab, 3*TICK) then Exit(True);
+  end;
+end;
+{$R+}
+
+var
+(*
+## GameTabs variable
+Global {ref}`TGameTabs` variable.
+*)
+  GameTabs: TGameTabs;
+
+(*
+# GameTab
+Gametabs interfaces core.
+Whenever you want to use gametab coordinates that are not unique to a specific
+tab you should use this.
+
+Check {ref}`TInterface` to see what coordinates it has available.
+*)
+type
+(*
+(TGameTab)=
+## TGameTab type
+The TGameTab type that holds the core coordinates of a gametab.
+*)
+  TGameTab = type TInterface;
+
+(*
+## GameTab.SetupInterface
+```pascal
+procedure TGameTab.SetupInterface();
+```
+Internal method used to setup the {ref}`TGameTab` coordinates.
+
+This is automatically called for you on the {ref}`GameTab variable`.
+*)
+procedure TGameTab.SetupInterface();
+begin
+  case Client.Mode of
+    EMode.FIXED:
+      with Client.Bounds do
+      begin
+        Self.Bounds.X1 := X2 - 214;
+        Self.Bounds.X2 := X2 - 31;
+        Self.Bounds.Y1 := Y2 - 298;
+        Self.Bounds.Y2 := Y2 - 37;
+      end;
+
+    EMode.RESIZABLE:
+      with Client.Bounds do
+      begin
+        Self.Bounds.X1 := X2 - 212;
+        Self.Bounds.X2 := X2 - 29;
+        Self.Bounds.Y1 := Y2 - 298;
+        Self.Bounds.Y2 := Y2 - 37;
+      end;
+
+    EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      with Client.Bounds do
+      begin
+        Self.Bounds.X1 := X2 - 193;
+        Self.Bounds.X2 := X2 - 10;
+        Self.Bounds.Y1 := GameTabs.Bounds.Y1 - 269;
+        Self.Bounds.Y2 := GameTabs.Bounds.Y1 - 7;
+
+        MainScreen.Mask.DrawColor := $00FFFF;
+        MainScreen.Mask.DrawBoxFilled(Self.Bounds.Expand(10, 6));
+      end;
+  end;
+
+  Self.Width  := Self.Bounds.Width;
+  Self.Height := Self.Bounds.Height;
+  Self.Center := Self.Bounds.Center;
+
+  Self.TopLeft     := Self.Bounds.TopLeft;
+  Self.TopRight    := Self.Bounds.TopRight;
+  Self.BottomRight := Self.Bounds.BottomRight;
+  Self.BottomLeft  := Self.Bounds.BottomLeft;
+
+  Self.Quad := [Self.TopLeft, Self.TopRight, Self.BottomRight, Self.BottomLeft];
+end;
+
+var
+(*
+## GameTab variable
+Global {ref}`TGameTab` variable.
+*)
+  GameTab: TGameTab;

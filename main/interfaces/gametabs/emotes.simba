@@ -1,0 +1,176 @@
+(*
+# Emotes
+Methods to interact with the emotes gametab.
+```{figure} ../../images/emotes.png
+```
+*)
+{$DEFINE WL_EMOTES_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TEmotes
+Main record responsible with handling the emotes gametab.
+*)
+  TEmotes = record
+    Scroll: TScrollBar;
+    Slots: TBoxArray;
+  end;
+
+(*
+## EEmote
+```pascal
+EEmote = enum(YES, NO, BOW, ANGRY, ..., FORTIS_SALUTE, SIT_DOWN, CRAB_DANCE);
+```
+Enum representing all the available emotes in the game.
+*)
+  EEmote = enum(
+    YES, NO, BOW, ANGRY,
+    THINK, WAVE, SHRUG, CHEER,
+    BECKON, LAUGH, JUMP_FOR_JOY, YAWN,
+    DANCE, JIG, SPIN, HEADBANG,
+    CRY, BLOW_KISS, PANIC, RASPBERRY,
+    CLAP, SALUTE, GOBLIN_BOW, GOBLIN_SALUTE,
+    GLASS_BOX, CLIMB_ROPE, LEAN, GLASS_WALL,
+    IDEA, STAMP, FLAP, SLAP_HEAD,
+    ZOMBIE_WALK, ZOMBIE_DANCE, SCARED, RABBIT_HOP,
+    SIT_UP, PUSH_UP, STAR_JUMP, JOG,
+    FLEX, ZOMBIE_HAND, HYPERMOBILE_DRINKER, SKILL_CAPE,
+    AIR_GUITAR, URI_TRANSFORM, SMOOTH_DANCE, CRAZY_DANCE,
+    PREMIER_SHIELD, EXPLORE, RELIC_UNLOCK, PARTY,
+    TRICK, FORTIS_SALUTE, SIT_DOWN, CRAB_DANCE
+  );
+
+procedure TEmotes.SetupGameTab();
+var
+  i: Integer;
+begin
+  with GameTab.Bounds do
+  begin
+    Self.Scroll.Area.X1 := X1;
+    Self.Scroll.Area.Y1 := Y1 + 1;
+    Self.Scroll.Area.X2 := X2-14;
+    Self.Scroll.Area.Y2 := Y2;
+  end;
+
+  Self.Slots := TBoxArray.Create(GameTab.TopLeft.Offset(0, 5), 4, 14, 40, 47, [1,2]);
+  for i := 0 to High(Self.Slots) do
+    Self.Slots[i] := Self.Slots[i].Expand(-5); //shrink boxes because calculating scrolling is not linear.
+
+  Self.Scroll.Setup();
+end;
+
+(*
+## Emotes.IsOpen
+```pascal
+function TEmotes.IsOpen(): Boolean;
+```
+Returns true if the Emotes tab is open.
+
+Example:
+```pascal
+WriteLn Emotes.IsOpen();
+```
+*)
+function TEmotes.IsOpen(): Boolean;
+begin
+  Result := GameTabs.IsOpen(EGameTab.EMOTES);
+end;
+
+(*
+## Emotes.Open
+```pascal
+function TEmotes.Open(): Boolean;
+```
+Attempts to open the emotes tab.
+
+Example:
+```pascal
+Emotes.Open();
+```
+*)
+function TEmotes.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.EMOTES);
+end;
+
+(*
+## Emotes.UseEmote
+```pascal
+function TEmotes.UseEmote(emote: EEmote): Boolean;
+```
+Attempts to use the specified emote. Returns true if we succeed.
+
+Example:
+```pascal
+WriteLn Emotes.UseEmote(EEmote.DANCE);
+```
+*)
+function TEmotes.UseEmote(emote: EEmote): Boolean;
+const
+  EMOTE_NAMES: TStringArray =[
+    'Yes','No','Bow','Angry',
+    'Think','Wave','Shrug','Cheer',
+    'Beckon','Laugh','Jump for Joy','Yawn',
+    'Dance','Jig','Spin','Headbang',
+    'Cry','Blow Kiss','Panic','Raspberry',
+    'Clap','Salute','Goblin Bow','Goblin Salute',
+    'Glass Box','Climb Rope','Lean','Glass Wall',
+    'Idea','Stamp','Flap','Slap Head',
+    'Zombie Walk','Zombie Dance','Scared','Rabbit Hop',
+    'Sit up','Push up','Star jump','Jog',
+    'Flex','Zombie Hand','Hypermobile Drinker','Skill Cape',
+    'Air Guitar','Uri transform','Smooth dance','Crazy dance',
+    'Premier Shield','Explore','Relic unlock','Party',
+    'Trick','Fortis Salute','Sit down','Crab dance'
+  ];
+var
+  scrollLevel: Integer;
+  box: TBox;
+  upText: String;
+  attempts: Integer;
+begin
+  Result := False;
+  if not Self.Open() then Exit;
+
+  upText := EMOTE_NAMES[emote];
+  if upText = '' then Exit;
+
+  scrollLevel := Round((Ord(emote) div 4) / 13.0 * 100);
+  if scrollLevel > 100 then scrollLevel := 100;
+
+  attempts := 0;
+  while (attempts < 5) and (not Result) do
+  begin
+    Self.Scroll.SetLevel(scrollLevel);
+    Biometrics.Sleep(40, 60);
+
+    box := Self.Slots[emote].Offset([0, -Round(Self.Scroll.GetLevel() * 4.3)]);
+
+    if Self.Scroll.Area.Contains([box.X1, box.Y1]) or
+       Self.Scroll.Area.Contains([box.X2, box.Y2]) then
+    begin
+      box.Clip(Self.Scroll.Area);
+      if Target.HasColor($27383F, 0, 1, box) then
+        Exit;
+
+      Mouse.Move(box, True);
+      if MainScreen.IsUpText(upText) then
+      begin
+        Mouse.Click(box, EMouseButton.LEFT);
+        Result := True;
+        Break;
+      end;
+    end;
+
+    Inc(attempts);
+    Biometrics.Sleep(120, 180);
+  end;
+end;
+
+var
+(*
+## Emotes variable
+Global {ref}`TEmotes` variable.
+*)
+  Emotes: TEmotes;

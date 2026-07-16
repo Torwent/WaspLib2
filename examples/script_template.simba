@@ -1,0 +1,174 @@
+//!PACKAGE EXAMPLE
+{$I WaspLib/main.simba}
+
+type
+  ETemplateState = enum(
+    LOGIN,
+    LEVEL_UP,
+    WAIT_STATE,
+
+    NO_ACTIVITY, MAX_ACTIONS, MAX_TIME, MAX_LEVEL, END_SCRIPT
+  );
+
+  TTemplate = record
+    Actions, MaxTime, MaxActions: UInt64;
+    LevelGoals, FormSetting: Boolean;
+  end;
+
+function TTemplate.GetReportValues(): TStringArray;
+var
+  actionsStr, sleepInfo: String;
+  xp: UInt64;
+begin
+  actionsStr := ToStr(Self.Actions);
+  if Self.MaxActions <> 0 then
+    actionsStr += '/' + ToStr(Self.MaxActions);
+
+  if Antiban.Sleeps = [] then
+    sleepInfo := 'No sleep'
+  else
+    sleepInfo := Antiban.TimeUntilSleep(Antiban.Sleeps.First, TIME_SHORT);
+
+  xp := XPBar.TotalEarnedXP(False);
+  Result := [
+    GetTimeStamp(TIME_SHORT),
+    Logger.TimeRunning.ElapsedFmt(TIME_SHORT),
+    Antiban.TimeRunning.ElapsedFmt(TIME_SHORT),
+    sleepInfo,
+    actionsStr,
+    FormatNumber(Self.Actions / Logger.TimeRunning.Elapsed * HOUR),
+    FormatNumber(xp),
+    FormatNumber(xp / Logger.TimeRunning.Elapsed * HOUR),
+    ToStr(Stats.GetLevel(ESkill.TOTAL))
+  ];
+end;
+
+procedure TTemplate.Init();
+begin
+  Logger.Setup('Template');
+  ProgressReport.Setup(
+    'Template',
+    [
+      'Script runtime:', 'Botting runtime:', 'Antiban runtime:', 'Next sleep:',
+      'Actions:', 'Actions/H:', 'Total XP:', 'XP/H:', 'Total level:'
+    ],
+    @Self.GetReportValues
+  );
+
+  if not Client.IsLoggedIn() then
+    Login.DoLogin();
+
+  StartListeners(300);
+
+  Map.Setup([EChunk.VARROCK]);
+
+  Antiban.Zoom.Min := 0;
+  Antiban.Zoom.Max := 50;
+  Antiban.Skills := [ESkill.TOTAL];
+
+  CollectionBox.Setup();
+end;
+
+function TTemplate.GetState(): ETemplateState;
+begin
+  if Activity.IsFinished then
+    Exit(ETemplateState.NO_ACTIVITY);
+
+  if (Self.MaxActions > 0) and (Self.Actions >= Self.MaxActions) then
+    Exit(ETemplateState.MAX_ACTIONS);
+
+  if (Self.MaxTime > 0) and (Logger.TimeRunning.Elapsed >= Self.MaxTime) then
+    Exit(ETemplateState.MAX_TIME);
+
+  if Self.LevelGoals and Stats.AnyGoalsCompleted() then
+    Exit(ETemplateState.MAX_LEVEL);
+
+  if not Client.IsLoggedIn() then
+    Exit(ETemplateState.LOGIN);
+
+  if Chat.LeveledUp() then
+    Exit(ETemplateState.LEVEL_UP);
+
+  Result := ETemplateState.WAIT_STATE;
+end;
+
+procedure TTemplate.Run();
+var
+  state: ETemplateState;
+begin
+  Self.Init();
+
+  repeat
+    state := Self.GetState();
+    Logger.Info(ToStr(state));
+    ProgressReport.Print();
+    WaspClient.SubmitStats();
+
+    case state of
+      ETemplateState.LOGIN: Login.DoLogin();
+      ETemplateState.LEVEL_UP: Chat.HandleLevelUp();
+      ETemplateState.WAIT_STATE: Sleep(2000, 4000);
+
+      ETemplateState.NO_ACTIVITY, ETemplateState.MAX_ACTIONS,
+      ETemplateState.MAX_TIME, ETemplateState.MAX_LEVEL,
+      ETemplateState.END_SCRIPT: Break;
+    end;
+
+    Antiban.DoAntiban();
+  until False;
+
+  Logger.Info('Thank you for using ' + Logger.Name);
+end;
+
+var
+  Template: TTemplate;
+  TemplateForm: TScriptForm;
+  TemplateConfig: TConfigJSON;
+  FormCheckbox: TLazCheckBox;
+
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+begin
+  inherited();
+
+  Template.FormSetting := FormCheckbox.Checked;
+  if TemplateConfig.Data.Assert('form_setting', EJSONType.BOOL) then
+    TemplateConfig.Data.Item['form_setting'].AsBool := Template.FormSetting
+  else
+    TemplateConfig.Data.AddBool('form_setting', Template.FormSetting);
+
+  TemplateConfig.Save();
+end;
+
+procedure TScriptForm.Init();
+var
+  tab: TLazTabSheet;
+  panel: TLazPanel;
+begin
+  TemplateConfig.Setup('scripts' + PATH_SEP + 'my-script-name');
+
+  Self.Setup('My Script Name', TemplateConfig.Data);
+
+  tab := Self.CreateTab('My Script Name');
+  GoalsForm.Actions := @Template.MaxActions;
+  GoalsForm.Time := @Template.MaxTime;
+  GoalsForm.Stats := @Template.LevelGoals;
+  panel := GoalsForm.Create(tab, True, True, True, EOrientation.HORIZONTAL);
+  panel.Align := ELazAlign.Bottom;
+
+  FormCheckbox := TLazCheckBox.CreateEx(tab, 'My Setting', 'My setting does cool stuff', 20, 220);
+  if TemplateConfig.Data.Assert('form_setting', EJSONType.BOOL) then
+    FormCheckbox.Checked := TemplateConfig.Data.Item['form_setting'].AsBool
+  else
+    FormCheckbox.Checked := True;
+
+  Self.CreateAntibanTab();
+  Self.CreateMiscTab();
+  Self.Run();
+end;
+
+begin
+  TemplateForm.Init();
+
+  WriteLn 'HELLO';
+  Template.Run();
+end.

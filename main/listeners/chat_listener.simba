@@ -1,0 +1,311 @@
+(*
+# Chat Listener
+The {ref}`Chat Listener` is a tool that allows you to listen for chat messages
+and run `OnMessage` callbacks which should be thread safe.
+
+You can debug incoming messages by adding this compiler directive before you
+include WaspLib:
+```pascal
+{$DEFINE WL_DEBUG_CHAT_LISTENER}
+```
+
+For more information on listeners and how to run them check {ref}`Listeners`.
+*)
+{$DEFINE WL_CHAT_LISTENER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_CHAT_LISTENER}
+{.$DEFINE WL_DEBUG_CHAT_LISTENER}
+
+type
+(*
+(TChatMessage)=
+## TChatMessage type
+Type representing a chat message.
+*)
+  TChatMessage = record
+    Ironman: EIron;
+    Username, Text: String;
+  end;
+
+  TChatMessageArray = array of TChatMessage;
+
+function TChatMessage.Equals(
+  const other: TChatMessage; similarity: Double
+): Boolean;
+begin
+  Result := (Self.Ironman = other.Ironman) and
+            (Self.Username.Similarity(other.Username) > similarity) and
+            (Self.Text.Similarity(other.Text) > similarity);
+end;
+
+function TChatMessageArray.Equals(
+  other: TChatMessageArray; similarity: Double
+): Boolean; overload;
+var
+  i: Integer;
+begin
+  for i := High(Self) downto 0 do
+    if not Self[i].Equals(other[i], similarity) then
+      Exit;
+  Result := True;
+end;
+
+procedure TChatMessageArray.Print();
+var
+  i: Integer;
+begin
+  WriteLn('Priting ', Length(Self), ' messages:');
+  for i := 0 to High(Self) do
+  begin
+    if Self[i].Username = '' then
+    begin
+      WriteLn(Self[i].Text);
+      Continue;
+    end;
+
+    WriteLn(
+      ToStr(Self[i].Ironman).After('EIron.') + ' > ' +
+      Self[i].Username + ': ', Self[i].Text
+    );
+  end;
+end;
+
+type
+  TOnChatMessage = procedure (const msgs: TChatMessageArray) of object;
+
+  TChatListener = record
+    Target: TTarget;
+    Engine: TPixelOCR;
+    MessageLines: TBoxArray;
+    LastMessages: TChatMessageArray;
+    Bounds, NameBox: TBox;
+    OnMessage: array of TOnChatMessage;
+    const STATIC_OFFSET: Integer = 2;
+  end;
+
+procedure TChatListener.Setup(trgt: TTarget);
+var
+  i: Integer;
+  pt: TPoint;
+begin
+  Self.Target := trgt;
+  Self.Bounds := Chat.Bounds;
+
+  pt := [-Self.Bounds.X1, -Self.Bounds.Y1 - Self.STATIC_OFFSET];
+
+  SetLength(Self.LastMessages, Length(Chat.MessageLines));
+  SetLength(Self.MessageLines, Length(Chat.MessageLines));
+
+  for i := 0 to High(Chat.MessageLines) do
+    Self.MessageLines[i] := Chat.MessageLines[i].Offset(pt);
+
+
+  Self.NameBox := Chat.InputLine.Offset(pt);
+  Self.NameBox.X2 := Self.NameBox.X1 + Self.NameBox.Width div 4;
+
+  WriteLn(
+    GetTimeStamp(),
+    ':[ChatListener]: Setup and ready to start listening to new chat messages.'
+  );
+end;
+
+(*
+## ChatListener.GetIronManType
+```pascal
+function TChatListener.GetIronManType(trgt: TTarget) : EIron;
+```
+Very similar to {ref}`Chat.GetIronManType`.
+
+Returns the account ironman type.
+
+Example:
+```pascal
+WriteLn ChatListener.GetIronManType(Target);
+```
+*)
+function TChatListener.GetIronManType(trgt: TTarget; b: TBox): EIron;
+begin
+  b.X2 := b.X1 + 10;
+
+  if trgt.HasColor([$484949, 1.216, EColorSpace.HSL, [0.018, 2.599, 0.385]], 1, b) then
+  begin
+    if trgt.HasColor([$7E3C1A, 0.761, EColorSpace.HSL, [1.396, 1.396, 0.210]], 1, b) then
+      Exit(EIron.GROUP);
+    if trgt.HasColor([$1A1A83, 0.817, EColorSpace.HSL, [1.977, 0.683, 0.342]], 1, b) then
+      Exit(EIron.HARCORE_GROUP);
+    if trgt.HasColor([$5D801A, 1.2, EColorSpace.HSL, [1.345, 1.345, 0.312]], 1, b) then
+      Exit(EIron.UNRANKED_GROUP);
+
+    Exit(EIron.IRONMAN);
+  end;
+
+  if trgt.HasColor([$1B1B57, 0.787, EColorSpace.HSL, [2.371, 0.206, 0.425]], 1, b) then
+    Exit(EIron.HARDCORE);
+
+  if trgt.HasColor([$BFC1C1, 2.268, EColorSpace.HSL, [0.034, 2.779, 0.189]], 1, b) then
+    Exit(EIron.ULTIMATE);
+end;
+
+
+(*
+## ChatListener.GetMessage
+```pascal
+function TChatListener.GetMessage(trgt: TTarget; line: Integer): TChatMessage;
+```
+Very similar to `Chat.GetMessage` when the chat is not transparent in how it
+works.
+
+Gets the message on the last `Chat` `line`.
+
+Example:
+```pascal
+WriteLn ChatListener.GetMessage(Target, 5);
+```
+*)
+function TChatListener.GetMessage(trgt: TTarget; line: Integer): TChatMessage;
+var
+  img: TImage;
+  tpa: TPointArray;
+  b: TBox;
+  iron: EIron;
+  txt: String;
+  i: Integer;
+begin
+  b := Self.MessageLines[line];
+
+  iron := Self.GetIronManType(trgt, b);
+  if iron <> EIron.NONE then
+    b.X1 += 10;
+
+  img := trgt.GetImage(b);
+
+  tpa := trgt.FindColor(
+           [$6593AC, 3.329, EColorSpace.HSL, [2.063, 0.536, 0.402]], b
+         );
+  tpa := tpa.Offset([-b.X1, -b.Y1]);
+
+  img.DrawColor := $0;
+  img.DrawTPA(tpa);
+
+  img.DrawColor := $FFFFFF;
+  img.DrawTPA(tpa.Invert());
+
+  txt := Self.Engine.Recognize(img, Fonts.PLAIN_12).Trim();
+
+  i := txt.IndexOf(':');
+  if i = -1 then
+    Exit([EIron.NONE, '', txt]);
+
+  Result.Ironman := iron;
+  Result.Username := txt.CopyRange(0, i-2).TrimRight();
+  Result.Text := txt.CopyRange(i+1, Length(txt)).TrimLeft().ExtractText();
+end;
+
+(*
+## ChatListener.GetTransparentMessage
+```pascal
+function TChatListener.GetTransparentMessage(trgt: TTarget; line: Integer): TChatMessage;
+```
+Very similar to `Chat.GetMessage` for transparent messages in how it works.
+
+Gets the message on the last `Chat` `line`.
+
+Example:
+```pascal
+WriteLn ChatListener.GetTransparentMessage(Target, 5);
+```
+*)
+function TChatListener.GetTransparentMessage(trgt: TTarget; line: Integer): TChatMessage;
+var
+  img: TImage;
+  tpa: TPointArray;
+  b: TBox;
+  iron: EIron;
+  txt: String;
+  i: Integer;
+begin
+  b := Self.MessageLines[line];
+  iron := Self.GetIronManType(trgt, b);
+  if iron <> EIron.NONE then
+    b.X1 += 10;
+
+  img := trgt.GetImage(b);
+  tpa := img.FindColor($0, 0, [0, Self.STATIC_OFFSET, img.Width, Self.STATIC_OFFSET]);
+  img.DrawColor := $FFFFFF;
+  img.DrawTPA(tpa);
+
+  tpa := img.FindColor($0, 0, [1, 1, img.Width, img.Height]);
+  tpa := tpa.Offset([-1,-1]).ExcludePoints(tpa);
+  img.ReplaceColorBinary(False, img.GetColors(tpa).Unique(), 0);
+
+  txt := Self.Engine.Recognize(img, Fonts.PLAIN_12, [0,0]);
+
+  i := txt.IndexOf(':');
+  if i = -1 then
+    Exit([EIron.NONE, '', txt]);
+
+  Result.Ironman := iron;
+  Result.Username := txt.CopyRange(0, i-2);
+  Result.Text := txt.CopyRange(i+1, Length(txt)).ExtractText();
+end;
+
+
+(*
+## ChatListener.Check
+```pascal
+function TChatListener.Check(): Boolean;
+```
+Returns true if there's been new messages.
+
+Example:
+```pascal
+WriteLn ChatListener.Check();
+```
+*)
+function TChatListener.Check(): Boolean;
+var
+  img: TImage;
+  trgt: TTarget;
+  i: Integer;
+  msgs: TChatMessageArray;
+begin
+  img := Self.Target.GetImage(Self.Bounds);
+
+  trgt := new TTarget();
+  trgt.SetImage(img);
+
+  SetLength(msgs, Length(Self.LastMessages));
+
+  if trgt.HasColor($FFFFFF, 0, 1, Self.NameBox) then
+  begin
+    for i := 0 to High(Self.MessageLines) do
+      msgs[i] := Self.GetTransparentMessage(trgt, i);
+  end
+  else
+  begin
+    for i := 0 to High(Self.MessageLines) do
+      msgs[i] := Self.GetMessage(trgt, i);
+  end;
+
+  if msgs.Equals(Self.LastMessages, 0.85) then
+    Exit;
+
+  Result := True;
+
+  {$IFDEF WL_DEBUG_CHAT_LISTENER}
+  WriteLn GetTimeStamp() + ':[ChatListener]: Got new messages.';
+  {$ENDIF}
+  Self.LastMessages := msgs;
+  for i := 0 to High(Self.OnMessage) do
+    Self.OnMessage[i](msgs);
+end;
+
+var
+(*
+## ChatListener variable
+Global {ref}`TChatListener` variable.
+*)
+{$H-}
+  ChatListener: TChatListener;
+{$H+}

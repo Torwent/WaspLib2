@@ -1,0 +1,442 @@
+(*
+# LLM Client
+Client to interact with LLMs.
+*)
+
+{$DEFINE WL_LLMCLIENT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+(*
+## TLLMClient
+Responsible for connecting to a LLM server.
+This expects an Ollama/OpenAI compatible REST API to talk to.
+*)
+type
+  ELLMService = enum(LOCAL, DEEPSEEK, OPENAI, OLLAMA, GEMINI);
+
+  TLLMClient = record
+    _Service: ELLMService;
+    Client: THTTPClient;
+    Server, Model, SystemMessage, MsgsKey: String;
+
+    Think, Memory: Boolean;
+    Lock: TLock;
+    ModelIndex, MaxCharacters, MaxMessages, MaxAttempts, Port: Integer;
+
+    Payload: TJSONObject;
+
+    Models: array [ELLMService] of TStringArray;
+    IsSetup, Enabled: Boolean;
+
+    const PATH: String = WLEnv.CacheDir + 'chats' + PATH_SEP;
+    const FORMAT_OPTIONS: EJSONFormatOptions = [EJSONFormatOption.SINGLE_LINE_OBJ, EJSONFormatOption.NO_WHITESPACE];
+  end;
+
+property TLLMClient.Service: ELLMService;
+begin
+  Result := Self._Service;
+end;
+
+property TLLMClient.Service(value: ELLMService);
+begin
+  Self._Service := value;
+
+  case value of
+    ELLMService.LOCAL:
+    begin
+      Self.Server := 'http://127.0.0.1:' + ToStr(Self.Port) + '/api/chat/';
+      Self.MsgsKey := 'messages';
+    end;
+
+    ELLMService.DEEPSEEK:
+    begin
+      Self.Server := 'https://api.deepseek.com/chat/completions/';
+      Self.MsgsKey := 'messages';
+    end;
+
+    ELLMService.OPENAI:
+    begin
+      Self.Server := 'https://api.openai.com/v1/chat/completions/';
+      Self.MsgsKey := 'input';
+    end;
+
+    ELLMService.OLLAMA:
+    begin
+      Self.Server := 'https://ollama.com/api/chat/';
+      Self.MsgsKey := 'messages';
+    end;
+
+    ELLMService.GEMINI:
+    begin
+      Self.Server := 'https://generativelanguage.googleapis.com/v1beta/models/';
+      Self.MsgsKey := 'contents';
+    end;
+  end;
+end;
+
+procedure TLLMClient.Setup();
+begin
+  Self.Client := new THTTPClient();
+  Self.Client.RequestHeader['Content-Type'] := 'application/json';
+  Self.IsSetup := True;
+
+  Self.Models[ELLMService.DEEPSEEK] := ['custom', 'granite4.1:3b'];
+  Self.Models[ELLMService.DEEPSEEK] := ['deepseek-v4-flash', 'deepseek-v4-pro'];
+  Self.Models[ELLMService.OPENAI]   := ['gpt-5.5', 'gpt-5.4', 'gpt-5.4-mini'];
+  Self.Models[ELLMService.OLLAMA]   := ['gemma3'];
+  Self.Models[ELLMService.GEMINI]   := ['gemini-3.1-flash-lite-preview', 'gemini-3-flash-preview', 'gemini-3.1-pro-preview'];
+
+  Self.MaxCharacters := 180;
+  Self.MaxMessages := 0;
+  Self.MaxAttempts := 3;
+  Self.Port := 11434;
+
+  Self.Lock := TLock.Create();
+  AddOnTerminate(@Self.Lock.Free);
+
+  Self.Service := Self._Service;
+
+  if not DirCreate(Self.PATH) then
+    raise GetDebugLn('LLMClient', 'Failed to create path: ' + Self.PATH);
+end;
+
+property TLLMClient.LocalhostPort(port: Integer);
+begin
+  if not Self.IsSetup then
+    Exit;
+  Self._Service := ELLMService.LOCAL;
+  Self.Port := port;
+  Self.Server := 'http://127.0.0.1:' + ToStr(port) + '/api/chat/';
+  Self.MsgsKey := 'messages';
+end;
+
+
+property TLLMClient.APIKey: String;
+begin
+  if not Self.IsSetup then
+    Exit;
+  case Self.Service of
+    ELLMService.GEMINI: Result := Self.Client.RequestHeader['x-goog-api-key'];
+    else Result := Self.Client.RequestHeader['Authorization'].After('Bearer ');
+  end;
+end;
+
+property TLLMClient.APIKey(value: String);
+begin
+  if not Self.IsSetup then
+    Exit;
+
+  case Self.Service of
+    ELLMService.GEMINI: Self.Client.RequestHeader['x-goog-api-key'] := value;
+    else Self.Client.RequestHeader['Authorization'] := 'Bearer ' + value;
+  end;
+end;
+
+
+procedure TLLMClient.SetupPayload();
+var
+  thinking, config: TJSONObject;
+begin
+  Self.Payload := new TJSONObject();
+
+  case Self.Service of
+    ELLMService.LOCAL:
+    begin
+      Self.Payload.AddString('model', Self.Model);
+      Self.Payload.AddBool('think', Self.Think);
+      Self.Payload.AddBool('stream', False);
+    end;
+
+    ELLMService.OLLAMA:
+    begin
+      Self.Payload.AddString('model', Self.Models[Self.Service][Self.ModelIndex]);
+      Self.Payload.AddBool('think', Self.Think);
+      Self.Payload.AddBool('stream', False);
+    end;
+
+    ELLMService.DEEPSEEK:
+    begin
+      thinking := new TJSONObject();
+      if Self.Think then
+        thinking.AddString('type', 'enabled')
+      else
+        thinking.AddString('type', 'disabled');
+
+      Self.Payload.AddString('model', Self.Models[Self.Service][Self.ModelIndex]);
+      Self.Payload.AddObject('thinking', thinking);
+      Self.Payload.AddBool('stream', False);
+    end;
+
+    ELLMService.OPENAI:
+    begin
+      thinking := new TJSONObject();
+      if Self.Think then
+        thinking.AddString('effort', 'medium')
+      else
+        thinking.AddString('effort', 'none');
+
+      Self.Payload.AddString('model', Self.Models[Self.Service][Self.ModelIndex]);
+      Self.Payload.AddObject('reasoning', thinking);
+      Self.Payload.AddBool('stream', False);
+    end;
+
+    ELLMService.GEMINI:
+    begin
+      config := new TJSONObject();
+      thinking := new TJSONObject();
+      if Self.Think then
+        thinking.AddString('thinkingLevel', 'minimal')
+      else
+        thinking.AddString('thinkingLevel', 'medium');
+
+      config.AddObject('thinkingConfig', thinking);
+      Self.Payload.AddObject('generationConfig', config);
+    end;
+  end;
+end;
+
+
+
+function TLLMClient.GetGeminiSystemMessages(user: String): TJSONObject;
+var
+  msgs: TJSONArray;
+  msg: TJSONObject;
+begin
+  msgs := new TJSONArray();
+  msg := new TJSONObject();
+  msg.AddString('text', 'Your messages should never exceed ' + ToStr(Self.MaxCharacters) + ', the more concise they are the better.');
+  msgs.AddObject('msg', msg);
+
+  msg := new TJSONObject();
+  msg.AddString('text', Self.SystemMessage);
+  msgs.AddObject('msg', msg);
+
+  msg := new TJSONObject();
+  msg.AddString('text', 'The user you are talking to is "' + user + '", avoid referring to him directly but keep it in mind if you need to.');
+  msgs.AddObject('msg', msg);
+
+  Result := new TJSONObject();
+  Result.AddArray('parts', msgs);
+end;
+
+function TLLMClient.GetSystemMessages(user: String): TJSONArray;
+var
+  msg: TJSONObject;
+begin
+  Result := new TJSONArray();
+  msg := new TJSONObject();
+  msg.AddString('role', 'system');
+  msg.AddString('content', 'Your messages should never exceed ' + ToStr(Self.MaxCharacters) + ', the more concise they are the better.');
+  Result.AddObject('msg', msg);
+
+  msg := new TJSONObject();
+  msg.AddString('role', 'system');
+  msg.AddString('content', Self.SystemMessage);
+  Result.AddObject('msg', msg);
+
+  msg := new TJSONObject();
+  msg.AddString('role', 'system');
+  msg.AddString('content', 'The user you are talking to is "' + user + '", avoid referring to him directly but keep it in mind if you need to.');
+  Result.AddObject('msg', msg);
+end;
+
+
+function TLLMClient.GetGeminiMessage(role, msg: String): TJSONObject;
+var
+  text: TJSONObject;
+  parts: TJSONArray;
+begin
+  text := new TJSONObject();
+  text.AddString('text', msg.Trim());
+
+  parts := new TJSONArray();
+  parts.AddObject('msg', text);
+
+  Result := new TJSONObject();
+  Result.AddString('role', role);
+  Result.AddArray('parts', parts);
+end;
+
+function TLLMClient.GetMessage(role, msg: String): TJSONObject;
+begin
+  Result := new TJSONObject();
+  Result.AddString('role', role);
+  Result.AddString('content', msg.Trim());
+end;
+
+
+function TLLMClient.GetGeminiChat(user: String): TJSONArray;
+var
+  parser: TJSONParser;
+  i: Integer;
+begin
+  Result := new TJSONArray();
+
+  if not Self.Memory then
+    Exit;
+
+  user := LowerCase(user);
+  if not FileExists(Self.PATH + user + '.json') then
+    Exit;
+
+  parser := new TJSONParser();
+  parser.Load(Self.PATH + user + '.json');
+
+  for i := 0 to parser.Count - 1 do
+    Result.AddObject(
+      'msg',
+      Self.GetGeminiMessage(
+        parser.Item[i].Item['role'].AsString.Replace('model', 'assistant'),
+        parser.Item[i].Item['content'].AsString
+      )
+    );
+end;
+
+procedure TLLMClient.AddChat(var arr: TJSONArray; user: String);
+var
+  parser: TJSONParser;
+  i: Integer;
+begin
+  if not Self.Memory then
+    Exit;
+
+  user := LowerCase(user);
+  if not FileExists(Self.PATH + user + '.json') then
+    Exit;
+
+  parser := new TJSONParser();
+  parser.Load(Self.PATH + user + '.json');
+
+  for i := 0 to parser.Count - 1 do
+    arr.AddObject(
+      'msg',
+      Self.GetMessage(
+        parser.Item[i].Item['role'].AsString,
+        parser.Item[i].Item['content'].AsString
+      )
+    );
+end;
+
+
+function TLLMClient.Chat(user, message: String): String;
+var
+  payload, msg, tmp: TJSONObject;
+  msgs, arr: TJSONArray;
+  url, request, response: String;
+  parser: TJSONParser;
+  i: Integer;
+begin
+  if not Self.IsSetup or not Self.Enabled then
+    Exit;
+
+  Self.Lock.Enter();
+
+  try
+    payload := Self.Payload.Clone();
+    user := user.Trim();
+
+    if Self.Service = ELLMService.GEMINI then
+    begin
+      url := Self.Server + Self.Models[Self.Service][Self.ModelIndex] + ':generateContent/';
+      payload.AddObject('system_instruction', Self.GetGeminiSystemMessages(user));
+      msgs := Self.GetGeminiChat(user);
+      msg := Self.GetGeminiMessage('user', message);
+    end
+    else
+    begin
+      url := Self.Server;
+      msgs := Self.GetSystemMessages(user);
+      Self.AddChat(msgs, user);
+      msg := Self.GetMessage('user', message);
+    end;
+
+    msgs.AddObject('message', msg);
+
+    payload.AddArray(Self.MsgsKey, msgs.Clone());
+    request := payload.Format(Self.FORMAT_OPTIONS);
+
+    for i := Self.MaxAttempts downto 0 do
+    begin
+      if i = 0 then Exit;
+
+      response := Self.Client.Post(url, request);
+
+      if not InRange(Self.Client.ResponseStatus.AsInteger, 200, 299) then
+        Continue;
+
+      parser := new TJSONParser();
+      parser.Parse(response);
+
+      if Self.Service = ELLMService.GEMINI then
+      begin
+        if not parser.Has('candidates') then
+          Continue;
+        if parser.Item['candidates'].Count = 0 then
+          Continue;
+
+        if not parser.Item['candidates'].Item[0].Has('content') then
+          Continue;
+        if not parser.Item['candidates'].Item[0].Item['content'].Has('parts') then
+          Continue;
+        if parser.Item['candidates'].Item[0].Item['content'].Item['parts'].Count = 0 then
+          Continue;
+        if not parser.Item['candidates'].Item[0].Item['content'].Item['parts'].Item[0].Has('text') then
+          Continue;
+
+        response := parser.Item['candidates'].Item[0].Item['content'].Item['parts'].Item[0].Item['text'].AsString;
+
+        if Length(response) <= Self.MaxCharacters then
+          Break;
+      end;
+
+      if not parser.Has('message') then
+        Continue;
+      if not parser.Item['message'].Has('content') then
+        Continue;
+
+      response := parser.Item['message'].Item['content'].AsString;
+
+      if Length(response) <= Self.MaxCharacters then
+        Break;
+    end;
+
+    Result := response;
+
+    if not Self.Memory then
+      Exit;
+
+    user := LowerCase(user);
+    arr := new TJSONArray();
+
+    if Self.Service = ELLMService.GEMINI then
+    begin
+      for i := 0 to msgs.Count-1 do
+      begin
+        tmp := Self.GetMessage(
+          msgs.Item[i].Item['role'].AsString.Replace('model', 'assistant'),
+          msgs.Item[i].Item['parts'].Item[0].Item['text'].AsString
+        );
+        arr.AddObject('msg', tmp);
+      end;
+
+      tmp := Self.GetMessage('assistant', Result);
+      arr.AddObject('msg', tmp);
+    end
+    else
+    begin
+      for i := 3 to msgs.Count-1 do
+        arr.AddObject('msg', msgs.Item[i].Clone());
+
+      tmp := Self.GetMessage('assistant', Result);
+      arr.AddObject('msg', tmp);
+    end;
+
+    if not FileWrite(Self.PATH + user + '.json', arr.Format(Self.FORMAT_OPTIONS)) then
+      raise GetDebugLn('LLMClient', 'Failed to delete file: ' + Self.PATH + user + '.json');
+  finally
+    Self.Lock.Leave();
+  end;
+end;
+
+var
+  LLMClient: TLLMClient;

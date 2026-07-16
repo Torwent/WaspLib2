@@ -1,0 +1,16 @@
+{$DEFINE WL_ACCOUNT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  EAccountTab = enum(ACCOUNT, COMMUNITY, LINKS);
+  TAccount = record
+    Tabs: TBoxArray;
+  end;
+
+procedure TAccount.SetupGameTab();
+begin
+  //TODO...
+end;
+
+var
+  Account: TAccount;

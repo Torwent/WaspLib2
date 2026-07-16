@@ -1,0 +1,322 @@
+(*
+# LLM Form
+This page is about the {ref}`LLM Client` dedicated `TLazForm` utilities.
+
+This is meant to be used with {ref}`TScriptForm` with
+{ref}`TScriptForm.CreateLLMTab` and will setup a a `TLazTabSheet` on it
+with several controls to configure the {ref}`LLM Client`:
+```{figure} ../../images/llmform.png
+```
+*)
+{$DEFINE WL_LLM_FORM_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## TLLMFormHelper
+The `TLLMFormHelper` type is, as it's name implies a helper type for the
+`LLM Form`.
+
+It has a lot of methods and callbacks that are hidden by default and won't be
+mentioned on this page because they are internal methods you shouldn't touch.
+
+Do feel free to read the source code though if you so desire.
+*)
+  TLLMFormHelper = record
+    Model: TLazComboBox;
+    PortEdit: TLazSpinEdit;
+    CustomModel: TLazEdit;
+    Config: TConfigJSON;
+  end;
+
+procedure TLLMFormHelper.OnEnabledChange(sender: TLazObject);
+var
+  checkbox: TLazCheckBox;
+  checked: Boolean;
+  parent: TLazWinControl;
+  i: Integer;
+  control: TLazComponent;
+begin
+  checkbox := TLazCheckBox(sender);
+  checked := checkbox.Checked;
+  parent := checkbox.Parent;
+
+  for i := 0 to parent.ComponentCount-1 do
+  begin
+    control := parent.GetComponent(i);
+    if checkbox <> control then
+      TLazControl(control).Enabled := checked;
+  end;
+
+  LLMClient.Enabled := checked;
+
+  if Self.Config.Data.Has('enabled') then
+    Self.Config.Data.Item['enabled'].AsBool := checked
+  else
+    Self.Config.Data.AddBool('enabled', checked);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnServiceChange(sender: TLazObject);
+begin
+  LLMClient.Service := ELLMService(TLazComboBox(sender).ItemIndex);
+
+  Self.PortEdit.Visible := LLMClient.Service = ELLMService.LOCAL;
+
+  if Self.Config.Data.Has('service') then
+    Self.Config.Data.Item['service'].AsInt := Ord(LLMClient.Service)
+  else
+    Self.Config.Data.AddInt('service', Ord(LLMClient.Service));
+
+  Self.Model.Items.BeginUpdate();
+  Self.Model.Items.Clear();
+  if LLMClient.Service = ELLMService.LOCAL then
+    Self.Model.Items.Add('Custom');
+  Self.Model.Items.AddStrings(LLMClient.Models[LLMClient.Service]);
+  Self.Model.Items.EndUpdate();
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnModelChange(sender: TLazObject);
+var
+  combobox: TLazComboBox;
+begin
+  combobox := TLazComboBox(sender);
+
+  if (LLMClient.Service = ELLMService.LOCAL) and (combobox.ItemIndex = 0) then
+  begin
+    Self.CustomModel.Visible := True;
+    LLMClient.Model := Self.CustomModel.Text;
+  end
+  else
+  begin
+    Self.CustomModel.Visible := False;
+    LLMClient.Model := combobox.Text;
+  end;
+
+  if Self.Config.Data.Has('model') then
+    Self.Config.Data.Item['model'].AsInt := combobox.ItemIndex
+  else
+    Self.Config.Data.AddInt('model', combobox.ItemIndex);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnCustomModelChange(sender: TLazObject);
+begin
+  LLMClient.Model := TLazMemo(sender).Text;
+
+  if Self.Config.Data.Has('custom_model') then
+    Self.Config.Data.Item['custom_model'].AsString := LLMClient.Model
+  else
+    Self.Config.Data.AddString('custom_model', LLMClient.Model);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnThinkChange(sender: TLazObject);
+var
+  checked: Boolean;
+begin
+  checked := TLazCheckBox(sender).Checked;
+  LLMClient.Think := checked;
+
+  if Self.Config.Data.Has('think') then
+    Self.Config.Data.Item['think'].AsBool := checked
+  else
+    Self.Config.Data.AddBool('think', checked);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnMemoryChange(sender: TLazObject);
+var
+  checked: Boolean;
+begin
+  checked := TLazCheckBox(sender).Checked;
+  LLMClient.Memory := checked;
+
+  if Self.Config.Data.Has('memory') then
+    Self.Config.Data.Item['memory'].AsBool := checked
+  else
+    Self.Config.Data.AddBool('memory', checked);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnPortEdit(sender: TLazObject);
+begin
+  LLMClient.Port := TLazSpinEdit(sender).Value;
+
+  if Self.Config.Data.Has('port') then
+    Self.Config.Data.Item['port'].AsInt := LLMClient.Port
+  else
+    Self.Config.Data.AddInt('port', LLMClient.Port);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnAPIKeyChange(sender: TLazObject);
+var
+  key: String;
+begin
+  key := TLazMemo(sender).Text;
+  LLMClient.APIKey := key;
+
+  if Self.Config.Data.Has('api_key') then
+    Self.Config.Data.Item['api_key'].AsString := key
+  else
+    Self.Config.Data.AddString('api_key', key);
+
+  Self.Config.Save();
+end;
+
+procedure TLLMFormHelper.OnSystemMsgChange(sender: TLazObject);
+begin
+  LLMClient.SystemMessage := TLazMemo(sender).Text;
+
+  if Self.Config.Data.Has('system_message') then
+    Self.Config.Data.Item['system_message'].AsString := LLMClient.SystemMessage
+  else
+    Self.Config.Data.AddString('system_message', LLMClient.SystemMessage);
+
+  Self.Config.Save();
+end;
+
+
+procedure TLLMFormHelper.Setup(parent: TLazWinControl);
+var
+  enabled, think, memory: TLazCheckBox;
+  info: TLazLabel;
+  service: TLazComboBox;
+  api: TLazEdit;
+  memo: TLazMemo;
+begin
+  LLMClient.Setup();
+  Self.Config.Setup('llm' + PATH_SEP + ToStr(ProfileIndex));
+
+  enabled := TLazCheckBox.CreateEx(
+    parent, 'Enabled', 'Whether you want to enable LLM Chat or not.', 20, 20
+  );
+  if not Self.Config.Data.Has('enabled') then
+    Self.Config.Data.AddBool('enabled', True);
+  enabled.Checked := Self.Config.Data.Item['enabled'].AsBool;
+  LLMClient.Enabled := enabled.Checked;
+  enabled.OnChange := @Self.OnEnabledChange;
+
+  info := TLazLabel.CreateEx(
+    parent, '', '',
+    Round(parent.Width * 0.05), enabled.Bottom + 20,
+    Round(parent.Width * 0.9), 100
+  );
+
+  info.Caption :=
+    'LLM Chat allows your scripts to chat with users powered by an LLM.' +
+    LINE_SEP + LINE_SEP +
+    'It''s important to understand how unreliable LLMs can be before you use this'
+    + LINE_SEP +
+    'as the LLM responses may not match your expectations.' + LINE_SEP +
+    LINE_SEP +
+    'By using this, aknowledge the potential issues risks.';
+
+  info.Alignment := ELazAlignment.Center;
+  info.Font.Name := 'Courier New';
+  info.OptimalFill := True;
+
+  service := TLazComboBox.CreateEx(
+    parent, 'Service:', 'LLM Service to use.', enabled.Left, info.Bottom + 40
+  );
+  service.Items.AddStrings(['Local', 'DeepSeek', 'OpenAI', 'Ollama', 'Gemini']);
+  if not Self.Config.Data.Has('service') then
+    Self.Config.Data.AddInt('service', 0);
+  service.ItemIndex := Self.Config.Data.Item['service'].AsInt;
+  LLMClient.Service := ELLMService(service.ItemIndex);
+  service.OnChange := @Self.OnServiceChange;
+
+  Self.PortEdit := TLazSpinEdit.CreateEx(
+    parent, 'Port:', 'Change localhost port.',
+    service.Right + 50, service.Top, 70
+  );
+  if not Self.Config.Data.Has('port') then
+    Self.Config.Data.AddInt('port', 11434);
+  Self.PortEdit.Value := Self.Config.Data.Item['port'].AsInt;
+  LLMClient.Port := Self.PortEdit.Value;
+  Self.PortEdit.OnChange := @Self.OnPortEdit;
+
+  api := TLazEdit.CreateEx(
+    parent, 'API Key:', 'Add the API Key if needed.', service.Left,
+    service.Bottom + 30, 220
+  );
+  if not Self.Config.Data.Has('api_key') then
+    Self.Config.Data.AddString('api_key', '');
+  api.Text := Self.Config.Data.Item['api_key'].AsString;
+  LLMClient.APIKey := api.Text;
+  api.OnChange := @Self.OnAPIKeyChange;
+
+  Self.Model := TLazComboBox.CreateEx(
+    parent, 'Model:', 'LLM Model to use.', api.Left, api.Bottom + 40
+  );
+  Self.Model.Items.AddStrings(LLMClient.Models[LLMClient.Service]);
+  if not Self.Config.Data.Has('model') then
+    Self.Config.Data.AddInt('model', 0);
+  Self.Model.ItemIndex := Self.Config.Data.Item['model'].AsInt;
+  LLMClient.Model := Self.Model.Text;
+  Self.Model.OnChange := @Self.OnModelChange;
+
+  Self.CustomModel := TLazEdit.CreateEx(
+    parent, 'Custom model:', 'Change local model.',
+    Self.Model.Right + 20, Self.Model.Top, 100
+  );
+  if not Self.Config.Data.Has('custom_model') then
+    Self.Config.Data.AddString('custom_model', 'granite4.1:3b');
+  Self.CustomModel.Text := Self.Config.Data.Item['custom_model'].AsString;
+  LLMClient.Model := Self.CustomModel.Text;
+  Self.CustomModel.OnChange := @Self.OnCustomModelChange;
+  Self.CustomModel.Visible := (LLMClient.Service = ELLMService.LOCAL) and
+                              (Self.Model.ItemIndex = 0);
+
+  memo := TLazMemo.CreateEx(
+    parent, 'System message:',
+    'System message is a special instruction to give the LLM.',
+    parent.Width-320, service.Top, 300, 80
+  );
+  if not Self.Config.Data.Has('system_message') then
+    Self.Config.Data.AddString(
+      'system_message', 'You are video game player so behave as such. Make sure noone suspects you are a bot.'
+    );
+  memo.Text := Self.Config.Data.Item['system_message'].AsString;
+  LLMClient.SystemMessage := memo.Text;
+  memo.ScrollBars := ELazScrollStyle.Vertical;
+  memo.OnChange := @Self.OnSystemMsgChange;
+
+  think := TLazCheckBox.CreateEx(
+    parent, 'Thinking', 'Whether you want to let the LLM to "think" or not.',
+    memo.Left, memo.Bottom + 20
+  );
+  if not Self.Config.Data.Has('think') then
+    Self.Config.Data.AddBool('think', True);
+  think.Checked := Self.Config.Data.Item['think'].AsBool;
+  LLMClient.Think := think.Checked;
+  think.OnChange := @Self.OnThinkChange;
+
+  memory := TLazCheckBox.CreateEx(
+    parent, 'Remember chats',
+    'Whether you want to let the LLM to remember previous conversations.',
+    think.Right + 20, think.Top
+  );
+  if not Self.Config.Data.Has('memory') then
+    Self.Config.Data.AddBool('memory', True);
+  memory.Checked := Self.Config.Data.Item['memory'].AsBool;
+  LLMClient.Memory := memory.Checked;
+  memory.OnChange := @Self.OnMemoryChange;
+
+  Self.OnServiceChange(service);
+end;
+
+var
+(*
+## LLMForm variable
+Global {ref}`TLLMFormHelper` variable.
+*)
+  LLMForm: TLLMFormHelper;

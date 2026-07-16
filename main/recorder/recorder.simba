@@ -1,0 +1,98 @@
+(*
+# Recorder
+Records video in separate thread for debugging script crashes and issues.
+
+Basic usage:
+```pascal
+SimbaRecorder.Start(30); // Start recording with 30 second buffer
+SimbaRecorder.Start(30, 'MyVideos'); // Custom save directory
+// Videos are automatically saved on script end
+```
+
+You may debug the recorder with the compiler directive:
+```pascal
+{$DEFINE WL_DEBUG_RECORDER}
+```
+Which should be added to your script before {ref}`WaspLib`.
+*)
+
+{$DEFINE WL_RECORDER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+{%anchor WL_DEBUG_RECORDER}
+{.$DEFINE WL_DEBUG_RECORDER}
+
+type
+(*
+## type TSimbaRecorder
+```pascal
+TSimbaRecorder = record
+  Thread: TThread;
+  IsRecording: Boolean;
+  BufferSeconds: Integer;
+  VideoPath: String;
+  RecorderTarget: TTarget;
+end;
+```
+Manages video recording with buffered capture.
+*)
+  TSimbaRecorder = record
+    Enabled, IsRecording: Boolean;
+    BufferSeconds: UInt64;
+  end;
+(*
+## TSimbaRecorder.Start
+```pascal
+procedure TSimbaRecorder.Start(BufferSeconds: Integer = 30; VideoPath: String = 'Videos');
+```
+Starts recording with specified buffer duration and save path.
+*)
+procedure TSimbaRecorder.Start();
+var
+  window, plugin: String;
+  process: TRunningProcess;
+begin
+  if not Self.Enabled or Self.IsRecording then
+    Exit;
+
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL:
+    begin
+      window := ToStr(WaspInput.Window);
+      plugin := 'wasp-input';
+    end;
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+    begin
+      window := ToStr(RemoteInput.Window);
+      plugin := 'remote-input';
+    end;
+  end;
+  {$ENDIF}
+
+  process := StartProcess(
+    GetProcessPath(GetProcessID()),
+    [
+      {$IFDEF WL_DEBUG_RECORDER}'--open', {$ENDIF}
+      '--run',
+      {$MACRO DIR} + 'recorder_subprocess.simba'
+    ],
+    '',
+    [
+      {$IFDEF WL_DEBUG_RECORDER}'debugging=true', {$ENDIF}
+      'script=' + ToStr(GetProcessID()),
+      'target=' + window,
+      'time='   + ToStr(Self.BufferSeconds),
+      'plugin=' + plugin,
+      'path='   + WLEnv.VideosDir
+    ]
+  );
+
+  Self.IsRecording := True;
+  process.Free();
+end;
+
+var
+  SimbaRecorder: TSimbaRecorder;

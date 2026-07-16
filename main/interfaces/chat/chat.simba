@@ -1,0 +1,675 @@
+(*
+# Chat
+The {ref}`Chat` interface is the interface that shows up at the bottom left
+corner of the game client where you can communicate with other players,
+receive game messages and even interact with some options and menus it hosts
+like the {ref}`Make` menu.
+
+```{figure} ../../images/chat_interface.png
+```
+*)
+{$DEFINE WL_CHAT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+(EChatColor)=
+## EChatColor enum
+```pascal
+EChatColor = enum(BLACK, MAROON .. NAVY, GREEN);
+```
+Enum representing each of the available chat text colors.
+*)
+  EChatColor = enum(
+    BLACK, MAROON, BLUE, PURPLE, RED, LIGHT_RED, WHITE, LIGHT_PURPLE, NAVY, GREEN
+  );
+
+  EChatColorArray = array of EChatColor;
+
+(*
+(EIron)=
+## EIron enum
+```pascal
+EIron = enum(
+  NONE, IRONMAN, HARDCORE, ULTIMATE, GROUP, HARCORE_GROUP, UNRANKED_GROUP
+);
+```
+Enum representing each of the available ironman types.
+*)
+  EIron = enum(
+    NONE, IRONMAN, HARDCORE, ULTIMATE, GROUP, HARCORE_GROUP, UNRANKED_GROUP
+  );
+
+(*
+## TChat
+Main record used to interact with the {ref}`Chat` interface.
+*)
+  TChat = record
+    Bounds: TBox;
+    Scroll: TScrollBar;
+    Tabs: TChatTabs;
+    MessageLines: TBoxArray;
+    InputLine: TBox;
+    ReportButton: TButton;
+    Colors: TColorArray;
+  end;
+
+(*
+### Chat.SetupInterface
+```pascal
+procedure TChat.SetupInterface();
+```
+Internal method used to setup the {ref}`TChat` coordinates.
+This is automatically called for you on the {ref}`Chat variable`.
+*)
+procedure TChat.SetupInterface();
+begin
+  Self.Tabs.SetupInterface();
+
+  with Self.Tabs.Bounds do
+  begin
+    Self.ReportButton := new TButton(
+      [X1 + 436, Y1,  X1 + 515, Y2 - 1],
+      [
+        [$000613, 6, EColorSpace.RGB, [1,1,1]],
+        [$526572, 0, EColorSpace.RGB, [1,1,1]],
+        [$0C233C, 0, EColorSpace.RGB, [1,1,1]]
+      ]
+    );
+    Self.Bounds.X1 := X1;
+    Self.Bounds.X2 := X2;
+    Self.Bounds.Y1 := Y1 - 142;
+    Self.Bounds.Y2 := Y1 - 1;
+  end;
+
+  Self.MessageLines := TBoxArray.Create(
+    Self.Bounds.TopLeft + [10, 8], 1, 9, Self.Bounds.Width - 34, 13, [0, 1]
+  );
+
+  Self.InputLine := Self.MessageLines.Pop;
+  Self.InputLine.X2 += 17;
+  Self.InputLine.Y2 += 2;
+
+  Self.Scroll.Area.X1 := Self.Bounds.X1 + 6;
+  Self.Scroll.Area.Y1 := Self.Bounds.Y1 + 6;
+  Self.Scroll.Area.X2 := Self.Bounds.X2 - 23;
+  Self.Scroll.Area.Y2 := Self.InputLine.Y1 - 1;
+
+  Self.Scroll.Setup();
+
+  Self.Colors := [
+    TFonts.BLACK, $7F0000, TFonts.BLUE, $7F007F, $2010EF, TFonts.RED,
+    TFonts.WHITE, $FF9090, TFonts.DARK_BLUE, $005F00
+  ];
+  MainScreen.Mask.DrawColor := $0000FF;
+  MainScreen.Mask.DrawBoxFilled(Self.Bounds);
+end;
+
+(*
+### Chat.Tabs variable
+```pascal
+Tabs: TChatTabs;
+```
+For more information on chat tabs read {ref}`ChatTabs`.
+
+You can access the {ref}`TChat` {ref}`ChatTabs` through the `Tabs variable`:
+```pascal
+ShowOnTarget(Chat.Tabs.Bounds);
+```
+```{figure} ../../images/chattabs_bounds.png
+```
+*)
+
+(*
+#### Chat.GetColors
+```pascal
+function TChat.GetColors(colors: EChatColorArray): TColorArray;
+```
+Convenience method used to conver the human readable `colors` in a
+`EChatColorArray` format into a `TColorArray` which has the colors in BGR
+format.
+
+Example:
+```pascal
+WriteLn Chat.GetColors([EChatColor.RED, EChatColor.WHITE]);
+```
+*)
+function TChat.GetColors(colors: EChatColorArray): TColorArray;
+var
+  c: EChatColor;
+begin
+  {$R-}
+  for c in colors do Result += Self.Colors[c];
+  {$R+}
+end;
+
+
+(*
+### Chat.GetDisplayNameBox
+```pascal
+function TChat.GetDisplayNameBox(out color: Integer): TBox;
+function TChat.GetDisplayNameBox(): TBox; overload;
+```
+Returns the bounds of the display name on the {ref}`Chat` box.
+You can optionally get the display name color back through the `color` variable.
+
+Example:
+```pascal
+ShowOnTarget(Chat.GetDisplayNameBox());
+```
+*)
+function TChat.GetDisplayNameBox(out color: Integer): TBox;
+var
+  b: TBox;
+  tpa: TPointArray;
+begin
+  b.X1 := Self.InputLine.X1;
+  b.Y1 := Self.InputLine.Y1;
+  b.X2 := b.X1 + Self.InputLine.Width div 4;
+  b.Y2 := Self.InputLine.Y2;
+
+  for color in [TFonts.WHITE, TFonts.BLACK] do
+  begin
+    tpa := Target.FindColor(color, 0, b);
+    if tpa <> [] then Exit(tpa.Bounds());
+  end;
+end;
+
+function TChat.GetDisplayNameBox(): TBox; overload;
+var
+  color: Integer;
+begin
+  Result := Self.GetDisplayNameBox(color);
+end;
+
+(*
+### Chat.GetDisplayName
+```pascal
+function TChat.GetDisplayName(): String;
+```
+Returns the account display name on the {ref}`Chat` box as a string.
+
+Example:
+```pascal
+WriteLn Chat.GetDisplayName();
+```
+*)
+function TChat.GetDisplayName(): String;
+var
+  b: TBox;
+begin
+  b.X1 := Self.InputLine.X1;
+  b.Y1 := Self.InputLine.Y1;
+  b.X2 := b.X1 + Self.InputLine.Width div 4;
+  b.Y2 := Self.InputLine.Y2;
+
+  Result := OCR.RecognizeStatic(b, Fonts.PLAIN_12, [$FFFFFF, $000000], 0);
+
+  if ':' in Result then
+    Result := Result.Before(':');
+end;
+
+
+(*
+### Chat.GetIronManType
+```pascal
+function TChat.GetIronManType() : EIron;
+```
+Returns the account ironman type.
+
+Example:
+```pascal
+WriteLn Chat.GetIronManType();
+```
+*)
+function TChat.GetIronManType(): EIron;
+var
+  b: TBox;
+begin
+  b.X1 := Self.InputLine.X1;
+  b.Y1 := Self.InputLine.Y1;
+  b.X2 := Self.InputLine.X1 + 10;
+  b.Y2 := Self.InputLine.Y2;
+
+  if Target.HasColor(
+    [$484949, 1.216, EColorSpace.HSL, [0.018, 2.599, 0.385]], 1, b
+  ) then
+  begin
+    if Target.HasColor(
+      [$7E3C1A, 0.761, EColorSpace.HSL, [1.396, 1.396, 0.210]], 1, b
+    ) then
+      Exit(EIron.GROUP);
+    if Target.HasColor(
+      [$1A1A83, 0.817, EColorSpace.HSL, [1.977, 0.683, 0.342]], 1, b
+    ) then
+      Exit(EIron.HARCORE_GROUP);
+    if Target.HasColor(
+      [$5D801A, 1.2, EColorSpace.HSL, [1.345, 1.345, 0.312]], 1, b
+    ) then
+      Exit(EIron.UNRANKED_GROUP);
+
+    Exit(EIron.IRONMAN);
+  end;
+
+  if Target.HasColor(
+    [$1B1B57, 0.787, EColorSpace.HSL, [2.371, 0.206, 0.425]], 1, b
+  ) then
+    Exit(EIron.HARDCORE);
+
+  if Target.HasColor(
+    [$BFC1C1, 2.268, EColorSpace.HSL, [0.034, 2.779, 0.189]], 1, b
+  ) then
+    Exit(EIron.ULTIMATE);
+end;
+
+
+(*
+### Chat.IsTransparent
+```pascal
+function TChat.IsTransparent(): Boolean;
+```
+Returns true if the {ref}`Chat` box is in transparent mode.
+
+Example:
+```pascal
+WriteLn Chat.IsTransparent();
+```
+*)
+function TChat.IsTransparent(): Boolean;
+var
+  b: TBox;
+begin
+  b.X1 := Self.InputLine.X1;
+  b.Y1 := Self.InputLine.Y1;
+  b.X2 := b.X1 + Self.InputLine.Width div 4;
+  b.Y2 := Self.InputLine.Y2;
+
+  Result := Target.HasColor($FFFFFF, 0, 1, b);
+end;
+
+
+(*
+### Chat.IsOpen
+```pascal
+function TChat.IsOpen(): Boolean;
+```
+Returns True/False if the {ref}`Chat` is open.
+
+Example:
+```pascal
+if Chat.IsOpen() then
+  ShowOnTarget(Chat.Bounds);
+```
+*)
+function TChat.IsOpen(): Boolean;
+begin
+  if Client.Mode = EMode.FIXED then Exit(True);
+  Result := Self.Tabs.GetActive() <> EChatTab.NONE;
+end;
+
+(*
+### Chat.Close
+```pascal
+function TChat.Close(): Boolean;
+```
+Attempts to close the {ref}`Chat`interface.
+
+Example:
+```pascal
+WriteLn Chat.Close();
+```
+*)
+function TChat.Close(): Boolean;
+begin
+  if Client.Mode = EMode.FIXED then Exit(False);
+  if Self.Tabs.GetActive() = EChatTab.NONE then Exit(True);
+
+  Self.Tabs.Tabs[Self.Tabs.GetActive()].Click();
+  Result := Self.Tabs.GetActive() = EChatTab.NONE;
+end;
+
+
+(*
+### Chat Queries
+A chat query is when you have some kind of question on the chatbox which you have
+to reply to.
+
+For example, when you try to "withdraw-x" from the bank, you are asked for the
+quantity:
+```{figure} ../../images/chat_query.png
+A chat query.
+```
+*)
+
+(*
+#### Chat.GetQuery
+```pascal
+function TChat.GetQuery(): String;
+```
+Returns the query shown on the {ref}`Chat` interface if any as a string.
+
+Example:
+```pascal
+WriteLn Chat.Close();
+```
+*)
+function TChat.GetQuery(): String;
+begin
+  Result := OCR.Recognize(Self.Bounds, Fonts.BOLD, [$0], 0);
+end;
+
+(*
+#### Chat.GetQueryAnswer
+```pascal
+function TChat.GetQueryAnswer(): String;
+```
+Returns the query current answer to the query in the {ref}`Chat` interface if
+any.
+
+Example:
+```pascal
+WriteLn Chat.GetQueryAnswer();
+```
+*)
+function TChat.GetQueryAnswer(): String;
+begin
+  Result := OCR.Recognize(Self.Bounds, Fonts.BOLD, [TFonts.DARK_BLUE], 0);
+end;
+
+(*
+#### Chat.FindQuery
+```pascal
+function TChat.FindQuery(const query: String; matchCase: Boolean = False): Boolean;
+```
+Returns the True/False if the {ref}`Chat` interface currently has the specified
+`query` visible.
+
+Example:
+```pascal
+WriteLn Chat.FindQuery('Enter amount');
+```
+*)
+function TChat.FindQuery(const query: String; matchCase: Boolean = False): Boolean;
+begin
+  Result := Self.GetQuery().Contains(query, matchCase);
+end;
+
+(*
+#### Chat.WaitQuery
+```pascal
+function TChat.WaitQuery(
+  const query: String;
+  matchCase: Boolean;
+  time: Integer = TICK;
+  interval: Integer = -1
+): Boolean;
+```
+Returns the true if the specified `query` is visible in the {ref}`Chat`
+interface within `time` milliseconds.
+
+Example:
+```pascal
+WriteLn Chat.WaitQuery('Enter amount');
+```
+*)
+function TChat.WaitQuery(
+  const query: String;
+  matchCase: Boolean = False;
+  time: Integer = TICK;
+  interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.FindQuery(query, matchCase), interval, time);
+end;
+
+(*
+#### Chat.AnswerQuery
+```pascal
+function TChat.AnswerQuery(
+  query, answer: String; waitTime: Integer = TICK; interval: Integer = -1
+): Boolean;
+```
+Attempts to reply to the specified `query` with `answer` if it's available in the
+{ref}`Chat` interface within `waitTime` milliseconds.
+
+Example:
+```pascal
+WriteLn Chat.AnswerQuery('Enter amount', '15');
+```
+*)
+function TChat.AnswerQuery(
+  query, answer: String; waitTime: Integer = TICK; interval: Integer = -1
+): Boolean;
+begin
+  Result := Self.WaitQuery(query, False, waitTime, interval);
+  if not Result then Exit;
+
+  if Self.GetQueryAnswer() <> Answer then
+    while Self.GetQueryAnswer() <> '*' do
+      Target.KeyPress(EKeyCode.BACK);
+
+  Keyboard.Send(answer, EKeyCode.RETURN);
+end;
+
+
+{$R-}
+function TChat._GetMessage(line: Integer): String;
+const
+  STATIC_OFFSET: Integer = 2;
+  CHAT_BACKGROUND: TColorTolerance = [$6593AC, 3.329, EColorSpace.HSL, [2.063, 0.536, 0.402]];
+var
+  bounds: TBox;
+  tpa: TPointArray;
+  colors: TColorArray;
+begin
+  with Self.MessageLines[line] do
+    bounds := [X1, Y1-STATIC_OFFSET, X2, Y2];
+
+  //Find chatbox_bg_colors.txt has the colors used
+  tpa := Target.FindColor(CHAT_BACKGROUND, bounds).Invert();
+  colors := Target.GetColors(tpa).Unique();
+  Result := OCR.Recognize(bounds, Fonts.PLAIN_12, colors, 0);
+end;
+
+function TChat._GetTransparentMessage(line: Integer): String;
+const
+  STATIC_OFFSET: Integer = 2;
+var
+  b: TBox;
+  img: TImage;
+  tpa: TPointArray;
+begin
+  with Self.MessageLines[line] do
+    b := [X1, Y1-STATIC_OFFSET, X2, Y2];
+
+  img := Target.GetImage(b);
+  // First shadow from above line draws over our line.
+  // Mark the shadow as a match since OCR requires 100% character match.
+  tpa := img.FindColor($000000, 0, [0, STATIC_OFFSET, img.Width, STATIC_OFFSET]);
+  img.DrawColor := $FFFFFF;
+  img.DrawTPA(tpa);
+
+  // Now find shadows, offset by -1,-1 to find colors of text
+  tpa := img.FindColor(0, 0, [1, 1, img.Width, img.Height]);
+  tpa := tpa.Offset([-1,-1]).ExcludePoints(tpa);
+  img.ReplaceColorBinary(False, img.GetColors(tpa).Unique(), 0);
+
+  Result := OCR.Engine.Recognize(img, Fonts.PLAIN_12, [0,0]);
+end;
+
+
+(*
+### Chat.GetMessage
+```pascal
+function TChat.GetMessage(line: Integer): String;
+```
+Get the message in the specified `line`.
+
+For consistency reasons all the symbols are stripped from the result.
+
+Example:
+```pascal
+WriteLn Chat.GetMessage(5);
+```
+
+Credits: Original design inspired on Olly's solution for this on his 2.0 library.
+*)
+function TChat.GetMessage(line: Integer): String;
+begin
+  if not Self.IsTransparent() then
+    Exit(Self._GetMessage(line).ExtractText());
+  Result := Self._GetTransparentMessage(line).ExtractText();
+end;
+
+(*
+### Chat.IndexOfMessage
+```pascal
+function TChat.IndexOfMessage(const msg: String; matchCase: Boolean = False): Integer;
+```
+Find which line has a specific `msg` either entirely or partially if any.
+
+Example:
+```pascal
+WriteLn Chat.IndexOfMessage('Hello world');
+```
+*)
+function TChat.IndexOfMessage(const msg: String; matchCase: Boolean = False): Integer;
+begin
+  if Self.IsTransparent() then
+  begin
+    for Result := 0 to High(Self.MessageLines) do
+      if Self._GetTransparentMessage(Result).Contains(msg, matchCase) then
+        Exit;
+    Exit(-1);
+  end;
+
+  for Result := 0 to High(Self.MessageLines) do
+    if Self._GetMessage(Result).Contains(msg, matchCase) then
+      Exit;
+  Result := -1;
+end;
+
+(*
+### Chat.ContainsMessage
+```pascal
+function TChat.ContainsMessage(const msg: String; matchCase: Boolean = False): Boolean;
+```
+Returns True/False if the specified `msg` is visible on the {ref}`Chat` interface.
+
+Example:
+```pascal
+WriteLn Chat.ContainsMessage('Hello world');
+```
+*)
+function TChat.ContainsMessage(const msg: String; matchCase: Boolean = False): Boolean;
+begin
+  Result := Self.IndexOfMessage(msg, matchCase) > -1;
+end;
+
+(*
+### Chat.CountNewMessage
+```pascal
+function TChat.CountNewMessage(const msg: String; matchCase: Boolean = False): Integer;
+```
+Counts how many time the specified `msg` repeats without any other message in
+between from the most recent one.
+
+This can be useful to know if you performed a task sometimes, for example,
+knowing if you tried to light a fire on top of another:
+```pascal
+{$I WaspLib/main.simba}
+var
+  oldCount, newCount: Integer;
+begin
+  oldCount := Chat.CountNewMessage('You can''t light a fire here.');
+  Inventory.Combine('Tinderbox', 'Logs');
+  Sleep(8*TICK);
+  newCount := Chat.CountNewMessage('You can''t light a fire here.');
+  if newCount > oldCount then
+    WriteLn('Tried to light a fire and failed.');
+end.
+```
+*)
+function TChat.CountNewMessage(const msg: String; matchCase: Boolean = False): Integer;
+var
+  i: Integer;
+begin
+  Result := 0;
+  for i := High(Self.MessageLines) downto 0 do
+  begin
+    if not Self.GetMessage(i).Equals(msg, matchCase) then
+      Exit;
+    Inc(Result);
+  end;
+end;
+
+(*
+### Chat.GetMessagesString
+```pascal
+function TChat.GetMessagesString(): String;
+```
+Returns every chat message visible as a string.
+
+Example:
+```pascal
+WriteLn Chat.GetMessagesString();
+```
+*)
+function TChat.GetMessagesString(): String;
+var
+  i: Integer;
+  msg: String;
+begin
+  if Self.IsTransparent() then
+  begin
+    for i := 0 to High(Self.MessageLines) do
+    begin
+      msg := Self._GetTransparentMessage(i);
+      if msg <> '' then
+      begin
+        if Result <> '' then
+          Result += LINE_SEP;
+        Result += msg;
+      end;
+    end;
+
+    Exit;
+  end;
+
+  for i := 0 to High(Self.MessageLines) do
+  begin
+    msg := Self._GetMessage(i);
+    if msg <> '' then
+    begin
+      if Result <> '' then
+        Result += LINE_SEP;
+      Result += msg;
+    end;
+  end;
+end;
+{$R+}
+
+(*
+### Chat.InputHasText
+```pascal
+function TChat.InputHasText(): Boolean;
+```
+Returns True/False if input line has text written that was never sent.
+
+Example:
+```pascal
+WriteLn Chat.InputHasText();
+```
+*)
+function TChat.InputHasText(): Boolean;
+begin
+  Result := Target.HasColor(Self.Colors[EChatColor.BLUE], 0, 15, Self.InputLine);
+end;
+
+var
+(*
+## Chat variable
+Global {ref}`TChat` variable.
+*)
+  Chat: TChat;

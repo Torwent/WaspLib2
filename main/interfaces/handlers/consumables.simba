@@ -1,0 +1,555 @@
+(*
+# Consumables
+Manages consumable items like food and potions.
+
+It handles loading, inventory scanning, and consumption logic with cooldowns and effects.
+*)
+{$DEFINE WL_CONSUMABLES_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+(*
+(ERSConsumable)=
+## Enum ERSConsumable
+```pascal
+ERSConsumable = (BOOST, ENERGY, POISON, ANTIFIRE);
+```
+Defines the categories of consumables available.
+*)
+type
+  ERSConsumable = (ENERGY, POISON, ANTIFIRE);
+
+(*
+(TConsumableItem)=
+## type TConsumableItem
+Represents a single consumable item with its properties.
+*)
+  TConsumableItem = record
+    Item: TItem;
+    Points, Order, Cooldown, Duration: Integer;
+    Skills: array of ESkill;
+    Other: array of ERSConsumable;
+  end;
+
+  TConsumableItemArray = array of TConsumableItem;
+
+function TConsumableItemArray.Create(json: TJSONObject): TConsumableItemArray; static;
+var
+  idx, i: Integer;
+  items: TItemArray;
+  item: TConsumableItem;
+begin
+  items := TItem(json.Item['name'].AsString).Spread();
+
+  for idx := 0 to High(items) do
+  begin
+    item.Item := items[idx];
+    item.Order := json.Item['order'].AsInt;
+    item.Cooldown := json.Item['cooldown'].AsInt;
+    item.Duration := json.Item['duration'].AsInt;
+    item.Points := json.Item['base'].AsInt;
+
+    for i := 0 to json.Item['skills'].Count-1 do
+      item.Skills += ESkill(json.Item['skills'].Item[i].AsInt);
+    for i := 0 to json.Item['other'].Count-1 do
+      item.Other += ERSConsumable(json.Item['other'].Item[i].AsInt);
+
+    Result += item;
+  end;
+end;
+
+function TConsumableItemArray.Intersection(other: TItemArray): TConsumableItemArray;
+var
+  a, b: Integer;
+begin
+  for a := 0 to High(other) do
+    for b := 0 to High(Self) do
+      if Self[b].Item.Before('(') = other[a] then
+        Result += Self[b];
+end;
+
+function TConsumableItemArray.SortByPoints(lowToHigh: Boolean = False): TConsumableItemArray;
+var
+  i: Integer;
+  weights: TIntegerArray;
+begin
+  SetLength(weights, Length(Self));
+  for i := 0 to High(Self) do
+    weights[i] := Self[i].Points;
+  Result := Self.Sorted(weights, lowToHigh);
+end;
+
+
+type
+(*
+(TBoostItem)=
+## type TBoostItem
+Represents a single boost item with its properties.
+*)
+  TBoostItem = record
+    Item: TItem;
+    Skill: ESkill;
+    Skills: array of ESkill;
+    Other: array of ERSConsumable;
+    _Points, Order, Cooldown, Duration, Base: Integer;
+    Multiplier: Single;
+  end;
+
+(*
+## TBoostItem.Points
+```pascal
+property TBoostItem.Points: Integer;
+property TBoostItem.Points(value: Integer);
+```
+Getter and setter `Points` property.
+
+Only set a new value if you want to permanently override it.
+*)
+property TBoostItem.Points: Integer;
+begin
+  if Self._Points > 0 then
+    Exit(Self._Points);
+
+  if Self.Item = 'anglerfish' then
+  begin
+    Self._Points := Floor(Stats.GetLevel(ESkill.HITPOINTS)/10) +
+                    2*Floor(Stats.GetLevel(ESkill.HITPOINTS)/25) +
+                    5*Floor(Stats.GetLevel(ESkill.HITPOINTS)/93) + 2;
+    Exit(Self._Points);
+  end;
+
+  Self._Points := Self.Base + Floor(Stats.GetLevel(Self.Skill) * Self.Multiplier);
+
+  Result := Self._Points * StrToInt(Self.Item.Between('(', ')'), 1);
+end;
+
+property TBoostItem.Points(value: Integer);
+begin
+  Self._Points := value;
+end;
+
+type
+  TBoostItemArray = array of TBoostItem;
+
+function TBoostItemArray.Create(json: TJSONObject; skill: ESkill): TBoostItemArray; static;
+var
+  idx, i: Integer;
+  items: TItemArray;
+  item: TBoostItem;
+begin
+  items := TItem(json.Item['name'].AsString).Spread();
+
+  for idx := 0 to High(items) do
+  begin
+    item.Item := items[idx];
+    item.Order := json.Item['order'].AsInt;
+    item.Cooldown := json.Item['cooldown'].AsInt;
+    item.Duration := json.Item['duration'].AsInt;
+    item.Base := json.Item['base'].AsInt;
+    item.Multiplier := json.Item['multiplier'].AsFloat;
+    item.Skill := skill;
+
+    for i := 0 to json.Item['skills'].Count-1 do
+      item.Skills += ESkill(json.Item['skills'].Item[i].AsInt);
+    for i := 0 to json.Item['other'].Count-1 do
+      item.Other += ERSConsumable(json.Item['other'].Item[i].AsInt);
+
+    Result += item;
+  end;
+end;
+
+function TBoostItemArray.Intersection(other: TItemArray): TBoostItemArray;
+var
+  a, b: Integer;
+begin
+  for a := 0 to High(other) do
+    for b := 0 to High(Self) do
+      if Self[b].Item.Before('(') = other[a] then
+        Result += Self[b];
+end;
+
+function TBoostItemArray.SortByPoints(lowToHigh: Boolean = False): TBoostItemArray;
+var
+  i: Integer;
+  weights: TIntegerArray;
+begin
+  SetLength(weights, Length(Self));
+  for i := 0 to High(Self) do
+    weights[i] := Self[i].Points;
+  Result := Self.Sorted(weights, lowToHigh);
+end;
+
+
+type
+(*
+(TConsumables)=
+## type TConsumables
+Manages all aspects of item consumption.
+*)
+  TConsumables = record
+    Boosts: array [ESkill] of record
+      Names: TStringArray;
+      Items, Active: TBoostItemArray;
+      MinInvPoints: Integer;
+      Timer: TCountDown;
+      Points: Integer;
+      IsSetup: Boolean;
+    end;
+
+    Consumables: array [ERSConsumable] of record
+      Names: TStringArray;
+      Items, Active: TConsumableItemArray;
+      MinInvPoints: Integer;
+      Timer: TCountDown;
+      IsSetup: Boolean;
+    end;
+
+    Cooldowns: array [0..2] of TCountDown;
+    Version, CacheDir: String;
+  end;
+
+
+procedure TConsumables.Init();
+var
+  path, tmp: String;
+begin
+  Self.Version := WLAssets.JSON.Item['jsons/consumables.zip'].AsString;
+  Self.CacheDir := WLEnv.CacheDir + 'consumables' + PATH_SEP;
+
+  //Delete old cache files if they exist
+  for path in DirList(Self.CacheDir) do
+  begin
+    tmp := Copy(path, Length(path) - Length(Self.Version) + 1, Length(path));
+    if tmp = Self.Version then Continue;
+    DirDelete(path, False);
+  end;
+
+  Self.CacheDir += Self.Version + PATH_SEP;
+
+  if not DirCreate(Self.CacheDir) then
+    raise GetDebugLn('Consumables', 'Failed to create cache directory: ' + Self.CacheDir);
+
+  Self.Cooldowns[0].Start(3*TICK);
+  Self.Cooldowns[1].Start(3*TICK);
+  Self.Cooldowns[2].Start(3*TICK);
+end;
+
+(*
+## Consumables.Setup
+```pascal
+procedure TConsumables.Setup(consumable: ERSConsumable);
+procedure TConsumables.Setup(skill: ESkill); overload;
+```
+Sets up the specified type of consumable.
+To setup a `ERSConsumable.BOOST` you should use a `ESkill` value instead with
+the `ESkill` you want to boost.
+
+For example, to setup food, prayer potions and antifires you would do the
+following:
+```pascal
+Consumables.Setup(ESkill.HITPOINTS);
+Consumables.Setup(ESkill.PRAYER);
+Consumables.Setup(ERSConsumable.ANTIFIRE);
+```
+*)
+procedure TConsumables.Setup(consumable: ERSConsumable);
+var
+  filename: String;
+  json: TJSONParser;
+  i: Integer;
+begin
+  if Self.Consumables[consumable].IsSetup then
+    Exit;
+
+  filename := ToStr(consumable) + '.json';
+  if not FileExists(Self.CacheDir + filename) then
+    if not ZipExtract(WLEnv.AssetsDir + 'jsons' + PATH_SEP + 'consumables.zip', Self.CacheDir, [filename]) then
+      raise GetDebugLn('Consumables', 'File does not exist: ' + filename);
+
+  json := new TJSONParser();
+  json.Load(filename);
+
+  if json.Typ <> EJSONType.ARR then
+    raise GetDebugLn('Consumables', 'Unexpected JSON format in: ' + filename);
+
+  for i := 0 to json.Count-1 do
+  begin
+    Self.Consumables[consumable].Names += json.Item[i].Item['name'].AsString;
+    Self.Consumables[consumable].Items += TConsumableItemArray.Create(json.Item[i]);
+  end;
+
+  Self.Consumables[consumable].IsSetup := True;
+end;
+
+procedure TConsumables.Setup(skill: ESkill); overload;
+var
+  filename: String;
+  json: TJSONParser;
+  i: Integer;
+begin
+  if Self.Boosts[skill].IsSetup then
+    Exit;
+
+  filename := ToStr(skill) + '.json';
+  if not FileExists(Self.CacheDir + filename) then
+    if not ZipExtract(WLEnv.AssetsDir + 'jsons' + PATH_SEP + 'consumables.zip', Self.CacheDir, [filename]) then
+      raise GetDebugLn('Consumables', 'File does not exist: ' + filename);
+
+  json := new TJSONParser();
+  json.Load(Self.CacheDir + filename);
+
+  if json.Typ <> EJSONType.ARR then
+    raise GetDebugLn('Consumables', 'Unexpected JSON format in: ' + filename);
+
+  for i := 0 to json.Count-1 do
+  begin
+    Self.Boosts[skill].Names += json.Item[i].Item['name'].AsString;
+    Self.Boosts[skill].Items += TBoostItemArray.Create(json.Item[i], skill);
+  end;
+
+  Self.Boosts[skill].IsSetup := True;
+end;
+
+
+(*
+## TConsumables.Enable
+```pascal
+procedure TConsumables.Enable(consumable: ERSConsumable; item: TItem);
+procedure TConsumables.Enable(boost: ESkill; item: TItem); overload;
+```
+Enabled a specific item to use for a category.
+
+If this is not used any item available will that is valid for the category will
+be used.
+*)
+procedure TConsumables.Enable(consumable: ERSConsumable; item: TItem);
+var
+  name: TItem;
+  i, j: Integer;
+begin
+  j := -1;
+  for name in item.Spread() do
+    for i := j+1 to High(Self.Consumables[consumable].Items) do
+      if name = Self.Consumables[consumable].Items[i].Item then
+      begin
+        Self.Consumables[consumable].Active += Self.Consumables[consumable].Items[i];
+        j := i;
+        Continue(2);
+      end;
+end;
+
+procedure TConsumables.Enable(boost: ESkill; item: TItem); overload;
+var
+  name: TItem;
+  i, j: Integer;
+begin
+  j := -1;
+  for name in item.Spread() do
+    for i := j+1 to High(Self.Boosts[boost].Items) do
+      if name = Self.Boosts[boost].Items[i].Item then
+      begin
+        Self.Boosts[boost].Active += Self.Boosts[boost].Items[i];
+        j := i;
+        Continue(2);
+      end;
+end;
+
+
+(*
+## TConsumables.Find
+```pascal
+function TConsumables.Find(consumable: ERSConsumable): TConsumableItemArray;
+function TConsumables.Find(boost: ESkill): TBoostItemArray; overload;
+```
+Scans inventory for all consumables of a specific category.
+*)
+function TConsumables.Find(consumable: ERSConsumable): TConsumableItemArray;
+var
+  items: TItemArray;
+  i: Integer;
+begin
+  if not Inventory.Open() then
+    Exit;
+
+  Self.Setup(consumable);
+
+  items := Inventory.Items.RecognizeAll();
+
+  for i := 0 to High(items) do
+    if items[i].EndsWith(')') then
+      items[i] := items[i].Before('(');
+
+  if Self.Consumables[consumable].Active = [] then
+    Self.Consumables[consumable].Active := Self.Consumables[consumable].Items;
+  Result := Self.Consumables[consumable].Active.Intersection(items);
+end;
+
+function TConsumables.Find(boost: ESkill): TBoostItemArray; overload;
+var
+  items: TItemArray;
+  i: Integer;
+begin
+  if not Inventory.Open() then
+    Exit;
+
+  Self.Setup(boost);
+
+  items := Inventory.Items.RecognizeAll();
+
+  for i := 0 to High(items) do
+    if items[i].EndsWith(')') then
+      items[i] := items[i].Before('(');
+
+  if Self.Boosts[boost].Active = [] then
+    Self.Boosts[boost].Active := Self.Boosts[boost].Items;
+
+  Result := Self.Boosts[boost].Items.Intersection(items);
+end;
+
+
+(*
+## TConsumables.HasEnoughPoints
+```pascal
+function TConsumables.HasEnoughPoints(consumable: ERSConsumable): Boolean;
+function TConsumables.HasEnoughPoints(skill: ESkill): Boolean; overload;
+```
+Checks if total points of a consumable type meet the `MinInvPoints` threshold.
+*)
+function TConsumables.HasEnoughPoints(consumable: ERSConsumable): Boolean;
+var
+  consumables: TConsumableItemArray;
+  c: TConsumableItem;
+  total: Integer;
+begin
+  if Self.Consumables[consumable].MinInvPoints <= 0 then
+    Exit(True);
+
+  consumables := Self.Find(consumable);
+  for c in consumables do
+    total += c.Points * Inventory.Items.Count(c.Item);
+
+  Result := total >= Self.Consumables[consumable].MinInvPoints;
+end;
+
+function TConsumables.HasEnoughPoints(skill: ESkill): Boolean; overload;
+var
+  boosts: TBoostItemArray;
+  b: TBoostItem;
+  total: Integer;
+begin
+  if Self.Consumables[skill].MinInvPoints <= 0 then
+    Exit(True);
+
+  boosts := Self.Find(skill);
+  for b in boosts do
+    total += b.Points * Inventory.Items.Count(b.Item);
+
+  Result := total >= Self.Consumables[skill].MinInvPoints;
+end;
+
+
+(*
+## TConsumables.CanConsume
+```pascal
+function TConsumables.CanConsume(consumable: ERSConsumable): Boolean;
+function TConsumables.CanConsume(boost: ESkill): Boolean; overload;
+```
+Checks if a consumable can be used, considering active effects.
+*)
+function TConsumables.CanConsume(consumable: ERSConsumable): Boolean;
+begin
+  Result := Self.Consumables[consumable].Timer.IsFinished;
+end;
+
+function TConsumables.CanConsume(boost: ESkill): Boolean; overload;
+begin
+  Result := Self.Boosts[boost].Timer.IsFinished;
+end;
+
+
+(*
+## TConsumables.Consume
+```pascal
+function TConsumables.Consume(consumable: ERSConsumable): Boolean;
+function TConsumables.Consume(skill: ESkill): Boolean; overload;
+```
+Consumes the best item of a specified category from inventory.
+*)
+function TConsumables.Consume(consumable: ERSConsumable): Boolean;
+var
+  consumables: TConsumableItemArray;
+  i, j, slot: Integer;
+begin
+  if not Self.Consumables[consumable].Timer.IsFinished then
+    Exit;
+
+  for i := 0 to 2 do
+    if Self.Cooldowns[i].IsFinished then
+    begin
+      if consumables = [] then
+        consumables := Self.Find(consumable).SortByPoints(False);
+
+      for j := 0 to High(consumables) do
+      begin
+        if consumables[j].Order <> i then
+          Continue;
+
+        if Inventory.Items.Find(consumables[j].Item, slot) then
+          raise GetDebugLn('Consumables', 'Something went wrong, can''t find consumable that was found previously.');
+
+        Inventory.Slots.Hover(slot);
+
+        if not MainScreen.IsUpText(['Eat', 'Drink']) then
+          if not ChooseOption.Hover(['Eat', 'Drink']) then Continue;
+        Mouse.Click(EMouseButton.LEFT);
+        Self.Cooldowns[i].Restart();
+        Exit(True);
+      end;
+    end;
+end;
+
+function TConsumables.Consume(boost: ESkill): Boolean; overload;
+var
+  boosts: TBoostItemArray;
+  i, j, slot: Integer;
+  skill: ESkill;
+begin
+  for i := 0 to 2 do
+    if Self.Cooldowns[i].IsFinished then
+    begin
+      if boosts = [] then
+        boosts := Self.Find(boost).SortByPoints(False);
+
+      for j := 0 to High(boosts) do
+      begin
+        if boosts[j].Order <> i then
+          Continue;
+
+        if not Self.Boosts[boost].Timer.IsFinished then
+          if boosts[j]._Points <= Self.Boosts[boost].Points then
+            Continue;
+
+        if Inventory.Items.Find(boosts[j].Item, slot) then
+          raise GetDebugLn('Consumables', 'Something went wrong, can''t find consumable that was found previously.');
+
+        Inventory.Slots.Hover(slot);
+
+        if not MainScreen.IsUpText(['Eat', 'Drink']) then
+          if not ChooseOption.Hover(['Eat', 'Drink']) then Continue;
+        Mouse.Click(EMouseButton.LEFT);
+        Self.Cooldowns[i].Restart();
+
+        Self.Boosts[boost].Timer.Start(boosts[j].Duration);
+        Self.Boosts[boost].Points := boosts[j]._Points;
+
+        for skill in boosts[j].Skills do
+        begin
+          //TODO... Cache other boosted skills
+        end;
+
+        Exit(True);
+      end;
+    end;
+end;
+
+var
+  Consumables: TConsumables;

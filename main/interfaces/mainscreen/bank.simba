@@ -1,0 +1,1639 @@
+(*
+# Bank
+Methods to interact with the bank interface:
+```{figure} ../../images/bank_interface.png
+```
+*)
+
+{$DEFINE WL_BANK_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+(EBankButton)=
+## EBankButton enum
+```pascal
+EBankButton = enum(SETTINGS, TUTORIAL);
+```
+Enum representing the 2 top buttons of the {ref}`Bank` interface.
+The tutorial button can be hidden.
+*)
+  EBankButton = enum(SETTINGS, TUTORIAL);
+
+(*
+(EBankSideButton)=
+## EBankSideButton enum
+```pascal
+EBankSideButton = enum(SETTINGS, TUTORIAL);
+```
+Enum representing the side buttons of the {ref}`Bank` interface.
+The incinerator button can be hidden and the potion storage might not be
+unlocked.
+*)
+  EBankSideButton = enum(POTION_STORAGE, INCINERATOR);
+
+(*
+(EBankModeButton)=
+## EBankModeButton enum
+```pascal
+EBankModeButton = enum(ARRANGEMENT, NOTES);
+```
+Enum representing the arrangement and notes buttons of the {ref}`Bank` interface.
+*)
+  EBankModeButton = enum(ARRANGEMENT, NOTES);
+
+(*
+(EBankMiscButton)=
+## EBankMiscButton enum
+```pascal
+EBankMiscButton = enum(SEARCH, PLACEHOLDERS);
+```
+Enum representing the 2 misc buttons on the bottom of the {ref}`Bank` interface.
+These buttons can shift places because you can enable/disable {ref}`EBankDepositButton` buttons.
+*)
+  EBankMiscButton = enum(SEARCH, PLACEHOLDERS);
+
+(*
+(EBankDepositButton)=
+## EBankDepositButton enum
+```pascal
+EBankDepositButton = enum(CONTAINERS, INVENTORY, WORN);
+```
+Enum representing the 3 deposit buttons on the right bottom corner of the {ref}`Bank` interface.
+These buttons are dynamic because they can be enabled/disabled and shift places.
+*)
+  EBankDepositButton = enum(CONTAINERS, INVENTORY, WORN);
+
+(*
+(EBankInteraction)=
+## EBankInteraction enum
+```pascal
+EBankInteraction = enum(WITHDRAW, DEPOSIT);
+```
+Enum representing 2 core actions you can perform on the {ref}`Bank` interface.
+*)
+  EBankInteraction = enum(WITHDRAW, DEPOSIT);
+
+(*
+## TBankPosition type
+Helper record to cache items positions on the {ref}`Bank` interface.
+*)
+  TBankPosition = record
+    Tab, Scroll: Integer;
+    Slot: TBox;
+  end;
+
+(*
+(TBank)=
+## TBank type
+Record responsible to handle the {ref}`Bank` interface.
+*)
+  TBank = record
+    Bounds: TBox;
+    Slots: TSlotInterface;
+    Items: TItemInterface;
+    Title: TInterfaceTitle;
+    Scroll: TScrollBar;
+
+    Incenerator, PotionStorage, SlotsArea: TBox;
+
+    Tabs, SlotBoxes: TBoxArray;
+
+    Worn: TButton;
+    Buttons: array [EBankButton] of TButton;
+    SidebarButtons: array [EBankSideButton] of TButton;
+    ModeButtons: array [EBankModeButton] of TButton;
+    QuantityButtons: array [EItemQuantity] of TButton;
+    MiscButtons: array [EBankMiscButton] of TButton;
+    DepositButtons: array [EBankDepositButton] of TButton;
+
+    JagexAccountAd: record
+      NotNow, MoreInfo: TBox;
+    end;
+
+    ButtonsOffset, Depleted: Boolean;
+
+    _Cache: record
+      Quantity: Integer;
+      Items: TStringMap<TBankPosition>;
+    end;
+    _IsOpenHelperBox: TBox;
+    Banks: TGObjectArray;
+    Bankers: TEntityArray;
+  end;
+
+function TBank.FindItemBoundaries(): TBoxArray; forward;
+
+function TBank.IsOpen(): Boolean; forward;
+
+(*
+## Bank.SetupInterface
+```pascal
+procedure TBank.SetupInterface();
+```
+Internal method used to setup the {ref}`TBank` coordinates.
+This is automatically called for you on the {ref}`Bank variable`.
+*)
+procedure TBank.SetupInterface();
+const
+  BUTTON_COLORS: array of TColorTolerance = [
+    [$0F1043, 0, EColorSpace.RGB, [1,1,1]],
+    [$23269F, 0.227, EColorSpace.RGB, [1,1,1]]
+  ];
+var
+  i: Integer;
+begin
+  Self.Bounds := MSInterface.CreateBounds([0, 2, 0, -1], 488, 800);
+
+  Self.Scroll.Area.X1 := Self.Bounds.X1 + 5;
+  Self.Scroll.Area.Y1 := Self.Bounds.Y1 + 77;
+  Self.Scroll.Area.X2 := Self.Bounds.X2 - 22;
+  Self.Scroll.Area.Y2 := Self.Bounds.Y2 - 44;
+
+  Self.Scroll.Setup();
+  Self.Title.Setup(Self.Bounds);
+
+  Self.Tabs := TBoxArray.Create(Self.Bounds.TopLeft.Offset(47, 42), 10, 1, 35, 28, [5, 0]);
+  Self.SlotBoxes :=
+    TBoxArray.Create(
+      Self.Bounds.TopLeft.Offset(57, 77), 8,
+      (Self.Bounds.Height - 135) div 35, 31, 31, [17, 5]
+    );
+
+  Self.SlotsArea.X1 := Self.Bounds.X1 + 57;
+  Self.SlotsArea.Y1 := Self.Bounds.Y1 + 77;
+  Self.SlotsArea.X2 := Self.Bounds.X2 - 63;
+  Self.SlotsArea.Y2 := Self.Bounds.Y2 - 44;
+
+  with Self.SlotsArea.Center.Offset(0,-1) do
+    Self.JagexAccountAd.NotNow := [X-120, Y+43, X-49, Y+66];
+
+  with Self.SlotsArea.Center.Offset(0,-1) do
+    Self.JagexAccountAd.MoreInfo := [X+39, Y+43, X+108, Y+66];
+
+  Self.Incenerator.X1 := Self.Bounds.X1 + 5;
+  Self.Incenerator.Y1 := Self.Bounds.Y2 - 113;
+  Self.Incenerator.X2 := Self.Bounds.X1 + 51;
+  Self.Incenerator.Y2 := Self.Bounds.Y2 - 44;
+
+  Self.PotionStorage.X1 := Self.Bounds.X1 + 8;
+  Self.PotionStorage.Y1 := Self.Bounds.Y2 - 156;
+  Self.PotionStorage.X2 := Self.Bounds.X1 + 51;
+  Self.PotionStorage.Y2 := Self.Bounds.Y2 - 118;
+
+  Self.Slots.Setup('Bank.Slots', Self.SlotBoxes, @Self.FindItemBoundaries);
+  Self.Items.Setup('Bank.Items', @Self.Slots, [0, 1], @Self.IsOpen);
+
+  Self._IsOpenHelperBox.X1 := Self.Bounds.X1 + 235;
+  Self._IsOpenHelperBox.Y1 := Self.Bounds.Y2 - 42;
+  Self._IsOpenHelperBox.X2 := Self.Bounds.X2 - 156;
+  Self._IsOpenHelperBox.Y2 := Self.Bounds.Y2 - 26;
+
+  with Self.Bounds do
+  begin
+    Self.Worn := new TButton([X2-40, Y1+38, X2-7, Y1+71], BUTTON_COLORS);
+
+    Self.Buttons[EBankButton.SETTINGS] := new TButton([X1+34, Y1+7, X1+54, Y1+27]);
+    Self.Buttons[EBankButton.TUTORIAL] := new TButton([X1+58, Y1+7, X1+78, Y1+27]);
+
+    Self.SidebarButtons[EBankSideButton.POTION_STORAGE] :=
+      new TButton([X1+8, Y2-121, X1+41, Y2-88], BUTTON_COLORS);
+    Self.SidebarButtons[EBankSideButton.INCINERATOR] :=
+      new TButton([X1+8, Y2-85, X1+41, Y2-52]);
+
+    Self.ModeButtons[EBankModeButton.ARRANGEMENT] :=
+      new TButton([X1, Y2-41, X1+33, Y2-8]);
+    Self.ModeButtons[EBankModeButton.NOTES] :=
+      new TButton([X1, Y2-41, X1+33, Y2-8], BUTTON_COLORS);
+
+    for i := 0 to 4 do
+      Self.QuantityButtons[i] := new TButton([X1, Y2-41, X1+33, Y2-8], BUTTON_COLORS);
+    for i := 0 to 1 do
+      Self.MiscButtons[i] := new TButton([X1, Y2-41, X1+33, Y2-8], BUTTON_COLORS);
+    for i := 0 to 2 do
+      Self.DepositButtons[i] := new TButton([X1, Y2-41, X1+33, Y2-8]);
+  end;
+
+  Self.ButtonsOffset := False;
+end;
+
+function TBank._GetButtonDividers(): TPointArray;
+var
+  tpa, dividers: TPointArray;
+  atpa: T2DPointArray;
+
+begin
+  with Self.Bounds do
+    tpa := Target.FindColor($232B2E, 1, [X1+6, Y2-43, X2-6, Y2-6]);
+  if tpa = [] then
+    Exit;
+  atpa := tpa.Cluster(1.5).ExtractDimensions(0, 0, 4, 30);
+  if Length(atpa) <> 3 then
+    Exit;
+
+  for tpa in atpa do
+    dividers += tpa.First;
+
+  if dividers[0].DistanceTo(dividers[1]) <> 191 then
+    Exit;
+  if dividers[0].DistanceTo(dividers[2]) <> 284 then
+    Exit;
+  Result := dividers;
+end;
+
+(*
+## Bank.UpdateButtons
+```pascal
+procedure TBank.UpdateButtons(const tpa: TPointArray);
+```
+Internal helper method used to update the buttons coordinates.
+
+All the bank's bottom buttons shift slightly on the X axis depending on how many dynamic buttons are visible.
+
+```{note}
+This is automatically called for you with {ref}`Bank.IsOpen`.
+```
+*)
+procedure TBank.UpdateButtons(const tpa: TPointArray);
+var
+  i: Integer;
+  boxes: TBoxArray;
+begin
+  if Self.ButtonsOffset then
+    Exit;
+
+  Self.ModeButtons[EBankModeButton.ARRANGEMENT].Bounds.X1 := tpa[0].X - 75;
+  Self.ModeButtons[EBankModeButton.ARRANGEMENT].Bounds.X2 := tpa[0].X - 42;
+  Self.ModeButtons[EBankModeButton.NOTES].Bounds.X1 := tpa[0].X - 38;
+  Self.ModeButtons[EBankModeButton.NOTES].Bounds.X2 := tpa[0].X - 5;
+
+  for i := 0 to 4 do
+  begin
+    Self.QuantityButtons[i].Bounds.X1 := tpa[0].X + 5 + i*37;
+    Self.QuantityButtons[i].Bounds.X2 := tpa[0].X + 38 + i*37;
+  end;
+
+  Self.MiscButtons[EBankMiscButton.SEARCH].Bounds.X1 := tpa[1].X + 5;
+  Self.MiscButtons[EBankMiscButton.SEARCH].Bounds.X2 := tpa[1].X + 48;
+  Self.MiscButtons[EBankMiscButton.PLACEHOLDERS].Bounds.X1 := tpa[1].X + 55;
+  Self.MiscButtons[EBankMiscButton.PLACEHOLDERS].Bounds.X2 := tpa[1].X + 88;
+
+  boxes := TBoxArray.Create([tpa[2].X+5, Self.Bounds.Y2-41], 3, 1, 33, 33, [4,0]);
+  for i := High(boxes) downto 0 do
+    if not Target.HasColor($516472, 0, 1, boxes[i]) then
+      Delete(boxes, i, 1);
+
+  case Length(boxes) of
+    0: raise GetDebugLn('Bank', 'Something went wrong, couldn''f find any bank deposit button.');
+    1:
+    begin
+      Self.DepositButtons[EBankDepositButton.WORN].Bounds := boxes.Last;
+      Self.DepositButtons[EBankDepositButton.INVENTORY] := nil;
+      Self.DepositButtons[EBankDepositButton.CONTAINERS] := nil;
+    end;
+    2:
+    begin
+      Self.DepositButtons[EBankDepositButton.WORN].Bounds := boxes.Last;
+      if Target.HasColor([$0F3669, 2.705, EColorSpace.HSV, [1.943, 0.722, 0.336]], 4, boxes[0]) then
+      begin
+        Self.DepositButtons[EBankDepositButton.INVENTORY].Bounds := boxes[0];
+        Self.DepositButtons[EBankDepositButton.CONTAINERS] := nil;
+      end
+      else
+      begin
+        Self.DepositButtons[EBankDepositButton.INVENTORY] := nil;
+        Self.DepositButtons[EBankDepositButton.CONTAINERS].Bounds := boxes[0];
+      end;
+    end;
+    3: for i := 0 to High(boxes) do
+        Self.DepositButtons[i].Bounds := boxes[i];
+  end;
+
+  Self.ButtonsOffset := True;
+end;
+
+
+(*
+## Bank.HasJagexAccountAd
+```pascal
+function TBank.HasJagexAccountAd(): Boolean;
+```
+Returns true if the bank has the jagex account ad pop-up.
+This only ever shows up on non jagex accounts and tries to buy you in with bank space.
+
+Example:
+```pascal
+WriteLn Bank.HasJagexAccountAd();
+```
+*)
+function TBank.HasJagexAccountAd(): Boolean;
+begin
+  Result := (Target.CountColor($0000FF, 0, Self.JagexAccountAd.NotNow) = 98) and
+            (Target.CountColor($0DC10D, 0, Self.JagexAccountAd.MoreInfo) = 112);
+end;
+
+(*
+## Bank.CloseJagexAccountAd
+```pascal
+function TBank.CloseJagexAccountAd(): Boolean;
+```
+Attempts to close the jagex account advert. Returns true on success.
+
+Example:
+```pascal
+WriteLn Bank.CloseJagexAccountAd();
+```
+*)
+function TBank.CloseJagexAccountAd(): Boolean;
+begin
+  Mouse.Click(Self.JagexAccountAd.NotNow, EMouseButton.LEFT);
+  Result := SleepUntil(not Self.HasJagexAccountAd(), 50, 600);
+end;
+
+
+(*
+## Bank.FindItemBoundaries
+```pascal
+function TBank.FindItemBoundaries(): TBoxArray;
+```
+Finds item boundaries and returns them as a TBoxArray.
+
+You have 2 ways of getting the bank slots, a static one:
+```pascal
+ShowOnTarget(Bank.SlotBoxes);
+```
+```{figure} ../../images/bank_static_slots.png
+The bank static slots.
+```
+
+And a dynamic one:
+```pascal
+ShowOnTarget(Self.FindItemBoundaries());
+```
+```{figure} ../../images/bank_item_boundaries.png
+The bank "dynamic" slots.
+```
+
+There are use cases for both, internally, `Bank.FindItemBoundaries` is usually used.
+*)
+function TBank.FindItemBoundaries(): TBoxArray;
+var
+  tpa, final: TPointArray;
+  atpa: T2DPointArray;
+  b: TBox;
+  stack: EStack;
+begin
+  final := Target.FindColor(ITEM_BORDER, 1, Self.SlotsArea);
+  if final = [] then Exit;
+
+  for stack := Low(EStack) to High(EStack) do
+  begin
+    tpa := Target.FindColor(stack.Color, 0, Self.SlotsArea);
+    if tpa <> [] then
+      final += tpa;
+  end;
+
+  atpa := final.Cluster(200, 3);
+
+  for tpa in atpa do
+  begin
+    b := tpa.Bounds();
+    if b.Height <= 5 then Continue;
+
+    Result += TBoxArray.Create([Self.SlotsArea.X1, b.Y1], 8, 1, 31, Min(Self.SlotsArea.Y2-b.Y1, 31), [17, 1]);
+  end;
+end;
+
+
+(*
+## Bank.IsOpen
+```pascal
+function TBank.IsOpen(): Boolean;
+```
+Returns true if the bank is open.
+
+Example:
+```pascal
+WriteLn Bank.IsOpen();
+```
+*)
+function TBank.IsOpen(): Boolean;
+var
+  tpa: TPointArray;
+  title: String;
+begin
+  if BankPin.IsOpen() then
+  begin
+    if not BankPin.WaitLoading(3000) then
+      raise GetDebugLn('BankPin', 'Bank pin buttons don''t seem to have loaded in 3 seconds.');
+
+    if not BankPin.Enter(Profiles.GetPin()) then
+      raise GetDebugLn('BankPin', 'Failed to enter bank pin.');
+  end;
+
+  tpa := Self._GetButtonDividers();
+  Result := (Length(tpa) = 3);
+
+  if not Result then
+  begin
+    title := Self.Title.GetTitle();
+    Result := title in ['Bank', 'Tab ', 'Equip'];
+  end;
+
+  if Result then
+  begin
+    if tpa = [] then
+    begin
+      if not Self.HasJagexAccountAd() then Exit;
+      if not Self.CloseJagexAccountAd() then Exit;
+      Exit(Self.IsOpen()); //ad closed, restart
+    end;
+
+    Self.UpdateButtons(tpa);
+  end;
+end;
+
+(*
+## Bank.WaitOpen
+```pascal
+function TBank.WaitOpen(time: Integer; interval: Integer = -1): Boolean;
+```
+Returns true if the bank is open within `time` milliseconds.
+
+## Example:
+```pascal
+WriteLn Bank.WaitOpen();
+```
+*)
+function TBank.WaitOpen(time: Integer; interval: Integer = -1): Boolean;
+begin
+  if interval < 0 then interval := RandomMode(100, 50, 1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+(*
+## Bank.Close
+```pascal
+function TBank.Close(escape: Boolean): Boolean;
+function TBank.Close(escapeProbability: Single = 0): Boolean; overload;
+```
+Closes the bank, depending on `escape` or `escapeProbability the function will
+either click the button or press escape key.
+
+Example:
+```pascal
+WriteLn Bank.Close();
+```
+*)
+function TBank.Close(escape: Boolean): Boolean;
+begin
+  Result := Self.Title.Close(escape);
+end;
+
+function TBank.Close(escapeProbability: Single = -1): Boolean; overload;
+begin
+  Result := Self.Title.Close(escapeProbability);
+end;
+
+(*
+## Bank.Tabs
+You can access the bank tabs coordinates via the `TBank.Tabs` variable.
+
+Example:
+```pascal
+ShowOnTarget(Bank.Tabs);
+```
+```{figure} ../../images/bank_tabs.png
+The bank interface.
+```
+*)
+
+(*
+### Bank.CountTabs
+```pascal
+function TBank.CountTabs: Integer;
+```
+Counts the existing bank tabs.
+
+Example:
+```pascal
+WriteLn Bank.CountTabs();
+```
+*)
+function TBank.CountTabs(): Integer;
+var
+  i: Integer;
+begin
+  for i := 9 downto 1 do
+    if Target.HasColor(ITEM_BORDER, 0, 1, Self.Tabs[i]) then
+      Exit(i);
+end;
+
+(*
+### Bank.GetCurrentTab
+```pascal
+function TBank.GetCurrentTab(): Integer;
+```
+Get the current active bank tab.
+
+Example:
+```pascal
+tab := Bank.GetCurrentTab();
+WritLn tab;
+ShowOnTarget(Bank.Tabs[tab]);
+```
+*)
+function TBank.GetCurrentTab(): Integer;
+var
+  i: Integer;
+begin
+  for i := 0 to 9 do
+    with Self.Tabs[i] do
+      if not Target.HasColor($516471, 0, 1, [X1+4, Y2+3, X2-4, Y2+5]) then
+        Exit(i);
+end;
+
+(*
+### Bank.OpenTab
+```pascal
+function TBank.OpenTab(tab: Integer): Boolean;
+```
+Opens the specified bank tab.
+
+Example:
+```pascal
+WriteLn Bank.OpenTab(0);
+```
+*)
+function TBank.OpenTab(tab: Integer): Boolean;
+  function _TabChanged(tab: Integer): Boolean;
+  begin
+    if tab <> 0 then
+      Exit(tab = Self.GetCurrentTab());
+
+    //when search is open tab 0 is returned.
+    Result := not Chat.FindQuery('Show items');
+  end;
+
+begin
+  if not Self.IsOpen() then Exit;
+
+  if tab = Self.GetCurrentTab() then
+  begin
+    if tab <> 0 then Exit(True);
+    if not Chat.FindQuery('Show items') then Exit(True);
+  end;
+
+  Mouse.Click(Self.Tabs[tab], EMouseButton.LEFT);
+  Result := SleepUntil(_TabChanged(tab), RandomMode(100, 50, 1500), 600);
+  Sleep(200, 300);
+end;
+
+
+(*
+## Bank.SetQuantity
+```pascal
+function TBank.SetQuantity(quantity: EItemQuantity; amount: Integer = 0): Boolean;
+```
+Attempts to set the bank quantity to `quantity`, returns true if we succeed.
+
+Example:
+```pascal
+WriteLn Bank.SetQuantity(EItemQuantity.FIVE);
+```
+*)
+function TBank.SetQuantity(quantity: EItemQuantity; amount: Integer = 0): Boolean;
+begin
+  if Self.QuantityButtons[quantity].Enabled then
+    Exit(True);
+  Result := Self.QuantityButtons[quantity].Enabled[True];
+
+  if Result or (quantity <> EItemQuantity.CUSTOM) then
+    Exit;
+
+  if Chat.AnswerQuery('Enter amount', ToString(amount), RandomLeft(1400, 2400)) then
+  begin
+    Self._Cache.Quantity := amount;
+    Result := Self.QuantityButtons[quantity].Enabled;
+  end;
+end;
+
+
+(*
+## Bank.IsSearchOpen
+```pascal
+function TBank.IsSearchOpen(): Boolean;
+```
+Checks if the bank search is currently open.
+
+Example:
+```pascal
+WriteLn Bank.IsSearchOpen();
+```
+*)
+function TBank.IsSearchOpen(): Boolean;
+begin
+  Result := Chat.FindQuery('Show items', True);
+end;
+
+(*
+## Bank.WaitSearchOpen
+```pascal
+function TBank.WaitSearchOpen(time: Integer = 600): Boolean;
+```
+Waits `time` milliseconds for the bank search to be open.
+
+Example:
+```pascal
+WriteLn Bank.WaitSearchOpen();
+```
+*)
+function TBank.WaitSearchOpen(time: Integer = 600; interval: Integer = -1): Boolean;
+begin
+  Result := Chat.WaitQuery('Show items', True, time, interval);
+end;
+
+(*
+## Bank.OpenSearch
+```pascal
+function TBank.OpenSearch(waitTime: Integer = 0): Boolean;
+```
+Attempts to open the bank search and Waits `waitTime` milliseconds for it to be open.
+
+Example:
+```pascal
+WriteLn Bank.OpenSearch();
+```
+*)
+function TBank.OpenSearch(waitTime: Integer = 0): Boolean;
+begin
+  Self.MiscButtons[EBankMiscButton.SEARCH].Click();
+  if waitTime <= 0 then
+    Exit(Self.IsSearchOpen());
+  Result := Self.WaitSearchOpen(waitTime);
+  Sleep(200, 300);
+end;
+
+(*
+## Bank.ClearSearch
+```pascal
+function TBank.ClearSearch(): Boolean;
+```
+Attempts to clear the bank search.
+
+Example:
+```pascal
+WriteLn Bank.ClearSearch();
+```
+*)
+function TBank.ClearSearch(): Boolean;
+begin
+  if not Self.Title.IsTitle('Showing items:') then Exit(True);
+
+  if Biometrics.RandomBoolean() then
+    Self.MiscButtons[EBankMiscButton.SEARCH].Click()
+  else
+    Mouse.Click(Self.Tabs[0], EMouseButton.LEFT);
+  Result := SleepUntil(not Self.Title.IsTitle('Showing items:'), RandomMode(100, 50, 1500), 600);
+end;
+
+(*
+## Bank.Search
+```pascal
+function TBank.Search(item: String): Boolean;
+```
+Searches for an item.
+
+Example:
+```pascal
+Bank.Search('logs'); // Search for logs
+```
+*)
+function TBank.Search(item: TItem): Boolean;
+var
+  txt: String;
+  i, j: Integer;
+begin
+  txt := item.SimplifyName();
+
+  if Self.Title.IsTitle('Showing items: ' + txt) then Exit(True);
+  if not Self.ClearSearch() then Exit;
+  if not Self.OpenSearch(Random(2000, 2500)) then Exit;
+
+  for i := 1 to Length(txt) do
+  begin
+    Keyboard.KeyPress(Target.KeyCodeFromChar(txt[i]));
+    Sleep(100, 200);
+
+    if i = j then Break;
+
+    if (j = 0) and Self.Items.Contains(item) then
+      j := i + Random(2, 4);
+  end;
+
+  Result := SleepUntil(Self.Items.Contains(item), 300, 2000);
+end;
+
+(*
+## Bank.CloseSearch
+```pascal
+function TBank.CloseSearch(): Boolean;
+```
+
+Closes the bank search if it's open.
+
+Example:
+```pascal
+Bank.Search('logs'); // Search for logs
+Wait(1000);
+Bank.CloseSearch();
+```
+*)
+function TBank.CloseSearch(): Boolean;
+begin
+  Result := Self.ClearSearch() and
+            Chat.AnswerQuery('Show items', '', Random(2000, 2500));
+end;
+
+(*
+## Bank.HasIncinerator
+```pascal
+function TBank.HasIncinerator(): Boolean;
+```
+Returns true if the bank screen has the incenerator visible.
+
+Example:
+```pascal
+if Bank.HasIncenerator() then
+  ShowOnTarget(Self.Incenerator);
+```
+*)
+function TBank.HasIncinerator(): Boolean;
+begin
+  with Self.Incenerator do
+    Result := Target.HasColor(ColorTolerance($517F9E, 2.132, EColorSpace.HSV, [2.437, 0.309, 0.256]), 1, [X1, Y1+55, X2, Y2]);
+end;
+
+(*
+## Bank.InceneratorTooltipVisible
+```pascal
+function TBank.InceneratorTooltipVisible(): Boolean;
+```
+Returns true if the incenerator tooltip is visible.
+This is important to check when you want to interact with the bottom buttons of
+the bank as the tooltip will cover them.
+
+Example:
+```pascal
+WriteLn Bank.InceneratorTooltipVisible();
+```
+*)
+function TBank.InceneratorTooltipVisible(): Boolean;
+begin
+  with Self.Incenerator do
+    Result := Target.HasColor($A0FFFF, 0, 1, [X1+6, Y1+76, X2, Y2+35]);
+end;
+
+(*
+## Bank.CloseInceneratorTooltip
+```pascal
+function TBank.CloseInceneratorTooltip(): Boolean;
+```
+Attempts to close the incenerator tooltip.
+This is important to do when you want to interact with the bottom buttons of
+the bank as the tooltip will cover them.
+
+Example:
+```pascal
+if Bank.InceneratorTooltipVisible() then
+  WriteLn Bank.CloseInceneratorTooltip();
+```
+*)
+function TBank.CloseInceneratorTooltip(): Boolean;
+var
+  boxes: TBoxArray;
+begin
+  if not Self.Incenerator.Contains(Target.MouseXY) then
+    Exit(True);
+
+  boxes := Self.Incenerator.Invert(Self.Bounds).SortFrom(Target.MouseXY);
+
+  ASyncMouse.Move(boxes[RandomLeft(0, High(boxes))].RandomPoint());
+  Result := SleepUntil(not Self.InceneratorTooltipVisible(), 100, 1000);
+  ASyncMouse.Stop();
+end;
+
+
+(*
+## Bank.HasPotionStorage
+```pascal
+function TBank.HasPotionStorage(): Boolean;
+```
+Returns True/False if the bank has the potion storage menu available.
+
+Example:
+```pascal
+WriteLn Bank.HasPotionStorage();
+```
+*)
+function TBank.HasPotionStorage(): Boolean;
+begin
+  Result := Target.HasColor(ColorTolerance($517F9E, 2.132, EColorSpace.HSV, [2.437, 0.309, 0.256]), 1, Self.PotionStorage);
+end;
+
+(*
+## Bank.PotionStorageIsOpen
+```pascal
+function TBank.PotionStorageIsOpen(): Boolean;
+```
+Returns True if the potion storage is currently open.
+
+Example:
+```pascal
+WriteLn Bank.PotionStorageIsOpen();
+```
+*)
+function TBank.PotionStorageIsOpen(): Boolean;
+begin
+  Result := Target.HasColor($1F98FF, 0,  3000, Self.SlotsArea);
+end;
+
+
+(*
+## Bank._FindTabText
+```pascal
+function TBank._FindTabText(tpa: TPointArray; out bounds: TBox): Boolean;
+```
+Internal helper function help process the tabs text when you search.
+
+Example:
+```pascal
+if Bank.Search('logs') then
+  if Bank._FindTabText(Target.FindColor(TFonts.LIGHT_YELLOW, 0, bounds), bounds) then
+    ShowOnTarget(bounds);
+```
+*)
+function TBank._FindTabText(tpa: TPointArray; out bounds: TBox): Boolean;
+var
+  atpa: T2DPointArray;
+begin
+  if tpa = [] then Exit;
+  atpa := tpa.Cluster(6).ExcludeDimensions(24, 8, 26, 8);
+  if atpa = [] then Exit;
+
+  atpa := atpa.SortByY(False)[0].Cluster(1.5);
+  bounds := atpa.SortByX(False)[0].Bounds();
+
+  bounds.X1 -= 1;
+  bounds.Y1 -= 1;
+  bounds.X2 += 1;
+  bounds.Y2 += 3;
+  Result := True;
+end;
+
+(*
+## Bank.FindTab
+```pascal
+function TBank.FindTab(item: TItem; openTab: Boolean = True): Integer;
+```
+Find the bank tab of `item`.
+
+```{note}
+A known limitation of this is that if several items match the sprite of the item (for example multiple charged jewlry) the tab retrieved will be the first one found. If you have 'Games necklace(1)' in tab 1 and 'Games necklace(8)' in tab 5 and search for the latter, you will get tab 1.
+```
+
+Example:
+```pascal
+WriteLn Bank.FindTab('Molten glass');
+```
+*)
+function TBank.FindTab(item: TItem): Integer;
+var
+  bounds: TBox;
+begin
+  if not Self.Search(item) then Exit(-1);
+  if not Self.Items.Find(item, bounds)  then Exit(-1);
+
+  bounds := [Self.Bounds.X1 + 56, Self.Bounds.Y1 + 77, Self.Bounds.X1 + 84, bounds.Y1];
+  if bounds.Height < 8 then Exit(0);
+
+  if Self._FindTabText(Target.FindColor(TFonts.LIGHT_YELLOW, 0, bounds), bounds) then
+    Result := OCR.RecognizeNumber(bounds, Fonts.PLAIN_11, [TFonts.LIGHT_YELLOW], 0);
+  if Self._FindTabText(Target.FindColor(TFonts.WHITE, 0, bounds), bounds) then
+    Result := OCR.RecognizeNumber(bounds, Fonts.PLAIN_11, [TFonts.WHITE], 0);
+end;
+
+(*
+## Bank.FindScroll
+```pascal
+function TBank.FindScroll(item: TItem): Integer;
+```
+Find the scroll position of the bank where `item` is visible..
+
+```{note}
+A known limitation of this is that if several items match the sprite of the item (for example multiple charged jewlry) the tab retrieved will be the first one found. If you have 'Games necklace(1)' in tab 1 and 'Games necklace(8)' in tab 5 and search for the latter, you will get tab 1.
+```
+
+Example:
+```pascal
+WriteLn Bank.FindScroll('Molten glass');
+```
+*)
+function TBank.FindScroll(item: TItem): Integer;
+var
+  next: Integer;
+  down: Boolean;
+begin
+  if not Self.Scroll.CanScroll() then Exit(-1);
+
+  Result := Self.Scroll.GetLevel();
+  down := (Result > 0) or RandomBoolean(0.5);
+
+  if Self.Items.Contains(item) then Exit;
+
+  repeat
+    if down then next := Result - 5
+    else next := Result + 5;
+
+    Result := Self.Scroll.SetLevel(next);
+    if Self.Items.Contains(item) then Exit;
+
+    if not Self.IsOpen() then Exit(-1); //failsafe
+  until not InRange(Result, 1, 99);
+
+  down := not down;
+  repeat
+    if down then next := Result - 5
+    else next := Result + 5;
+
+    Result := Self.Scroll.SetLevel(next);
+    if Self.Items.Contains(item) then Exit;
+
+    if not Self.IsOpen() then Exit(-1);
+  until not InRange(Result, 1, 99);
+
+  Result := -1;
+end;
+
+(*
+## Bank._InteractionHelper
+```pascal
+function TBank._InteractionHelper(mode: EBankInteraction; slot: TBox; amount: Integer; useQuantityButton: Boolean): Boolean;
+```
+Internal helper method to handle both withdrawing and depositing of items.
+
+Example:
+```pascal
+if Bank.Items.Find('Abyssal whip', slot) the
+  Bank._InteractionHelper(EBankInteraction.WITHDRAW, slot, 1, True);
+```
+*)
+function TBank._InteractionHelper(mode: EBankInteraction; slot: TBox; amount: Integer; useQuantityButton: Boolean): Boolean;
+var
+  quantity: EItemQuantity;
+  amountStr, modeStr, upText: String;
+  timeout: TCountDown;
+begin
+  amountStr := ToString(amount);
+  quantity := EItemQuantity.Integer2Quantity(amount);
+
+  if mode = EBankInteraction.DEPOSIT then
+    modeStr := 'Deposit-'
+  else
+    modeStr := 'Withdraw-';
+
+  if useQuantityButton then
+  begin
+    if not Self.SetQuantity(quantity, amount) then
+      Exit;
+
+    Mouse.Move(slot);
+    if quantity <> EItemQuantity.CUSTOM then
+    begin
+      Mouse.Click(EMouseButton.LEFT);
+      Exit(True);
+    end;
+
+    if Self._Cache.Quantity = amount then
+    begin
+      Mouse.Click(EMouseButton.LEFT);
+      Exit(True);
+    end;
+
+    timeout.Start(Round(RandomMode(100, 85, 250)));
+
+    repeat
+      if MainScreen._IsUpText(upText, [modeStr], True, 0.85) then
+      begin
+        Sleep(50);
+        if MainScreen._IsUpText(upText, [modeStr], True, 0.85) then
+          Break;
+      end;
+
+      if timeout.IsFinished then
+        Exit;
+      Sleep(25);
+    until False;
+
+
+    upText := upText.Between(modeStr, ' ');
+
+    if upText = amountStr then
+    begin
+      Self._Cache.Quantity := amount;
+      Mouse.Click(EMouseButton.LEFT);
+      Exit(True);
+    end;
+
+    if not ChooseOption.Select(modeStr + 'X') then
+      Exit;
+    if Chat.AnswerQuery('Enter amount', amountStr, RandomLeft(1400, 2400)) then
+    begin
+      Self._Cache.Quantity := amount;
+      Exit(True);
+    end
+    else
+      Exit;
+  end;
+
+  Mouse.Move(slot);
+
+  if (quantity <> EItemQuantity.CUSTOM) then
+  begin
+    if Self.QuantityButtons[quantity].Enabled then
+    begin
+      Mouse.Click(EMouseButton.LEFT);
+      Exit(True);
+    end;
+  end
+  else
+  if MainScreen.IsUpText(modeStr + amountStr) then
+  begin
+    Mouse.Click(EMouseButton.LEFT);
+    Exit(True);
+  end;
+
+  if (quantity = EItemQuantity.ALL) then
+    Exit(ChooseOption.Select(modeStr + 'All'));
+
+  Result := ChooseOption.Select(modeStr + amountStr + ' ', True, False) or
+            (ChooseOption.Select(modeStr + 'X') and Chat.AnswerQuery('Enter amount', amountStr, RandomLeft(1400, 2400)));
+end;
+
+(*
+## Bank.Find
+```pascal
+function TBank.Find(item: TItem; out data: TBankPosition; attempts: Int32 = 3): Boolean;
+```
+Attempts to find `item` in the back by whatever means necessary.
+This will search and scroll the bank until the item is found.
+By default attempts up to 3 times.
+
+Item position data is returned via `data`.
+*)
+function TBank.Find(item: TItem; out data: TBankPosition; attempts: Int32 = 3): Boolean;
+begin
+  if attempts = 0 then Exit(False);
+
+  if Self.Items.Find(item, data.Slot) then
+  begin
+    if not Self.MiscButtons[EBankMiscButton.SEARCH].Enabled then
+    begin
+      data.Tab := Self.GetCurrentTab();
+      data.Scroll := Self.Scroll.GetLevel();
+      Self._Cache.Items.Value[item] := data;
+      Exit(True);
+    end;
+
+    if Self.WaitSearchOpen(600) then
+      if not Self.CloseSearch() then Exit(Self.Find(item, data, Dec(attempts))); //unknown state, reset search
+  end;
+
+  data.Tab := Self.FindTab(item);
+  if data.Tab = -1 then
+    Exit(Self.Find(item, data, Dec(attempts)));
+  Self.OpenTab(data.Tab);
+
+  if Self.Items.Find(item, data.Slot) then
+  begin
+    data.Scroll := Self.Scroll.GetLevel();
+    Self._Cache.Items.Value[item] := data;
+    Exit(True);
+  end;
+
+  data.Scroll := Self.FindScroll(item);
+  if data.Scroll = -1 then
+    Exit(Self.Find(item, data, Dec(attempts)));
+
+  if not Self.Items.Find(item, data.Slot) then
+    Exit(Self.Find(item, data, Dec(attempts)));
+
+  Result := True;
+  Self._Cache.Items.Value[item] := data;
+end;
+
+
+(*
+## Bank.Withdraw
+```pascal
+function TBank.Withdraw(item: TBankItem; useQuantityButton: Boolean = True; useCache: Boolean = True): Boolean;
+function TBank.Withdraw(item: TItem; useQuantityButton: Boolean = True; useCache: Boolean = True): Boolean; overload;
+```
+Attempts to withdraw `item` from the bank.
+
+Example:
+```pascal
+WriteLn Bank.Withdraw(item);
+```
+*)
+function TBank.Withdraw(item: TBankItem; useQuantityButton, useCache: Boolean = True; waitConfirmation: Boolean = False): Boolean;
+var
+  data: TBankPosition;
+  tmp: TItem;
+  count: Integer;
+  attempt: Integer;
+begin
+  if useCache and Self._Cache.Items.Exists(item.Item) then
+    data := Self._Cache.Items.Value[item.Item]
+  else if not Self.Find(item.Item, data) then
+    Exit;
+
+  if not Self.OpenTab(data.Tab) then Exit;
+  if not InRange(Self.Scroll.GetLevel() - data.Scroll, -5, 5) then
+    Self.Scroll.SetLevel(data.Scroll);
+
+  tmp := item.ToItem();
+
+  for attempt := 0 to 2 do
+  begin
+    count := Self.Slots.ReadStack(data.Slot);
+    if not Self.ModeButtons[EBankModeButton.NOTES].Enabled[item.Noted] then
+      Continue;
+    if Self._InteractionHelper(EBankInteraction.WITHDRAW, data.Slot, item.Quantity, useQuantityButton) then
+    begin
+      if not waitConfirmation then
+        Exit(True);
+
+      Self.Slots.WaitFade(data.Slot);
+      Sleep(200);
+
+      if SleepUntil(Self.Slots.ReadStack(data.Slot) < count, 200, 4200) then
+        Exit(True);
+    end;
+  end;
+end;
+
+function TBank.Withdraw(item: TItem; useQuantityButton: Boolean = True; useCache: Boolean = True): Boolean; overload;
+begin
+  Result := Self.Withdraw(item.ToBankItem(), useQuantityButton, useCache);
+end;
+
+(*
+## Bank.Deposit
+```pascal
+function TBank.Deposit(item: TBankItem; useQuantityButton: Boolean = True): Boolean;
+function TBank.Deposit(item: TItem; useQuantityButton: Boolean = True): Boolean; overload;
+```
+Attempts to deposit `item` into the bank.
+
+Example:
+```pascal
+WriteLn Bank.Deposit(item);
+```
+*)
+function TBank.Deposit(item: TBankItem; useQuantityButton: Boolean = True): Boolean;
+var
+  slot: TBox;
+begin
+  if Inventory.Items.Find(item.ToItem(), slot) then
+    Result := Self._InteractionHelper(EBankInteraction.DEPOSIT, slot, item.Quantity, useQuantityButton);
+end;
+
+function TBank.Deposit(item: TItem; useQuantityButton: Boolean = True): Boolean; overload;
+var
+  slot: TBox;
+begin
+  if Inventory.Items.Find(item, slot) then
+    Result := Self._InteractionHelper(EBankInteraction.DEPOSIT, slot, 1, useQuantityButton);
+end;
+
+(*
+## Bank.DepositContainers
+```pascal
+function Tbank.DepositContainers(): Boolean;
+```
+Deposits all items item containers in the {ref}`inventory` into the bank.
+Example of item containers:
+- Log basket
+- Plank sack
+- Gem bag
+- Coal bag
+- etc
+
+Example:
+```pascal
+WriteLn Bank.DepositContainers();
+```
+*)
+function TBank.DepositContainers(): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  Self.DepositButtons[EBankDepositButton.CONTAINERS].Click(EMouseButton.LEFT);
+  Result := True;
+end;
+
+(*
+## Bank.DepositInventory
+```pascal
+function Tbank.DepositInventory(): Boolean;
+```
+Deposits all items in the {ref}`inventory` into the bank.
+
+Example:
+```pascal
+WriteLn Bank.DepositInventory();
+```
+*)
+function TBank.DepositInventory(): Boolean;
+var
+  count: Integer;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  count := Inventory.Slots.Count();
+  Self.DepositButtons[EBankDepositButton.INVENTORY].Click(EMouseButton.LEFT);
+  Result := SleepUntil(Inventory.Slots.Count() < count, 200, 4*TICK);
+end;
+
+(*
+## Bank.DepositWorn
+```pascal
+function TBank.DepositWorn(): Boolean;
+```
+Deposits all items in the worn equipment into the bank.
+
+Example:
+```pascal
+WriteLn Bank.DepositWorn();
+```
+*)
+function TBank.DepositWorn(): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  Self.DepositButtons[EBankDepositButton.WORN].Click(EMouseButton.LEFT);
+  Result := True;
+end;
+
+
+(*
+## Bank.DepositDifferent
+```pascal
+function TBank.DepositDifferent(items: TItemArray; useQuantityButton: Boolean = True): Boolean;
+```
+Attempts to deposit all items found that are not the `items` passed as a paremeter.
+
+Example:
+```pascal
+WriteLn Bank.DepositDifferent(['Abyssal whip', 'Bandos chestplate', 'Bandos tassets']);
+```
+*)
+function TBank.DepositDifferent(items: TItemArray; useQuantityButton: Boolean = True): Boolean;
+var
+  slots: TIntegerArray;
+  slot: Integer;
+  hash: String;
+  deposited: TStringArray;
+begin
+  slots := Inventory.Items.FindDifferent(items);
+  if slots = [] then Exit(True);
+
+  for slot in slots do
+  begin
+    hash := Inventory.Items._GetHash(slot);
+    if deposited.Contains(hash) then
+      Continue;
+    deposited += hash;
+    if not Self._InteractionHelper(EBankInteraction.DEPOSIT, Inventory.Slots.Box(slot), QUANTITY_ALL, useQuantityButton) then
+      Exit;
+  end;
+  Result := True;
+end;
+
+
+(*
+## Bank.IsDepleted
+```pascal
+function TBank.IsDepleted(item: TBankItem; attempts: Integer = 3): Boolean;
+```
+Checks if a item is depleted in the bank.
+This returns true if the `item.Item` quantity in the bank is less than `item.Quantity`.
+
+It also sets the `Bank.Depleted` variable to true which you can use in your script for whatever you see fit.
+
+Example:
+```pascal
+WriteLn Bank.IsDepleted(item);
+```
+*)
+function TBank.IsDepleted(item: TBankItem; attempts: Integer = 3): Boolean;
+var
+  data: TBankPosition;
+begin
+  if attempts = 0 then Exit;
+
+  if Self.Find(item.Item, data) then
+  begin
+    if Max(1, TItem.ReadStack(data.Slot)) < Min(item.Quantity, 28) then
+    begin
+      Self.Depleted := Self.IsOpen();
+      Exit(True);
+    end;
+
+    Exit(False);
+  end;
+
+  Result := Self.IsDepleted(item, attempts-1);
+
+  Self.Depleted := Result and Self.IsOpen();
+end;
+
+
+(*
+## Bank.PrioritySort
+```pascal
+function TBank.PrioritySort(constref l, r: TBankItem): Int32;
+```
+Sorting function for {ref}`TBankItemArray`.
+
+In a nutshell, this can be used to sort a `TBankitemArray` by prioritizing
+what's currently visitble.
+
+Do keep in mind that this uses {ref}`ItemFinder` to work and may be a bad idea
+to use in huge arrays.
+
+Example:
+```pascal
+bankItems := Sorted(bankItems, @Bank.PrioritySort);
+```
+*)
+function TBank.PrioritySort(constref l, r: TBankItem): Int32;
+var
+  a, b: Boolean;
+begin
+  a := Self.Items.Contains(l.Item);
+  b := Self.Items.Contains(r.Item);
+  if a = b then Exit(0);
+  if a then Exit(-1);
+  Result := 1;
+end;
+
+
+procedure TBank._SetupMapObjects();
+begin
+  Self.Banks := TGObjectArray.Create(
+                  Map.Walker, ObjectsJSON.GetByAction('Bank')
+                ) +
+                TGObjectArray.Create(
+                  Map.Walker, ObjectsJSON.GetByAllActions(['Use', 'Collect'])
+                );
+  Self.Bankers := TEntityArray.Create(Map.Walker, NPCsJSON.GetByAction('Bank'));
+end;
+
+(*
+## Bank.Hover
+```pascal
+function TBank.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Hover(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+function TBank.Hover(walk: Boolean = True): Boolean; overload;
+```
+Hovers the closest bank that WaspLib is aware of.
+
+This assumes that {ref}`Map` is being used and setup.
+It's possible to use this with other systems but you need to configure it all
+manually.
+
+It will always hover the closest bank {ref}`TGObject` or {ref}`TEntity` on your
+loaded map.
+
+If you are too far, it will attempt to walk closer to it.
+*)
+function TBank.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+begin
+  if walk then
+    Exit(obj.WalkHover());
+  Result := obj.Hover();
+end;
+
+function TBank.Hover(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+begin
+  if walk then
+    Exit(npc.WalkHover());
+  Result := npc.Hover();
+end;
+
+function TBank.Hover(walk: Boolean = True): Boolean; overload;
+var
+  obj: PRSObject;
+  npc: PRSEntity;
+  me: TPoint;
+begin
+  if (Self.Banks = []) or (Self.Bankers = []) then
+    Self._SetupMapObjects();
+
+  me := Map.Position();
+  obj := @Self.Banks[Self.Banks.ClosestIndex(me)];
+  npc := @Self.Bankers[Self.Bankers.ClosestIndex(me)];
+
+  if obj^.DistanceTo(me) < npc^.DistanceTo(me) then
+    Exit(Self.Hover(obj^, walk));
+  Result := Self.Hover(npc^, walk);
+end;
+
+(*
+## Bank.Open
+```pascal
+function TBank.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Open(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+function TBank.Open(walk: Boolean = True): Boolean; overload;
+```
+Opens the bank for you.
+This assumes that {ref}`Map` is being used and setup.
+
+It's possible to use this with other systems but you need to configure it all
+manually.
+
+It will always use the closest bank {ref}`RSObject` or {ref}`RSNPC` WaspLib is
+aware of on your loaded map.
+
+If you are too far, it will attempt to walk closer to it by default unless you
+set the `walk` parameter to `False`.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  Map.Setup([EChunk.VARROCK]);
+  Bank.Open();
+end.
+```
+```{figure} ../../images/bankopen.gif
+```
+*)
+function TBank.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+begin
+  if walk then
+    Result := obj.WalkInteract(['Bank B', 'Bank E', 'Bank G', 'Use B'])
+  else
+    Result := obj.Interact(['Bank B', 'Bank E', 'Bank G', 'Use B']);
+
+  if not Result then
+    if not MainScreen.IsUpText('Bank') or not ChooseOption.Select(['Bank B', 'Bank E']) then
+      Exit;
+
+  obj.Walker^.WaitMoving();
+  Result := Self.WaitOpen(3000);
+end;
+
+function TBank.Open(const npc: TEntity; walk: Boolean = True): Boolean; overload;
+begin
+  if walk then
+    Result := npc.WalkInteract(['Bank B', 'Bank E'])
+  else
+    Result := npc.Interact(['Bank B', 'Bank E']);
+
+  if not Result and not MainScreen.Interact(['Bank B', 'Bank E']) then
+    Exit;
+
+  npc.Walker^.WaitMoving();
+  Result := Self.WaitOpen(3000);
+end;
+
+function TBank.Open(walk: Boolean = True): Boolean; overload;
+var
+  obj: PRSObject;
+  npc: PRSEntity;
+  me: TPoint;
+begin
+  if MSInterface.IsOpen() then
+  begin
+    if Self.IsOpen() then
+      Exit(True);
+    MSInterface.Close(True);
+  end;
+
+  if (Self.Banks = []) or (Self.Bankers = []) then
+    Self._SetupMapObjects();
+
+  me := Map.Position();
+  obj := @Self.Banks[Self.Banks.ClosestIndex(me)];
+  npc := @Self.Bankers[Self.Bankers.ClosestIndex(me)];
+
+  if obj^.DistanceTo(me) < npc^.DistanceTo(me) then
+    Exit(Self.Open(obj^, walk));
+  Result := Self.Open(npc^, walk);
+end;
+
+(*
+## Bank.IsSlotLocked
+```pascal
+function TBank.IsSlotLocked(slot: Integer): Boolean;
+```
+Checks if an inventory slot is locked.
+This assumes that the bank interface is open as locked slots are only visible with the bank open.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  if Bank.IsSlotLocked(0) then
+    WriteLn('Slot 0 is locked');
+end.
+```
+*)
+function TBank.IsSlotLocked(slot: Integer): Boolean;
+var
+  bounds: TBox;
+  tpa: TPointArray;
+begin
+  bounds := Inventory.Slots.Box(slot);
+  tpa := Target.FindColor($0000FF, 4, bounds.Expand(2, 1));
+  tpa := tpa.ExcludeBox(bounds);
+  Result := Length(tpa) >= 100;
+end;
+
+(*
+## Bank.GetLockedSlots
+```pascal
+function TBank.GetLockedSlots(): TIntegerArray;
+```
+Returns all inventory slots that are locked.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  WriteLn(Bank.GetLockedSlots());
+end.
+```
+*)
+function TBank.GetLockedSlots(): TIntegerArray;
+var
+  slot: Integer;
+begin
+  for slot := Inventory.Slots.Boxes().Low to Inventory.Slots.Boxes().High do
+    if Self.IsSlotLocked(slot) then
+      Result += slot;
+end;
+
+(*
+## Bank.LockSlot
+```pascal
+function TBank.LockSlot(slot: Integer): Boolean;
+```
+Locks an inventory slot and returns confirmation the slot was locked.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  if Bank.LockSlot(0) then
+    WriteLn('Slot 0 has been locked');
+end.
+```
+*)
+function TBank.LockSlot(slot: Integer): Boolean;
+begin
+  if Self.IsSlotLocked(slot) then Exit(True);
+  Result := Inventory.Slots.Interact(slot, 'Lock-slot') and SleepUntil(Self.IsSlotLocked(slot), Random(100, 300), 2*TICK);
+end;
+
+(*
+## Bank.UnlockSlot
+```pascal
+function TBank.UnlockSlot(slot: Integer): Boolean;
+```
+Unlocks an inventory slot and returns confirmation the slot was unlocked.
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+begin
+  if Bank.UnlockSlot(0) then
+    WriteLn('Slot 0 has been unlocked');
+end.
+```
+*)
+function TBank.UnlockSlot(slot: Integer): Boolean;
+begin
+  if not Self.IsSlotLocked(slot) then Exit(True);
+  Result := Inventory.Slots.Interact(slot, 'Unlock-slot') and SleepUntil(not Self.IsSlotLocked(slot), Random(100, 300), 2*TICK);
+end;
+
+var
+(*
+## Bank variable
+Global {ref}`TBank` variable.
+*)
+  Bank: TBank;

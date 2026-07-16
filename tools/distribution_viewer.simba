@@ -1,0 +1,756 @@
+//!PACKAGE SCRIPT
+(*
+(Distribution Viewer)=
+# Tool: Distribution Viewer
+Tool to visually see random distributions available in the library in multiple shapes.
+
+```{figure} ../../images/distribution_viewer.gif
+```
+*)
+{$I WaspLib/main.simba}
+
+const DEFAULT_SHAPE: Integer = 0;
+const DEFAULT_DISTR: Integer = 1;
+const PT_AMOUNT: Integer = 5000;
+const PT_WEIGHT: Single = 0.1;
+
+type
+  TDistributionViewer = record
+    ImageBox: TImageBox;
+
+    Width, Height: Integer;
+
+    From: TPoint;
+    Tracking: Boolean;
+
+    Circle: TCircle;
+    Triangle: TTriangle;
+    Polygon: TPolygon;
+    Quad: TQuad;
+    Box: TBox;
+
+    Shape, Distribution: TLazComboBox;
+    PaintFunctions: array [0..4] of array [0..3] of TImageBoxPaintEvent;
+  end;
+
+function TTriangle.Create(center: TPoint; size: Integer): TTriangle; static; overload;
+var
+  tpa: TPointArray;
+  a, b, c: TPoint;
+begin
+  tpa := TPointArray.CreateFromCircle(center, size, False);
+  a := tpa[Random(0, High(tpa))];
+
+  repeat
+    b := tpa[Random(0, High(tpa))];
+  until a.DistanceTo(b) > 50;
+
+  repeat
+    c := tpa[Random(0, High(tpa))];
+  until (c.DistanceTo(a) > 50) and (c.DistanceTo(b) > 50);
+
+  Result := TTriangle.Create(a, b, c);
+end;
+
+function TPolygon.Create(center: TPoint; sides: Integer; size: Integer): TPolygon; static; overload;
+var
+  i: Integer;
+  dx,dy,ptx,pty,SinR,CosR: Double;
+  pt : TPoint;
+begin
+  ptx := center.X + size;
+  pty := center.Y + size;
+  SinR := Sin(DegToRad(360.0 / sides));
+  CosR := Cos(DegToRad(360.0 / sides));
+
+  Result := [Point(Round(ptx),Round(pty))];
+  for i:=1 to sides-1 do
+  begin
+    dx := ptx - center.x;
+    dy := pty - center.y;
+    ptx := (dy * SinR) + (dx * CosR) + center.x;
+    pty := (dy * CosR) - (dx * SinR) + center.y;
+    pt := Point(Round(ptx),Round(pty));
+
+    Result += [pt];
+  end;
+end;
+
+
+{$H-}
+procedure TDistributionViewer.CreateShape(sender: TLazObject);
+var
+  center: TPoint;
+  tpa: TPointArray;
+begin
+  center := [Self.Width div 2 + Random(-100, 100), Self.Height div 2 + Random(-30, 30)];
+  case Self.Shape.ItemIndex of
+    0: Self.Circle := TCircle.Create(center.X, center.Y, Random(90, 200));
+    1: Self.Triangle := TTriangle.Create(center, Random(100, 200));
+    2: Self.Polygon := TPolygon.Create(center, Random(5, 8), Random(80, 150));
+    3: Self.Quad := TQuad.CreateFromPoints(TPointArray.CreateFromSimplePolygon(center, 4, Random(80, 150), False)).Rotate(Random(-TAU, TAU));
+    4: Self.Box := TQuad.CreateFromPoints(TPointArray.CreateFromSimplePolygon(center, 4, Random(80, 150), False)).Bounds;
+  end;
+
+  Self.ImageBox.Repaint();
+end;
+
+
+//Circle
+procedure TDistributionViewer.PaintCircleRandomPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Circle.RandomPoint();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawCircle(Self.Circle.Center, Self.Circle.Radius, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintCircleRandomPointCenter(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Circle.RandomPointCenter();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawCircle(Self.Circle.Center, Self.Circle.Radius, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintCircleRandomSkewedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Circle.RandomSkewedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawCircle(Self.Circle.Center, Self.Circle.Radius, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintCircleRandomWeightedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+  tpa, pts: TPointArray;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Circle.RandomWeightedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawCircle(Self.Circle.Center, Self.Circle.Radius, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+
+//Triangle
+procedure TDistributionViewer.PaintTriangleRandomPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Triangle.RandomPoint();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoints(Self.Triangle.Corners.Connect(), $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintTriangleRandomPointCenter(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Triangle.RandomPointCenter();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoints(Self.Triangle.Corners.Connect(), $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintTriangleRandomSkewedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Triangle.RandomSkewedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoints(Self.Triangle.Corners.Connect(), $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintTriangleRandomWeightedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Triangle.RandomWeightedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoints(Self.Triangle.Corners.Connect(), $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+
+//Polygon
+procedure TDistributionViewer.PaintPolygonRandomPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Polygon.RandomPoint();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoly(Self.Polygon, True, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintPolygonRandomPointCenter(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Polygon.RandomPointCenter();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoly(Self.Polygon, True, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintPolygonRandomSkewedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Polygon.RandomSkewedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoly(Self.Polygon, True, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintPolygonRandomWeightedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Polygon.RandomWeightedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawPoly(Self.Polygon, True, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+
+//Quad
+procedure TDistributionViewer.PaintQuadRandomPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Quad.RandomPoint();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawQuad(Self.Quad, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintQuadRandomPointCenter(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Quad.RandomPointCenter();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawQuad(Self.Quad, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintQuadRandomSkewedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Quad.RandomSkewedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawQuad(Self.Quad, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintQuadRandomWeightedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+  b: TBox;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Quad.RandomWeightedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawQuad(Self.Quad, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+
+//Box
+procedure TDistributionViewer.PaintBoxRandomPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Box.RandomPoint();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawBox(Self.Box, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintBoxRandomPointCenter(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Box.RandomPointCenter();
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawBox(Self.Box, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintBoxRandomSkewedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Box.RandomSkewedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawBox(Self.Box, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+
+procedure TDistributionViewer.PaintBoxRandomWeightedPoint(sender: TImageBox; canvas: TImageBoxCanvas; r: TLazRect);
+var
+  matrix: TSingleMatrix;
+  pt: TPoint;
+begin
+  matrix.SetSize(Self.Width,Self.Height);
+
+  for 0 to PT_AMOUNT do
+  begin
+    pt := Self.Box.RandomWeightedPoint(Self.From);
+    matrix[pt.y+1,pt.x] := Min(1, matrix[pt.y+1,pt.x] + PT_WEIGHT);
+    matrix[pt.y-1,pt.x] := Min(1, matrix[pt.y-1,pt.x] + PT_WEIGHT);
+    matrix[pt.y,pt.x+1] := Min(1, matrix[pt.y,pt.x+1] + PT_WEIGHT);
+    matrix[pt.y,pt.x-1] := Min(1, matrix[pt.y,pt.x-1] + PT_WEIGHT);
+    matrix[pt.y,pt.x]   := Min(1, matrix[pt.y,pt.x]   + PT_WEIGHT);
+  end;
+
+  canvas.DrawHeatmap(matrix);
+  canvas.DrawBox(Self.Box, $FFFFFF);
+  canvas.DrawCross(Self.From, 8, $0000FF);
+end;
+{$H+}
+
+
+procedure TDistributionViewer.OnDistributionChange(sender: TLazObject);
+var
+  i, j: Integer;
+begin
+  i := Self.Shape.ItemIndex;
+  j := TLazComboBox(sender).ItemIndex;
+  Self.ImageBox.OnImgPaint := Self.PaintFunctions[i, j];
+end;
+
+procedure TDistributionViewer.OnShapeChange(sender: TLazObject);
+var
+  i, j: Integer;
+begin
+  i := TLazComboBox(sender).ItemIndex;
+  j := Self.Distribution.ItemIndex;
+  Self.ImageBox.OnImgPaint := Self.PaintFunctions[i, j];
+end;
+
+procedure TDistributionViewer.ImgBoxMouseMove(sender: TImageBox; {$H-}shift: ELazShiftStates;{$H+} x, y: Integer);
+begin
+  if Self.Tracking then
+    Self.From := [x,y];
+  sender.Repaint();
+end;
+
+procedure TDistributionViewer.ImgBoxMouseDown({$H-}sender: TImageBox; button: ELazMouseButton; shift: ELazShiftStates; x, y: Integer); {$H+}
+begin
+  if button <> ELazMouseButton.Left then Exit;
+  Self.Tracking := not Self.Tracking;
+end;
+
+procedure TDistributionViewer.Terminate();
+begin
+  Async.ScheduleStop('Repaint');
+end;
+
+procedure TDistributionViewer.Repaint();
+begin
+  Self.ImageBox.Repaint();
+end;
+
+{$H-}
+procedure TDistributionViewer.OnShow(sender: TLazObject);
+begin
+  Async.ScheduleEvery('Repaint', @Self.Repaint, 1); //force repainting lol
+  AddOnTerminate(@Self.Terminate);
+end;
+{$H+}
+
+
+procedure TDistributionViewer.Run();
+var
+  form: TLazForm;
+  panel: TLazPanel;
+  lbl: TLazLabel;
+  btn: TLazButton;
+  img: TImage;
+begin
+  Self.PaintFunctions[0,0] := @Self.PaintCircleRandomPoint;
+  Self.PaintFunctions[0,1] := @Self.PaintCircleRandomPointCenter;
+  Self.PaintFunctions[0,2] := @Self.PaintCircleRandomSkewedPoint;
+  Self.PaintFunctions[0,3] := @Self.PaintCircleRandomWeightedPoint;
+
+  Self.PaintFunctions[1,0] := @Self.PaintTriangleRandomPoint;
+  Self.PaintFunctions[1,1] := @Self.PaintTriangleRandomPointCenter;
+  Self.PaintFunctions[1,2] := @Self.PaintTriangleRandomSkewedPoint;
+  Self.PaintFunctions[1,3] := @Self.PaintTriangleRandomWeightedPoint;
+
+  Self.PaintFunctions[2,0] := @Self.PaintPolygonRandomPoint;
+  Self.PaintFunctions[2,1] := @Self.PaintPolygonRandomPointCenter;
+  Self.PaintFunctions[2,2] := @Self.PaintPolygonRandomSkewedPoint;
+  Self.PaintFunctions[2,3] := @Self.PaintPolygonRandomWeightedPoint;
+
+  Self.PaintFunctions[3,0] := @Self.PaintQuadRandomPoint;
+  Self.PaintFunctions[3,1] := @Self.PaintQuadRandomPointCenter;
+  Self.PaintFunctions[3,2] := @Self.PaintQuadRandomSkewedPoint;
+  Self.PaintFunctions[3,3] := @Self.PaintQuadRandomWeightedPoint;
+
+  Self.PaintFunctions[4,0] := @Self.PaintBoxRandomPoint;
+  Self.PaintFunctions[4,1] := @Self.PaintBoxRandomPointCenter;
+  Self.PaintFunctions[4,2] := @Self.PaintBoxRandomSkewedPoint;
+  Self.PaintFunctions[4,3] := @Self.PaintBoxRandomWeightedPoint;
+
+
+  form := TLazForm.Create();
+  form.Caption := 'Random Distribution Debugger';
+  form.Width := 1000;
+  form.Height := 600;
+  form.Position := ELazFormPosition.ScreenCenter;
+  form.Color := $242322;
+  form.BorderStyle := ELazFormBorderStyle.Sizeable;
+  form.OnShow := @Self.OnShow;
+
+  panel := TLazPanel.Create(form);
+  panel.Parent := form;
+  panel.SetBounds(0, 0, form.Width, 40);
+  panel.BevelOuter := ELazPanelBevel.None;
+  panel.Align := ELazAlign.Top;
+
+  Self.Distribution := TLazComboBox.Create(panel);
+  Self.Distribution.Parent := panel;
+  Self.Distribution.Items.Add('Random');
+  Self.Distribution.Items.Add('Gauss');
+  Self.Distribution.Items.Add('Skewed');
+  Self.Distribution.Items.Add('Weighted');
+  Self.Distribution.Style := ELazComboBoxStyle.DropDownList;
+  Self.Distribution.Align := ELazAlign.Left;
+  Self.Distribution.BorderSpacing.Around := 10;
+  Self.Distribution.ItemIndex := DEFAULT_DISTR;
+  Self.Distribution.OnChange := @Self.OnDistributionChange;
+
+  lbl := TLazLabel.Create(panel);
+  lbl.Parent := panel;
+  lbl.Caption := 'Distribution:';
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 12;
+  lbl.Height := 40;
+
+  Self.Shape := TLazComboBox.Create(panel);
+  Self.Shape.Parent := panel;
+  Self.Shape.Items.Add('Circle');
+  Self.Shape.Items.Add('Triangle');
+  Self.Shape.Items.Add('Polygon');
+  Self.Shape.Items.Add('Quad');
+  Self.Shape.Items.Add('Box');
+  Self.Shape.Style := ELazComboBoxStyle.DropDownList;
+  Self.Shape.ItemIndex := 0;
+  Self.Shape.Align := ELazAlign.Left;
+  Self.Shape.BorderSpacing.Around := 10;
+  Self.Shape.OnChange := @Self.OnShapeChange;
+
+  lbl := TLazLabel.Create(panel);
+  lbl.Parent := panel;
+  lbl.Caption := 'Shape:';
+  lbl.Font.Color := $FFFFFF;
+  lbl.Align := ELazAlign.Left;
+  lbl.BorderSpacing.Around := 12;
+  lbl.Height := 40;
+
+  btn := TLazButton.Create(panel);
+  btn.Parent := panel;
+  btn.Caption := 'Recreate shape';
+  btn.Align := ELazAlign.Left;
+  btn.BorderSpacing.Around := 5;
+  btn.Width := 150;
+  btn.Height := 40;
+  btn.Font.Color := $FFFFFF;
+  btn.OnClick := @Self.CreateShape;
+
+  Self.Width := form.Width-14;
+  Self.Height := form.Height-79;
+
+  img := new TImage(Self.Width, Self.Height);
+
+  Self.ImageBox := TImageBox.Create(form);
+  Self.ImageBox.Parent := form;
+  Self.ImageBox.Align := ELazAlign.Client;
+  Self.ImageBox.OnImgPaint := Self.PaintFunctions[DEFAULT_SHAPE, DEFAULT_DISTR];
+  Self.ImageBox.OnImgMouseMove := @Self.ImgBoxMouseMove;
+  Self.ImageBox.OnImgMouseDown := @Self.ImgBoxMouseDown;
+  Self.ImageBox.SetImage(img);
+
+  Self.Shape.ItemIndex := 0;
+  Self.CreateShape(nil);
+
+  Self.Shape.ItemIndex := 1;
+  Self.CreateShape(nil);
+
+  Self.Shape.ItemIndex := 2;
+  Self.CreateShape(nil);
+
+  Self.Shape.ItemIndex := 3;
+  Self.CreateShape(nil);
+
+  Self.Shape.ItemIndex := 4;
+  Self.CreateShape(nil);
+
+  Self.Shape.ItemIndex := DEFAULT_SHAPE;
+
+  Self.Tracking := True;
+  form.ShowModal();
+end;
+
+var
+  DistributionViewer: TDistributionViewer;
+
+begin
+  DistributionViewer.Run();
+end;

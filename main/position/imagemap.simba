@@ -1,0 +1,365 @@
+(*
+# Image Map
+This file is responsible for the TImageMap positioning system.
+It's heavily based on [slacky](https://slacky.one/)'s original TWalker and
+while it might look different the logic related to positioning should be the
+exact same.
+
+The way it works is that you load it with an image (.png or .bmp) and you can
+retrive your position on that image by finding the most similar place to your
+{ref}`Minimap` on the image.
+*)
+
+{$DEFINE WL_IMAGEMAP_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+  TImageMapSearchFunction = function (
+    tmplt: TIntegerMatrix; map: TImage; pos: TPoint; scale: UInt32; out match: Single
+  ): TPoint of object;
+
+(*
+(EPositionMode)=
+## EPositionMode enum
+```pascal
+EPositionMode = enum(SPEED, ACCURACY);
+```
+Enum representing the modes that {ref}`Image Map` can use.
+
+The default mode is `EPositionMode.SPEED`.
+`EPositionMode.ACCURACY` gives you between 0-30% more accuracy at the cost of
+almost half the speed and is generally not worth while unless you really are
+having positioning issues.
+
+Use {ref}`ImageMap.DebugPosition` and plan accordingly whether this is worth
+using or not.
+*)
+  EPositionMode = enum(SPEED, ACCURACY);
+
+(*
+## TMapSample
+Record used to customize the sample retrieved from the minimap for TMap.
+*)
+  TMapSample = record
+    Amount, Radius: Int32;
+  end;
+
+(*
+## TImageMap
+Record responsible for positioning.
+*)
+  TImageMap = record
+    Map, HalfMap: TImage;
+    Walker: TWalker;
+    Similarity: Single;
+    DownscaledMatrix: TIntegerMatrix;
+    Cache: TMatchTemplateCache;
+    Sample: TMapSample;
+    IsSetup: Boolean;
+    Downscale: Integer;
+    Graph: TWebGraph;
+    Mode: EPositionMode;
+  end;
+
+function TImageMap.Position(): TPoint; forward;
+
+(*
+## ImageMap.Setup
+```pascal
+procedure TImageMap.Setup(path: String; downscale: UInt32 = 8);
+```
+Sets up a {ref}`TImageMap`.
+*)
+procedure TImageMap.Setup(path: String; downscale: UInt32 = 8);
+var
+  img, sample: TImage;
+begin
+  if Self.Sample.Amount = 0 then Self.Sample.Amount := 3;
+  if Self.Sample.Radius = 0 then Self.Sample.Radius := 65;
+  Self.Downscale := downscale;
+
+  Self.Map := new TImage(path);
+  Self.HalfMap := Self.Map.Downsample(2);
+  Self.DownscaledMatrix := Self.Map.Downsample(Self.Downscale).ToMatrix();
+
+  img := Minimap.GetCleanImage();
+  sample := Minimap.ScaleMinimap(img, Self.Downscale, Self.Sample.Radius);
+
+  if not Self.IsSetup then
+  begin
+    Self.Walker.Setup(@Self.Position, nil, nil, nil, @Self.Graph, Self.Map);
+    Self.Walker.Name := 'ImageMap.Walker';
+    Self.IsSetup := True;
+  end;
+end;
+
+(*
+## ImageMap.ScaledSearch
+```pascal
+function TImageMap.ScaledSearch(img: TImage): TPointArray;
+```
+Internal TImageMap method used to get an initial TPointArray of possible positions.
+
+This is performed in a downscaled map with a downscaled minimap.
+
+This is very innacurate by itself but by ruling down most of the map
+in a downscaled search before doing a full sized search speed has a dramatic boost.
+
+You probably won't ever need to call this directly.
+*)
+function TImageMap.ScaledSearch(img: TImage): TPointArray;
+var
+  sample: TImage;
+  matrix: TSingleMatrix;
+begin
+  sample := Minimap.ScaleMinimap(img, Self.Downscale, Self.Sample.Radius);
+
+  matrix := MatchTemplateMask(
+    Self.DownscaledMatrix, sample.ToMatrix(), ETMFormula.TM_CCOEFF_NORMED, Self.Cache
+  );
+
+  while Length(Result) < Self.Sample.Amount do
+    with matrix.ArgMax() do
+    begin
+      Result += Offset(sample.Width div 2, Sample.Height div 2) * Self.Downscale;
+      matrix.Fill([X - 5, Y - 5, X + 5, Y + 5], 0);
+    end;
+
+  Result := Result.Offset([Self.Downscale div 2, Self.Downscale div 2]);
+end;
+
+(*
+## ImageMap.FullSearch
+```pascal
+function TImageMap.FullSearchEx(
+  tmplt: TIntegerMatrix; map: TImage; position: TPoint; scale: UInt32; out match: Single
+): TPoint; static;
+function TImageMap.FullSearch(
+  tmplt: TIntegerMatrix; map: TImage; position: TPoint; scale: UInt32; out match: Single
+): TPoint; static;
+```
+Internal TImageMap method used to get the player position.
+
+This is used by {ref}`ImageMap.Position` to determine how likely is the
+`position` passed in, our actual position.
+
+This likelyhood is returned with `match` which ranges from `0.0` to `1.0`.
+
+You probably won't ever need to call this directly.
+*)
+function TImageMap.FullSearchEx(
+  tmplt: TIntegerMatrix; map: TImage; position: TPoint; scale: UInt32; out match: Single
+): TPoint; static;
+const
+  TEMPL_SIZE: Int32 = 80;
+var
+  size: Int32;
+  cache: TMatchTemplateCache;
+  matrix: TSingleMatrix;
+  area: TBox;
+begin
+  position.X := position.X div scale;
+  position.Y := position.Y div scale;
+
+  size := TEMPL_SIZE div scale;
+  area := [
+    Max(0, position.X - size),
+    Max(0, position.Y - size),
+    Min(map.Width  - 1, position.X + size),
+    Min(map.Height - 1, position.Y + size)
+  ];
+
+  matrix := MatchTemplateMask(map.ToMatrix(area), tmplt, ETMFormula.TM_CCOEFF_NORMED, cache);
+
+  with matrix.ArgMax() do
+  begin
+    match := matrix[Y, X];
+    Result.X := (area.X1 + X) * scale;
+    Result.Y := (area.Y1 + Y) * scale;
+  end;
+end;
+
+function TImageMap.FullSearch(
+  tmplt: TIntegerMatrix; map: TImage; position: TPoint; scale: UInt32; out match: Single
+): TPoint; static;
+const
+  TEMPL_SIZE: Integer = 40;
+var
+  matrix: TSingleMatrix;
+  area: TBox;
+begin
+  position.X := position.X div scale;
+  position.Y := position.Y div scale;
+
+  area := [
+    Max(0, position.X - TEMPL_SIZE),
+    Max(0, position.Y - TEMPL_SIZE),
+    Min(map.Width  - 1, position.X + TEMPL_SIZE),
+    Min(map.Height - 1, position.Y + TEMPL_SIZE)
+  ];
+
+  matrix := MatchTemplate(map.ToMatrix(area), tmplt, ETMFormula.TM_CCOEFF_NORMED);
+
+  with matrix.ArgMax() do
+  begin
+    match := matrix[Y, X];
+    Result.X := (area.X1 + X) * scale;
+    Result.Y := (area.Y1 + Y) * scale;
+  end;
+end;
+
+
+(*
+## ImageMap.Position
+```pascal
+function TImageMap.Position(): TPoint;
+```
+Returns the players current position on the loaded map image.
+
+Example:
+```pascal
+WriteLn(ImageMap.Position());
+WriteLn(ImageMap.Similarity); // Check to see the match percentage if needed
+```
+*)
+function TImageMap.Position(): TPoint;
+const
+  SCALE: Integer = 2;
+var
+  clean, half: TImage;
+  matrix: TIntegerMatrix;
+  results: TPointArray;
+  i: Integer;
+  hit, center: TPoint;
+  angle, match: Single;
+  searchFunc: TImageMapSearchFunction;
+begin
+  Self.Similarity := 0;
+
+  angle := Minimap.CompassRadians;
+  clean := Minimap.GetCleanImage(angle, Self.Sample.Radius);
+  results := Self.ScaledSearch(clean);
+
+  half := Minimap.ScaleMinimap(clean, SCALE, Self.Sample.Radius);
+  if Self.Mode = EPositionMode.SPEED then
+  begin
+    searchFunc := @TImageMap.FullSearch;
+    half := half.Blend(half.FindColor($0, 0), 10);
+  end
+  else
+    searchFunc := @TImageMap.FullSearchEx;
+
+  matrix := half.ToMatrix();
+
+  for i := 0 to High(results) do
+  begin
+    hit := searchFunc(matrix, Self.HalfMap, results[i], SCALE, match);
+
+    if match > Self.Similarity then
+    begin
+      Self.Similarity := match;
+      Result := hit;
+    end;
+  end;
+
+  center := clean.Center;
+
+  if Client.Mode = EMode.FIXED then
+    center := center.Offset(0, 8).Rotate(-angle, center)
+  else
+    center := center.Offset(2, 1).Rotate(-angle, center);
+
+  Result := Result.Offset(center);
+end;
+
+(*
+## ImageMap.DebugPosition
+```pascal
+function TImageMap.DebugPosition(): TPoint;
+```
+Debugs the player position in the currently loaded map image.
+
+Example:
+```pascal
+Map.Setup(...);
+while True do
+  Map.DebugPosition();
+```
+*)
+function TImageMap.DebugPosition(print: Boolean = True): TPoint;
+  function _BoxStr(b: TBox): String;
+  begin
+    Result := Format('[%d, %d, %d, %d]', [b.X1, b.Y1, b.X2, b.Y2]);
+  end;
+var
+  x1, y1, x2, y2, x, y, i: Int32;
+  p: TPoint;
+  img, map, cleanMinimap: TImage;
+  time: Double;
+  lines: TStringArray;
+begin
+  Target.FreezeImage();
+
+  time   := PerformanceTime();
+  Result := Self.Position();
+
+  time   := PerformanceTime() - time;
+
+  x1 := Max(0, Result.X - 200);
+  y1 := Max(0, Result.Y - 200);
+  x2 := Min(x1 + 400, Self.Map.Width  - 1);
+  y2 := Min(y1 + 400, Self.Map.Height - 1);
+
+  x := Result.X - x1;
+  y := Result.Y - y1;
+
+  lines := [
+    'Position:',
+    ' - Position: ' + Format('[%d, %d]', [Result.X, Result.Y]),
+    '',
+    'Certainty: '    + ToStr(Round(Self.Similarity, 3)),
+    'Time: '         + ToStr(Round(time)) + ' ms'
+  ];
+
+  map := Self.Map.Copy([x1, y1, x2, y2]);
+  map.DrawColor := $00FF00;
+  map.DrawLine(Point(0, y), Point(x2 - x1, y));
+  map.DrawLine(Point(x, 0), Point(x, y2 - y1));
+  map.DrawColor := $FFFFFF;
+  map.DrawBox([x - 2, y - 2, x + 2, y + 2]);
+
+  cleanMinimap := Minimap.GetCleanImage();
+  img := new TImage(700 + cleanMinimap.Width, 440);
+  img.DrawImage(map, [10, 20]);
+
+  with cleanMinimap.Center do
+  begin
+    if Client.Mode = EMode.FIXED then
+      p := Point(X, Y).Offset(0, 8).Rotate(-Minimap.CompassRadians, [X,Y])
+    else
+      p := Point(X, Y).Offset(2, 1).Rotate(-Minimap.CompassRadians, [X,Y]);
+  end;
+
+  cleanMinimap.DrawColor := $FFFFFF;
+  cleanMinimap.DrawBox(TBox.Create(p, 1, 1));
+  cleanMinimap.DrawColor := $FF;
+  cleanMinimap.DrawCross(p, 4);
+
+  {$IFDEF WINDOWS}
+  img.FontName := 'Consolas';
+  {$ENDIF}
+  img.FontSize := 18;
+  img.FontAntialiasing := True;
+
+  img.DrawColor := $FFFFFF;
+  for i := 0 to High(lines) do
+  begin
+    if print then WriteLn(lines[i]);
+    img.DrawText(lines[i], [430, cleanMinimap.Height + 20 + 20 * i]);
+  end;
+
+  img.DrawImage(cleanMinimap, [520, 10]);
+  img.Show();
+
+  Target.UnFreezeImage();
+end;

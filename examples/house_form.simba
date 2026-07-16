@@ -1,0 +1,13 @@
+//!PACKAGE EXAMPLE
+{$I WaspLib/main.simba}
+var
+  form: TScriptForm;
+  tab: TLazTabSheet;
+  combobox: TLazComboBox;
+begin
+  form.Setup();
+  tab := form.CreateTab('My Settings');
+  form.CreateHouseTab();
+  combobox := HouseForm.CreateTeleportCombobox(tab, 'House teleport mode:', 200, 200);
+  form.Run();
+end.

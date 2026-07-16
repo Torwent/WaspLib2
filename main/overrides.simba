@@ -1,0 +1,321 @@
+(*
+# Overrides
+Several final overrides to add some final behaviour to certain methods.
+This is the very last file being included in the library.
+*)
+
+{$DEFINE WL_OVERRIDES_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+(*
+## Options.GetTab override
+```pascal
+function TOptions.GetTab(): EOptionsTab; override;
+```
+Override that basically sets the cached zoom level when the display tab is open.
+
+E.g., when the bank is open, all gametab buttons are hidden but you have the inventory open.
+
+Example:
+```pascal
+WriteLn GameTabs.GetCurrent();
+```
+*)
+function TOptions.GetTab(): EOptionsTab; override;
+var
+  z: Int32;
+begin
+  Result := inherited();
+  if Result <> EOptionsTab.DISPLAY then
+    Exit;
+
+  z := Options._GetZoomLevel();
+  if RSMouseZoom.Enabled then
+    RSMouseZoom.ZoomLevel := RSMouseZoom.Slider2Level(z);
+
+  if RSMouseZoom.SettingChecked then
+    Exit;
+
+  RSMouseZoom.Enabled := not Target.HasColor($0000C8, 0, 1, GameTab.Bounds);
+  RSMouseZoom.SettingChecked := True;
+  RSMouseZoom.ZoomLevel := -1;
+end;
+
+(*
+## GameTabs.GetCurrent override
+```pascal
+function TGameTabs.GetCurrent(): EGameTab; override;
+```
+Override that handles several scenarios where the "current" gametab is not visible.
+
+E.g., when the bank is open, all gametab buttons are hidden but you have the inventory open.
+
+Example:
+```pascal
+WriteLn GameTabs.GetCurrent();
+```
+*)
+function TGameTabs.GetCurrent(): EGameTab; override;
+begin
+  Result := inherited();
+
+  case Result of
+    EGameTab.NONE:
+    begin
+      if Bank.IsOpen() or CargoHold.IsOpen() or Shop.IsOpen() then
+        Exit(EGameTab.INVENTORY);
+      if not HouseOptions.IsOpen() then
+        Exit(EGameTab.OPTIONS);
+    end;
+
+    EGameTab.OPTIONS: Options.GetTab(); //Because of the override above
+  end;
+end;
+
+(*
+## GameTabs.Open override;
+```pascal
+function TGameTabs.Open(tab: EGameTab): Boolean; override;
+```
+Overrides {ref}`GameTabs.Open` to close the bank if the bank open.
+*)
+function TGameTabs.Open(tab: EGameTab; fkeyProbability: Single = -1): Boolean; override;
+begin
+  if Self.IsOpen(tab) then
+    Exit(True);
+  if Bank.IsOpen() or Shop.IsOpen() or CargoHold.IsOpen() then
+    MSInterface.Close();
+  Result := inherited(tab, fkeyProbability);
+end;
+
+(*
+## HouseOptions.Open override
+```pascal
+function THouseOptions.Open(): Boolean; override;
+```
+Attempts to open the house options on the options gametab.
+
+Since {ref}`HouseOptions` depends on {ref}`Options`, an override is necessary.
+
+Example:
+```pascal
+WriteLn HouseOptions.Open();
+```
+*)
+function THouseOptions.Open(): Boolean; override;
+begin
+  if Self.IsOpen() then Exit(True);
+  if not Options.Open() or not Options.OpenTab(EOptionsTab.CONTROLS) then Exit;
+
+  Options.Buttons[EOptionsButton.HOUSE].Click();
+  Result := Self.WaitOpen();
+end;
+
+(*
+## WorldSwitcher.Open override
+```pascal
+function TWorldSwitcher.Open(waitLoad: Boolean = True): Boolean; override;
+```
+Attempts to open the world switcher.
+
+Since {ref}`WorldSwitcher` depends on {ref}`Logout`, this override is necessary.
+
+Example:
+```pascal
+WriteLn WorldSwitcher.Open();
+```
+*)
+function TWorldSwitcher.Open(waitLoad: Boolean = True): Boolean; override;
+begin
+  if not GameTabs.Open(EGameTab.LOGOUT) then
+    Exit;
+  if WorldSwitcher._IsOpen() then
+    Exit(True);
+  Logout.Buttons[ERSLogoutButton.WORLD_SWITCHER].Click();
+  Result := inherited();
+end;
+
+
+procedure TMainScreen._ApplyResizableMasks();
+var
+  b: ^TBox;
+begin
+  if Bank.IsOpen() then
+    b := @Bank.Bounds
+  else if Anvil.IsOpen() then
+    b := @Anvil.Bounds
+  else if CollectionBox.IsOpen() then
+    b := @CollectionBox.Bounds
+  else if CargoHold.IsOpen() then
+    b := @CargoHold.Bounds
+  else if SilverScreen.IsOpen() then
+    b := @SilverScreen.Bounds
+  else if GoldScreen.IsOpen() then
+    b := @GoldScreen.Bounds
+  else if Lamp.IsOpen() then
+    b := @Lamp.Bounds
+  else if GrandExchangeHistory.IsOpen() then
+    b := @GrandExchangeHistory.Bounds
+  else if GrandExchangeOffer.IsOpen() then
+    b := @GrandExchangeOffer.Bounds
+  else if GrandExchange.IsOpen() then
+    b := @GrandExchange.Bounds
+  else if FairyRing.IsOpen() then
+    b := @FairyRing.Bounds;
+
+  MainScreen._ConditionalMaskEx(MSInterface.Bounds, b^.Expand(24).Clip(MSInterface.Bounds));
+end;
+
+
+function TMainScreen.Contains(const pt: TPoint): Boolean; override;
+var
+  msInterfaceClosed: Boolean;
+begin
+  msInterfaceClosed := not MSInterface.IsOpen();
+
+  if not msInterfaceClosed then
+  begin
+    if Client.Mode = EMode.FIXED then
+      Self._ConditionalMask(MSInterface.Bounds)
+    else if Client.Mode in RESIZABLE_MODES then
+      Self._ApplyResizableMasks();
+  end;
+
+  Result := Self._Contains(
+    pt,
+    GameTabs.GetCurrent() = EGameTab.NONE,
+    not XPBar.IsOpen(),
+    not Chat.IsOpen(), msInterfaceClosed
+  );
+end;
+
+{$R-}
+function TMainScreen.ContainsAny(const tpa: TPointArray): Boolean; override;
+var
+  i: Integer;
+  tabNone, xpbarClosed, chatClosed, msInterfaceClosed: Boolean;
+begin
+  tabNone := GameTabs.GetCurrent() = EGameTab.NONE;
+  xpbarClosed := not XPBar.IsOpen();
+  chatClosed := not Chat.IsOpen();
+  msInterfaceClosed := not MSInterface.IsOpen();
+
+  if not msInterfaceClosed then
+  begin
+    if Client.Mode = EMode.FIXED then
+      Self._ConditionalMask(MSInterface.Bounds)
+    else if Client.Mode in RESIZABLE_MODES then
+      Self._ApplyResizableMasks();
+  end;
+
+  for i := 0 to High(tpa) do
+    if Self._Contains(tpa[i], tabNone, xpbarClosed, chatClosed, msInterfaceClosed) then
+      Exit(True);
+end;
+
+function TMainScreen.ContainsAll(const tpa: TPointArray): Boolean; override;
+var
+  i: Integer;
+  tabNone, xpbarClosed, chatClosed, msInterfaceClosed: Boolean;
+begin
+  tabNone := GameTabs.GetCurrent() = EGameTab.NONE;
+  xpbarClosed := not XPBar.IsOpen();
+  chatClosed := not Chat.IsOpen();
+  msInterfaceClosed := not MSInterface.IsOpen();
+
+  if not msInterfaceClosed then
+  begin
+    if Client.Mode = EMode.FIXED then
+      Self._ConditionalMask(MSInterface.Bounds)
+    else if Client.Mode in RESIZABLE_MODES then
+      Self._ApplyResizableMasks();
+  end;
+
+  Result := True;
+  for i := 0 to High(tpa) do
+    if not Self._Contains(tpa[i], tabNone, xpbarClosed, chatClosed, msInterfaceClosed) then
+      Exit(False);
+end;
+
+function TMainScreen.Filter(const tpa: TPointArray): TPointArray; override;
+var
+  i: Integer;
+  tabNone, xpbarClosed, chatClosed, msInterfaceClosed: Boolean;
+begin
+  tabNone := GameTabs.GetCurrent() = EGameTab.NONE;
+  xpbarClosed := not XPBar.IsOpen();
+  chatClosed := not Chat.IsOpen();
+  msInterfaceClosed := not MSInterface.IsOpen();
+
+  if not msInterfaceClosed then
+  begin
+    if Client.Mode = EMode.FIXED then
+      Self._ConditionalMask(MSInterface.Bounds)
+    else if Client.Mode in RESIZABLE_MODES then
+      Self._ApplyResizableMasks();
+  end;
+
+  for i := 0 to High(tpa) do
+    if Self._Contains(tpa[i], tabNone, xpbarClosed, chatClosed, msInterfaceClosed) then
+      Result += tpa[i];
+end;
+{$R+}
+
+(*
+## Minimap.SetZoomToPoint override
+```pascal
+function TMinimap.SetZoomToPoint(pt: TPoint; randomness: Integer = 0): Boolean; override;
+```
+Overrides {ref}`Minimap.SetZoomToPoint` to truncate the minimum and maximum zoom
+at `Antiban.Zoom` level.
+*)
+function TMinimap.SetZoomToPoint(pt: TPoint; randomness: Integer = 0): Boolean; override;
+var
+  level: Integer;
+begin
+  if Self.InZoomRange(pt) then
+    Exit(True);
+
+  level := Self.GetZoomToPoint(pt, randomness);
+
+  if InRange(level, Max(Antiban.Zoom.Min, 0), Min(Antiban.Zoom.Max, 100)) then
+  begin
+    if Abs(level-Options.GetZoomLevel(True)) < randomness then
+      Exit(True);
+    Result := Options.SetZoomLevel(level);
+  end;
+end;
+
+(*
+## Options.SetZoomLevel override
+```pascal
+function TOptions.SetZoomLevel(level: Int32): Boolean; override;
+```
+Overrides {ref}`Options.SetZoomLevel` to also set the {ref}`RSMouseZoom`
+`ZoomLevel`.
+*)
+function TOptions.SetZoomLevel(level: Int32): Boolean; override;
+begin
+  Result := inherited();
+  if not Result then
+    level := Options.GetZoomLevel(False);
+
+  RSMouseZoom.ZoomLevel := RSMouseZoom.Slider2Level(level);
+end;
+
+
+(*
+## ScriptForm.OnStart override
+```pascal
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+```
+Overrides TScriptForm.OnStart to perform certain tasks when the script starts
+running, e.g. start the `Simba Recorder`
+*)
+procedure TScriptForm.OnStart(sender: TLazObject); override;
+begin
+  inherited();
+
+  if SimbaRecorder.Enabled then
+    SimbaRecorder.Start();
+end;

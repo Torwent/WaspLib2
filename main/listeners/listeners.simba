@@ -1,0 +1,357 @@
+(*
+# Listeners
+{ref}`Listeners` allows you to listen to certain events. You can either use the
+built-in WaspLib listeners like {ref}`Chat Listener` or make your own.
+
+It's important to keep in mind that {ref}`Listeners` only job is running your
+listeners and balance them within the configured `Listeners.Interval`.
+It's not meant to run any tasks when they trigger, that's up to the listener
+itself and these should be quick tasks so other listeners don't get delayed.
+*)
+{$DEFINE WL_LISTENERS_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+(TListener)=
+## TListener type
+Simple record that represents a listener.
+
+The bare minimum a listener has to have is a `function (): Boolean of object`.
+This is what will be ran on a loop by {ref}`Listeners`.
+*)
+  TListener = record
+    Name: String;
+    Setup: procedure (trgt: TTarget) of object;
+    Check: function (): Boolean of object;
+  end;
+
+(*
+(TListeners)=
+## TListeners type
+Type responsible for handling all your listeners.
+*)
+  TListeners = record
+    Interval: Integer;
+    Thread: TThread;
+    Running: Boolean;
+    Listeners: array of TListener;
+    Target: TTarget;
+  end;
+
+(*
+### TListeners.Add
+```pascal
+procedure TListeners.Add(
+  name: String; setup: procedure () of object;
+  check: function (): Boolean of object
+);
+```
+Add a {ref}`TListener` to {ref}`Listeners`.
+`name` cannot be empty and only `setup` can optionally be `nil` if your listener
+doesn't require any one time setup procedure.
+
+The `check` function cannot be `nil` and is what {ref}`Listeners` will run on a
+loop.
+This function should be as fast as possible and if it triggers anything, it's
+tasks should also be as fast as possible otherwise the whole `Listeners` loop
+will be delayed.
+
+You will be getting warning messages if your check functions under-perform for
+what's expected.
+*)
+procedure TListeners.Add(
+  name: String; setup: procedure (trgt: TTarget) of object;
+  check: function (): Boolean of object
+);
+var
+  i: Integer;
+  tmp: String;
+begin
+  if Self.Running then
+    raise GetDebugLn('Listeners', 'You can''t add listeners after `Listeners` is already running.');
+  if name = '' then
+    raise GetDebugLn('Listeners', 'When you add a listener it should have a name.');
+
+  tmp := LowerCase(name);
+  for i := 0 to High(Self.Listeners) do
+    if LowerCase(Self.Listeners[i].Name) = tmp then
+      Exit;
+
+  if @check = nil then
+    raise GetDebugLn('Listeners', 'When you add a listener it must have a `check` function.');
+
+  Self.Listeners += [name, @setup, @check];
+end;
+
+(*
+### TListeners.Remove
+```pascal
+procedure TListeners.Remove(name: String);
+```
+Remove a {ref}`TListener` from {ref}`Listeners`.
+*)
+procedure TListeners.Remove(name: String);
+var
+  i: Integer;
+  tmp: String;
+begin
+  tmp := LowerCase(name);
+  for i := 0 to High(Self.Listeners) do
+    if LowerCase(Self.Listeners[i].Name) = tmp then
+    begin
+      Delete(Self.Listeners, i, 1);
+      Break;
+    end;
+end;
+
+
+(*
+### TListeners.Free
+```pascal
+procedure TListeners.Free();
+```
+Runs once on script termination assuming
+*)
+procedure TListeners.Free();
+begin
+  Self.Running := False;
+  if Self.Thread <> nil then
+  begin
+    Self.Thread.WaitForTerminate(5000);
+    Self.Thread.Free();
+  end;
+  Self.Listeners := [];
+end;
+
+(*
+### TListeners.Setup
+```pascal
+procedure TListeners.Setup();
+```
+Runs once and runs all of `Listeners.Listeners` `Setup` procedures.
+It will also raise an exception if you run this before configuring
+`Listeners.Interval`.
+*)
+procedure TListeners.Setup();
+var
+  i: Integer;
+begin
+  if Self.Interval = 0 then
+  begin
+    WriteLn(#0#0'000004', GetTimeStamp(), ':[Listeners]: Interval cannot be 0.');
+    RaiseException(#0#0'000004' + GetTimeStamp() + ':[Listeners]: Interval cannot be 0.');
+  end;
+
+  for i := 0 to High(Self.Listeners) do
+    if @Self.Listeners[i].Setup <> nil then
+      try
+        Self.Listeners[i].Setup(Self.Target);
+      except
+        WriteLn(#0#0'000004', GetTimeStamp(), ':[Listeners]: ', Self.Listeners[i].Name, ' crashed:');
+        WriteLn(#0#0'000004', GetExceptionMessage());
+        RaiseException(GetExceptionMessage());
+      end;
+
+  if Self.Thread = nil then
+    AddOnTerminate(@Self.Free);
+
+  Self.Running := True;
+end;
+
+(*
+## Listeners.Start
+```pascal
+procedure TListeners.Start();
+```
+Starts `Listeners` in the current thread, which is not what you will usually
+want as running this on the main thread you will be stuck on an infinite loop,
+use {ref}`Listeners.StartInThread` instead which is what you will likely want.
+
+Example:
+```pascal
+Listeners.Start();
+```
+*)
+procedure TListeners.Start(params: TPointerArray);
+var
+  i, hi: Integer;
+  t, total, avg: Int64;
+begin
+  if Self.Running then
+    Exit;
+  if Self.Target = nil then
+    Self.Target := TTarget(params[0]^);
+  Self.Setup();
+
+  hi := High(Self.Listeners);
+  avg := Self.Interval div (hi+1);
+
+  repeat
+    total := Time();
+    for i := 0 to hi do
+    begin
+      t := Time();
+
+      try
+        Self.Listeners[i].Check();
+      except
+        WriteLn(#0#0'000004', GetTimeStamp(), ':[Listeners]: ', Self.Listeners[i].Name, ' crashed:');
+        WriteLn(#0#0'000004', GetExceptionMessage());
+        RaiseException(GetExceptionMessage());
+      end;
+
+      t := Time()-t;
+      if t > avg then
+      begin
+        WriteLn(
+          #0#0'000002', GetTimeStamp(), ':[Listeners]: ',
+          Self.Listeners[i].Name, ' took ', t, 'ms to run.', LINE_SEP,
+          #0#0'000002', 'This is slower than expected for your interval.'
+        );
+      end;
+    end;
+
+    t := Time()-total;
+    if t <= Self.Interval then
+    begin
+      Sleep(Self.Interval-t);
+      Continue;
+    end;
+
+    WriteLn(
+      #0#0'000002', GetTimeStamp(), ':[Listeners]: Your listeners took ', t,
+      'ms to run. This is slower than your interval.'
+    );
+  until not Self.Running;
+end;
+
+(*
+## Listeners.StartInThread
+```pascal
+procedure TListeners.StartInThread(interval: Integer = 300);
+```
+Starts `Listeners` in a separate thread.
+
+Below you have an example on how to use `Listeners` to keep a {ref}`Chat`
+`History`:
+```pascal
+{$I WaspLib/main.simba}
+
+var
+  history: TChatMessageArray;
+
+procedure ProcessChat(const msgs: TChatMessageArray);
+var
+  i, n: Integer;
+begin
+  for i := High(history) downto 0 do
+    for n := High(msgs) downto 1 do
+      if history[i].Equals(msgs[n], 0.85) then
+        Break;
+  for n to 7 do
+    history += msgs[n];
+end;
+
+var
+  updated: Boolean;
+  messages: TChatMessageArray;
+
+procedure OnMessage(const msgs: TChatMessageArray);
+begin
+  messages := msgs.Copy();
+  updated := True;
+end;
+
+begin
+  AddOnTerminate(@history.Print);
+  ChatListener.OnMessage += @OnMessage;
+  Listeners.Add('ChatListener', @ChatListener.Setup, @ChatListener.Check);
+  Listeners.StartInThread(300);
+
+  while True do
+  begin
+    WriteLn updated;
+    if updated then
+    begin
+      ProcessChat(messages);
+      updated := False;
+    end;
+    Sleep(4000);
+  end;
+end.
+```
+*)
+procedure TListeners.StartInThread(interval: Integer = 200);
+begin
+  Self.Target := new TTarget();
+
+  {$IFNDEF WL_DISABLE_FAKE_INPUT}
+  case Client.Client of
+    {$IFDEF WINDOWS}
+    EClient.OFFICIAL:
+      Self.Target.SetPlugin(
+        {$MACRO LOADEDLIB(waspinput)}, ToStr(WaspInput.Window.GetPID())
+      );
+    {$ENDIF}
+    EClient.LEGACY, EClient.RUNELITE:
+      Self.Target.SetPlugin(
+        {$MACRO LOADEDLIB(libremoteinput)}, ToStr(RemoteInput.Window.GetPID())
+      );
+    else
+      Self.Target.SetWindow(GetSimbaTargetWindow());
+  end;
+  {$ELSE}
+  Self.Target.SetWindow(GetSimbaTargetWindow());
+  {$ENDIF}
+
+  if Self.Running then
+    raise GetDebugLn('Listeners', 'Already running.');
+  Self.Interval := interval;
+  Self.Thread := TThread.CreateEx(@Self.Start, []);
+  AddOnTerminate(Self.Free);
+end;
+
+var
+(*
+## Listeners variable
+Global {ref}`TListeners` variable.
+*)
+  Listeners: TListeners;
+
+{%anchor WL_SYNC_LISTENERS}
+{.$DEFINE WL_SYNC_LISTENERS}
+(*
+## StartListeners
+```pascal
+procedure StartListeners(interval: Integer = 200);
+```
+Starts {ref}`Listeners` with some of the built-in listeners:
+- {ref}`LevelUpListener`
+
+Example:
+```pascal
+{$I WaspLib/main.simba}
+
+begin
+  StartListeners(200);
+
+  while True do
+    Sleep(4000);
+end.
+```
+*)
+procedure StartListeners(interval: Integer = 200);
+begin
+
+  LevelUpListener.OnLevelUp += @LevelUpListener.SaveScreenshot;
+  LevelUpListener.OnLevelUp += @LevelUpListener.UpdateStats;
+  Listeners.Add('LevelUpListener', @LevelUpListener.Setup, @LevelUpListener.Check);
+
+  {$IFDEF WL_SYNC_LISTENERS}
+  Listeners.Interval := interval;
+  Listeners.Start([@Target]);
+  {$ELSE}
+  Listeners.StartInThread(interval);
+  {$ENDIF}
+end;

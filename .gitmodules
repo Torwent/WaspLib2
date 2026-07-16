@@ -1,0 +1,3 @@
+[submodule "wasplib-docs"]
+	path = wasplib-docs
+	url = https://github.com/Torwent/wasplib-docs

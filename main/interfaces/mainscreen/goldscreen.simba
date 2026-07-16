@@ -1,0 +1,284 @@
+(*
+# GoldScreen
+Methods to interact with the gold‑crafting **Gold Screen** interface.
+
+```{figure} ../../images/goldscreen_interface.png
+```
+
+```{note}
+Credits to Flight and Skunkworks
+```
+*)
+
+{$DEFINE WL_GOLDSCREEN_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+(EGoldItem)=
+## EGoldItem enum
+```pascal
+EGoldItem = enum(GOLD_RING..ZENYTE_BRACELET);
+```
+Enum of all jewellery items that can be crafted on the {ref}`GoldScreen`.
+*)
+  EGoldItem = enum(
+    { Rings }
+      GOLD_RING, SAPPHIRE_RING, EMERALD_RING, RUBY_RING, DIAMOND_RING,
+      DRAGONSTONE_RING, ONYX_RING, SLAYER_RING, ZENYTE_RING,
+    { Necklaces }
+      GOLD_NECKLACE, SAPPHIRE_NECKLACE, EMERALD_NECKLACE, RUBY_NECKLACE,
+      DIAMOND_NECKLACE, DRAGONSTONE_NECKLACE, ONYX_NECKLACE, ZENYTE_NECKLACE,
+    { Amulets }
+      GOLD_AMULET, SAPPHIRE_AMULET, EMERALD_AMULET, RUBY_AMULET, DIAMOND_AMULET,
+      DRAGONSTONE_AMULET, ONYX_AMULET, ZENYTE_AMULET,
+    { Bracelets }
+      GOLD_BRACELET, SAPPHIRE_BRACELET, EMERALD_BRACELET, RUBY_BRACELET,
+      DIAMOND_BRACELET, DRAGONSTONE_BRACELET, ONYX_BRACELET, ZENYTE_BRACELET
+  );
+
+(*
+(TGoldScreen)=
+## TGoldScreen type
+Main record to interact with the {ref}`GoldScreen` interface.
+*)
+  TGoldScreen = record
+    Title: TInterfaceTitle;
+    Bounds: TBox;
+    SlotBoxes: TBoxArray;
+    Buttons: array [EItemQuantity] of TButton;
+    const ITEMS: set of EGoldItem = [
+      EGoldItem.GOLD_RING .. EGoldItem.ZENYTE_BRACELET
+    ];
+  end;
+
+(*
+## GoldScreen.SetupInterface
+```pascal
+procedure TGoldScreen.SetupInterface();
+```
+Internal method used to setup the {ref}`TGoldScreen` coordinates.
+Automatically called for you on the `GoldScreen` variable.
+*)
+procedure TGoldScreen.SetupInterface();
+var
+  btnGrid, topRow, gridBelow: TBoxArray;
+  i: Integer;
+begin
+  {─ outer bounds ─}
+  case Client.Mode of
+    EMode.FIXED:
+      Self.Bounds := MSInterface.CreateBounds([0,1,0,-1], 492, 300);
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Bounds := MSInterface.CreateBounds([0,1,0,-3], 492, 300);
+  end;
+
+  {─ title ─}
+  Self.Title.Setup(Self.Bounds);
+
+  {─ item‑slot boxes ─}
+  topRow := TBoxArray.Create(
+    [Self.Bounds.X1 + 36, Self.Bounds.Y1 + 66], 9, 1, 31, 31, [14,30]
+  );
+  gridBelow := TBoxArray.Create(
+    [Self.Bounds.X1 + 36, Self.Bounds.Y1 + 127], 8, 3, 31, 31, [19,30]
+  );
+
+  Self.SlotBoxes += topRow;
+  self.SlotBoxes += gridBelow;
+
+  Self.Title.Setup(Self.Bounds);
+
+  {─ quantity buttons ─}
+  btnGrid := TBoxArray.Create(
+    [Self.Bounds.X1 + 445, Self.Bounds.Y1 + 38], 1, 5, 36, 36, [0,4]
+  );
+
+  for i := 0 to 4 do
+    Self.Buttons[i] :=
+      new TButton(btnGrid[i], [[$25323B, 1.294, EColorSpace.RGB, [1,1,1]]]);
+end;
+
+(*
+## GoldScreen.IsOpen
+```pascal
+function TGoldScreen.IsOpen(): Boolean;
+```
+Returns `True` if the gold‑crafting interface is visible.
+*)
+function TGoldScreen.IsOpen(): Boolean;
+begin
+  Result := Self.Title.IsOpen();
+end;
+
+(*
+## GoldScreen.WaitOpen
+```pascal
+function TGoldScreen.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+```
+Waits up to `time` ms for the interface to appear.
+*)
+function TGoldScreen.WaitOpen(
+  time: Integer = TICK; interval: Integer = -1
+): Boolean;
+begin
+  if interval < 0 then
+    interval := RandomMode(100,50,1500);
+  Result := SleepUntil(Self.IsOpen(), interval, time);
+end;
+
+(*
+## GoldScreen.Close
+```pascal
+function TGoldScreen.Close(PressEscape: Boolean = False): Boolean;
+function TGoldScreen.Close(escapeProbability: Single = -1): Boolean; overload;
+```
+Closes the interface via its close button or by pressing **Escape**.
+*)
+function TGoldScreen.Close(pressEscape: Boolean): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit(True);
+
+  Result := (not pressEscape and MSInterface.Close(False))
+            or
+            (pressEscape and MSInterface.Close(True));
+
+  if Result then
+    Result := SleepUntil(not Self.IsOpen(),
+                         RandomMode(100,50,1500),
+                         Random(1500,2000));
+end;
+
+function TGoldScreen.Close(escapeProbability: Single = -1): Boolean; overload;
+begin
+  if escapeProbability = -1 then
+    escapeProbability := Biometrics.RandomDouble(0.5);
+  Result := Self.Close(RandomBoolean(escapeProbability));
+end;
+
+(*
+## GoldScreen.SetQuantity
+```pascal
+function TGoldScreen.SetQuantity(amount: Integer): Boolean;
+```
+Selects the desired quantity button (1/5/10/X/All).
+Pass `0` or any negative value for "All".
+*)
+function TGoldScreen.SetQuantity(amount: Integer): Boolean;
+var
+  txt: String;
+  btn: TButton;
+begin
+  txt := ToString(amount);
+  if amount <= QUANTITY_ALL then
+    txt := 'All';
+
+  for btn in Self.Buttons do
+  begin
+    if not btn.Enabled then
+      Continue;
+    if OCR.Locate(btn.Bounds, txt, [TFonts.WHITE], 1, Fonts.PLAIN_11) > 0.85 then
+      Exit(True);
+  end;
+
+  for btn in Self.Buttons do
+    if OCR.Locate(btn.Bounds, txt, [TFonts.ORANGE], 1, Fonts.PLAIN_11) > 0.85 then
+    begin
+      btn.Click();
+      Exit(True);
+    end;
+
+  for btn in Self.Buttons do
+    if OCR.Locate(btn.Bounds, 'X', [TFonts.ORANGE], 1, Fonts.PLAIN_11) > 0.85 then
+    begin
+      btn.Click();
+      Exit(Chat.AnswerQuery('Enter amount', ToString(Amount), 3000));
+    end;
+end;
+
+(*
+## GoldScreen.CanCraft
+```pascal
+function TGoldScreen.CanCraft(Item: EGoldItem): Boolean;
+```
+Returns `True` if the given item icon is available for crafting.
+*)
+function TGoldScreen.CanCraft(gold: EGoldItem): Boolean;
+begin
+  if not Self.IsOpen() then
+    Exit;
+  Result := Target.HasColor($2AD3EB, 20, 1, Self.SlotBoxes[gold]);
+end;
+
+(*
+## GoldScreen.IsHighlighted
+```pascal
+function TGoldScreen.IsHighlighted(Item: EGoldItem): Boolean;
+```
+Returns `True` if the given item is currently highlighted.
+*)
+function TGoldScreen.IsHighlighted(i: EGoldItem): Boolean;
+var
+  highlight: TColorTolerance := [4807018,2];
+begin
+  if not Self.IsOpen() then
+    Exit;
+
+  if not Self.CanCraft(i) then
+    Exit;
+
+  Result := Target.FindColor(highlight, Self.SlotBoxes[i]).Length > 0;
+end;
+
+(*
+## GoldScreen.CraftItem
+```pascal
+function TGoldScreen.CraftItem(
+  gold: EGoldItem; amount: Integer; useSpace: Boolean
+): Boolean;
+
+function TGoldScreen.CraftItem(
+  gold: EGoldItem;
+  amount: Integer = QUANTITY_ALL;
+  spaceProbability: Single = -1
+): Boolean; overload;
+```
+Sets the `amount` then crafts the requested item.
+If `useSpace = True` and the item is highlighted it presses **Space**,
+otherwise it clicks the item icon.
+*)
+function TGoldScreen.CraftItem(
+  gold: EGoldItem; amount: Integer; useSpace: Boolean
+): Boolean;
+begin
+  if not Self.CanCraft(gold) or not Self.SetQuantity(amount) then
+    Exit;
+
+  if useSpace and Self.IsHighlighted(gold) then
+    Keyboard.KeyPress(EKeyCode.SPACE)
+  else
+    Mouse.Click(Self.SlotBoxes[gold], EMouseButton.LEFT);
+
+  Result := SleepUntil(not Self.IsOpen(), 200, 6 * TICK);
+end;
+
+function TGoldScreen.CraftItem(
+  gold: EGoldItem;
+  amount: Integer = QUANTITY_ALL;
+  spaceProbability: Single = -1
+): Boolean; overload;
+begin
+  if spaceProbability = -1 then
+    spaceProbability := Biometrics.RandomDouble(0.5);
+  Result := Self.CraftItem(gold, amount, RandomBoolean(spaceProbability));
+end;
+
+var
+(*
+## GoldScreen variable
+Global {ref}`TGoldScreen` variable.
+*)
+  GoldScreen: TGoldScreen;

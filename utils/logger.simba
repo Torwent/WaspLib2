@@ -1,0 +1,289 @@
+(*
+# Logger
+Logging utilities for WaspLib scripts.
+*)
+
+{$DEFINE WL_LOGGER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+type
+(*
+## ELogLevel
+```pascal
+ELogLevel = enum(SUCCESS, WARN, ERROR);
+```
+Enum representing log message severity levels.
+*)
+  ELogLevel = enum(INFO, SUCCESS, WARN, ERROR);
+
+(*
+## TLogger
+Record for managing script logging to files and console output.
+*)
+  TLogger = record
+    Name, Path, PreviousMessage: String;
+    TimeRunning: TStopwatch;
+    IsSetup, Verbose: Boolean;
+  end;
+
+(*
+## Logger.Init
+```pascal
+procedure TLogger.Init();
+```
+Initializes the logger, creating the log directory and file.
+Called automatically at script start.
+*)
+procedure TLogger.Init();
+var
+  files: TStringArray;
+  i: Integer;
+  date, oldest: TDateTime;
+  filename: String;
+begin
+  Self.Path := WLEnv.LogsDir;
+
+  files := DirList(Self.Path);
+  if Length(files) > 100 then
+  begin
+    for i := 0 to High(files) do
+    begin
+      date := FileCreationTime(files[i]);
+      if date > oldest then
+      begin
+        oldest := date;
+        filename := files[i];
+      end;
+    end;
+
+    if FileExists(filename) and not FileDelete(filename) then
+      raise GetTimeStamp() + ':[Logger]: Failed to delete old log: ' + PathExtractName(filename);
+  end;
+
+  if not DirCreate(Self.Path) then
+    raise GetTimeStamp() + ':[Logger]: Failed to create logs directory.';
+
+  Self.Path += 'WaspLib_' + TDateTime.CreateFromSystem().ToString(FILE_TIME_FORMAT) + '.log';
+  if not FileCreate(Self.Path) then
+    raise GetTimeStamp() + ':[Logger]: Failed to create log file: ' + PathExtractName(Self.Path);
+
+  Self.TimeRunning.Start();
+end;
+
+(*
+## Logger.Setup
+```pascal
+procedure TLogger.Setup(name: String = '');
+```
+Configures the logger with a script name. Creates a dedicated log directory.
+
+Example:
+```pascal
+Logger.Setup('MyScript');
+```
+*)
+procedure TLogger.Setup(name: String = '');
+var
+  old: String;
+begin
+  Self.Name := name;
+  Self.IsSetup := name <> '';
+  old := Self.Path;
+  Self.Path := WLEnv.LogsDir + name + PATH_SEP;
+
+  if not DirCreate(Self.Path) then
+    raise GetTimeStamp() + ':[Logger]: Failed to create log path: ' + Self.Path;
+
+  Self.Path += TDateTime.CreateFromSystem().ToString(FILE_TIME_FORMAT) + '.log';
+
+  if Self.IsSetup and (old <> Self.Path) then
+  begin
+    if FileExists(old) then
+    begin
+      if not FileRename(old, Self.Path) then
+        raise GetTimeStamp() + ':[Logger]: Failed to rename log file: ' + PathExtractName(old) + ' > ' + PathExtractName(Self.Path);
+    end;
+    if not FileCreate(Self.Path) then
+      raise GetTimeStamp() + ':[Logger]: Failed to create log file: ' + PathExtractName(Self.Path);
+  end;
+end;
+
+procedure TLogger.AddLine(line: String);
+begin
+  FileAppend(Self.Path, line + LINE_SEP);
+end;
+
+var
+(*
+## Logger variable
+Global {ref}`TLogger` variable.
+*)
+  Logger: TLogger;
+
+(*
+## GetDebugLn
+```pascal
+function GetDebugLn(text: String; log: Boolean = True): String;
+function GetDebugLn(name, text: String; log: Boolean = True): String; overload;
+```
+Returns a formatted debug string with timestamp.
+Optionally logs to file.
+*)
+function GetDebugLn(text: String; log: Boolean = True): String;
+begin
+  Result := GetTimeStamp() + ': ' + text;
+  if log then
+    Logger.AddLine(Result);
+end;
+
+function GetDebugLn(name, text: String; log: Boolean = True): String; overload;
+begin
+  Result := GetTimeStamp() + ':[' + name + ']: ' + text;
+  if log then
+    Logger.AddLine(Result);
+end;
+
+(*
+## DebugLn
+```pascal
+procedure DebugLn(text: String; level: ELogLevel = ELogLevel.INFO; log: Boolean = True);
+procedure DebugLn(
+  name, text: String; level: ELogLevel = ELogLevel.INFO; log: Boolean = True
+); overload;
+```
+Prints a formatted debug string with timestamp.
+Optionally logs to file and applies color formatting based on `level`.
+*)
+procedure DebugLn(text: String; level: ELogLevel = ELogLevel.INFO; log: Boolean = True);
+begin
+  case level of
+    ELogLevel.INFO:    begin WriteLn(GetDebugLn(text, log)); Exit; end;
+    ELogLevel.SUCCESS: SetWriteColor($00FF00);
+    ELogLevel.WARN:    SetWriteColor($00FFFF);
+    ELogLevel.ERROR:   SetWriteColor($0000FF);
+  end;
+
+  WriteLn(GetDebugLn(text, log));
+  ResetWriteColor();
+end;
+
+procedure DebugLn(
+  name, text: String; level: ELogLevel = ELogLevel.INFO; log: Boolean = True
+); overload;
+begin
+  case level of
+    ELogLevel.SUCCESS: SetWriteColor($00FF00);
+    ELogLevel.WARN:    SetWriteColor($00FFFF);
+    ELogLevel.ERROR:   SetWriteColor($0000FF);
+  end;
+
+  WriteLn(GetDebugLn(name, text, log));
+  ResetWriteColor();
+end;
+
+(*
+## ErrorDialog
+```pascal
+procedure ErrorDialog(name, text: String; log: Boolean = True);
+```
+Show an error dialog and then raises an exception.
+*)
+procedure ErrorDialog(name, text: String; log: Boolean = True);
+begin
+  ShowDialog(EDialogIcon.ERROR, [EDialogButton.ABORT], name, text);
+  raise GetDebugLn(name, text, log);
+end;
+
+(*
+## Logger.Info
+```pascal
+procedure TLogger.Info(text: String; vars: TVariantArray = []);
+```
+Logs an info message.
+
+Duplicate consecutive messages are suppressed unless `Logger.Verbose` is True.
+*)
+procedure TLogger.Info(text: String; vars: TVariantArray = []);
+var
+  formatted: String;
+begin
+  formatted := Format(text, vars);
+  Self.AddLine(Format('%s:[Info]: %s', [GetTimeStamp(), formatted]));
+  if not Self.Verbose and (Self.PreviousMessage = formatted) then
+    Exit;
+  WriteLn(GetDebugLn(Self.Name, formatted, False));
+  Self.PreviousMessage := formatted;
+end;
+
+(*
+## Logger.Success
+```pascal
+procedure TLogger.Success(text: String; vars: TVariantArray = []);
+```
+Logs a success message (green colored output).
+*)
+procedure TLogger.Success(text: String; vars: TVariantArray = []);
+var
+  formatted: String;
+begin
+  formatted := Format(text, vars);
+  Self.AddLine(Format('%s:[Success]: %s', [GetTimeStamp(), formatted]));
+
+  SetWriteColor($00FF00);
+  WriteLn(GetDebugLn(Self.Name, formatted, False));
+  ResetWriteColor();
+end;
+
+(*
+## Logger.Warn
+```pascal
+procedure TLogger.Warn(text: String; vars: TVariantArray = []);
+```
+Logs a warning message (yellow colored output).
+*)
+procedure TLogger.Warn(text: String; vars: TVariantArray = []);
+var
+  formatted: String;
+begin
+  formatted := Format(text, vars);
+  Self.AddLine(Format('%s:[Warn]: %s', [GetTimeStamp(), formatted]));
+
+  SetWriteColor($00FFFF);
+  WriteLn(GetDebugLn(Self.Name, formatted, False));
+  ResetWriteColor();
+end;
+
+(*
+## Logger.Error
+```pascal
+procedure TLogger.Error(text: String; vars: TVariantArray = []);
+```
+Logs an error message (red colored output).
+*)
+procedure TLogger.Error(text: String; vars: TVariantArray = []);
+var
+  formatted: String;
+begin
+  formatted := Format(text, vars);
+  Self.AddLine(Format('%s:[ERROR]: %s', [GetTimeStamp(), formatted]));
+
+  SetWriteColor($0000FF);
+  WriteLn(GetDebugLn(Self.Name, formatted, False));
+  ResetWriteColor();
+end;
+
+(*
+## Logger.Exception
+```pascal
+procedure TLogger.Exception(text: String; vars: TVariantArray = []);
+```
+Logs an error message and raises an exception to halt script execution.
+*)
+procedure TLogger.Exception(text: String; vars: TVariantArray = []);
+var
+  formatted: String;
+begin
+  formatted := Format(text, vars);
+  Self.AddLine(Format('%s:[ERROR]: %s', [GetTimeStamp(), formatted]));
+  raise GetDebugLn(Self.Name, formatted, False);
+end;

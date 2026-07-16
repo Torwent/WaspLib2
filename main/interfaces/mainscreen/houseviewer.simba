@@ -1,0 +1,110 @@
+(*
+# House Viewer
+Methods to interact with the house viewer interface:
+
+```{figure} ../../images/houseviewer_interface.png
+```
+
+The house viewer allows your to see your house layout at a glance and
+move/rotate rooms.
+
+The functionality provided by the following functions was done from scratch but
+heavily inspired in Skunkworks original "layout_finder.simba".
+In other words, it provides you the ability to load the house layout from the
+viewer into {ref}`House` and it's {ref}`HouseLoader`.
+*)
+{$DEFINE WL_HOUSE_VIEWER_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+type
+(*
+## THouseViewer
+Main record used to interact with the {ref}`House Viewer`.
+*)
+  THouseViewer = record
+    Bounds, LayoutPanel: TBox;
+  end;
+
+(*
+## HouseViewer.SetupInterface
+```pascal
+procedure THouseViewer.SetupInterface();
+```
+Internal method used to setup the {ref}`THouseViewer` coordinates.
+This is automatically called for you on the {ref}`HouseViewer variable`.
+*)
+procedure THouseViewer.SetupInterface();
+begin
+  case Client.Mode of
+    EMode.FIXED:
+      Self.Bounds := MSInterface.CreateBounds([-1, 0, 0, 0], 498, 304);
+    EMode.RESIZABLE, EMode.MODERN_COMPACT, EMode.MODERN_WIDE:
+      Self.Bounds := MSInterface.CreateBounds([0, 1, 0, -3], 498, 304);
+  end;
+
+  with Self.Bounds do
+    Self.LayoutPanel := [X1+35, Y1+35, X1+269, Y2-35];
+end;
+
+(*
+## HouseViewer.LayoutBounds
+```pascal
+property THouseViewer.LayoutBounds: TBox;
+```
+Internal property used to get the house layout bounds from the
+{ref}`THouseViewer`.
+*)
+property THouseViewer.LayoutBounds: TBox;
+begin
+  Result := Target.FindColor(
+    [$3C3CB3, 0.795, EColorSpace.HSL, [2.816, 0.057, 0.129]],
+    Self.LayoutPanel
+  ).Bounds();
+end;
+
+property THouseViewer.RoomBoxes: TBoxArray;
+begin
+  Result := Self.LayoutBounds.Partition(7,7);
+end;
+
+
+(*
+## HouseViewer.LoadHouse
+```pascal
+procedure THouseViewer.LoadHouse();
+```
+Loads the current layout visible in the {ref}`HouseViewer` into
+{ref}`THouse` {ref}`HouseLoader` (`THouse.Loader`).
+
+For a easy usage of this and instant visualization of the results, check out:
+{ref}`ScriptForm CreateHouseTab`.
+*)
+procedure THouseViewer.LoadHouse();
+var
+  boxes: TBoxArray;
+  i, rotation, offset: Integer;
+  room: THouseRoom;
+  t: Double;
+begin
+  t := PerformanceTime();
+  House.Loader.Init();
+
+  boxes := Self.RoomBoxes;
+
+  offset := House.Loader.AMOUNT div 2 - 3;
+  for i := 0 to High(boxes) do
+  begin
+    room.Room := HouseLayoutFinder.Compare(boxes[i], rotation);
+    room.Rotation := rotation;
+    House.Loader.DrawMap(room, [offset + (i mod 7), offset + (i div 7)]);
+  end;
+
+  DebugLn('HouseViewer', 'Took ' + ToStr(Round(PerformanceTime()-t, 3)) + 'ms to load the house.', ELogLevel.SUCCESS);
+end;
+
+var
+(*
+## HouseViewer variable
+Global {ref}`THouseViewer` variable.
+*)
+  HouseViewer: THouseViewer;

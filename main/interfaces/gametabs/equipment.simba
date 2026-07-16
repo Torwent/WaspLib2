@@ -1,0 +1,134 @@
+(*
+# Equipment
+Methods to interact with the Equipment gametab.
+```{figure} ../../images/equipment.png
+```
+*)
+{$DEFINE WL_EQUIPMENT_INCLUDED}
+{$INCLUDE_ONCE WaspLib/main.simba}
+
+
+type
+(*
+## EEquipment
+```pascal
+EEquipment = enum(HEAD, CAPE, NECK, AMMO, WEAPON, BODY, SHIELD, LEGS, HANDS, FEET, RING, SECONDARY_AMMO);
+```
+Enumerator of the equipment slots.
+*)
+  EEquipment = enum(
+    HEAD, CAPE, NECK, AMMO, WEAPON, BODY, SHIELD, LEGS, HANDS, FEET, RING,
+    SECONDARY_AMMO
+  );
+
+type
+(*
+## EEquipmentButton
+```pascal
+EEquipmentButton = (STATS, PRICES, DEATH, FOLLOWER);
+```
+Enumerator of the equipment buttons.
+*)
+  EEquipmentButton = enum(STATS, PRICES, DEATH, FOLLOWER);
+
+(*
+## TEquipment
+Main record reponsible for handling the equipment gametab.
+*)
+  TEquipment = record
+    Slots: TSlotInterface;
+    Items: TItemInterface;
+    SlotBoxes: TBoxArray;
+    Buttons: array [EEquipmentButton] of TButton;
+  end;
+
+(*
+## Equipment.SetupGameTab
+```pascal
+procedure TEquipment.SetupGameTab();
+```
+Internal method used to setup the {ref}`TEquipment` coordinates.
+
+This is automatically called for you on the {ref}`Equipment variable`.
+*)
+
+function TEquipment.Open(): Boolean; forward;
+
+{%codetools off}
+function TEquipment.GetSlots(topLeft: TPoint): TBoxArray;
+var
+  tmp: TBox;
+  i: Integer;
+begin
+  Result := TBoxArray.Create(topLeft.Offset(33, 5), 3,2, 35, 35, [6, 4]) +
+            TBoxArray.Create(topLeft.Offset(18, 83), 3, 3, 35, 35, [21, 5]);
+
+  Delete(Result, 0, 1);
+  Delete(Result, 8, 1);
+  Delete(Result, 9, 1);
+
+  //moving the boxes around so they match ERSGear order.
+  tmp := Result[1];
+  for i := 1 to High(Result) - 1 do
+    Result[i] := Result[i + 1];
+  Result[High(Result)] := tmp;
+end;
+{%codetools on}
+
+
+procedure TEquipment.SetupGameTab();
+var
+  btns: TBoxArray;
+  i: Integer;
+begin
+  Self.SlotBoxes := Self.GetSlots(GameTab.TopLeft);
+
+  Self.Slots.Setup('Equipment.Slots', Self.SlotBoxes);
+  Self.Items.Setup('Equipment.Items', @Self.Slots, [2, 2], @Self.Open);
+
+  btns := TBoxArray.Create(GameTab.BottomLeft.Offset(4, -52), 4, 1, 39, 39, [6,0]);
+  for i := 0 to 3 do
+    Self.Buttons[i] := new TButton(btns[i]);
+end;
+
+(*
+## Equipment.IsOpen
+```pascal
+function TEquipment.IsOpen(): Boolean;
+```
+Returns True/False whether the equipment tab is open or not.
+
+Example:
+```pascal
+WriteLn Equipment.IsOpen();
+```
+*)
+function TEquipment.IsOpen(): Boolean;
+begin
+  Result := GameTabs.IsOpen(EGameTab.EQUIPMENT);
+end;
+
+(*
+## Equipment.Open
+```pascal
+function TEquipment.Open(): Boolean;
+```
+Attempts to open the equipment tab.
+Returns true if we succeed.
+
+Example:
+```pascal
+WriteLn Equipment.Open();
+```
+*)
+function TEquipment.Open(): Boolean;
+begin
+  Result := GameTabs.Open(EGameTab.EQUIPMENT);
+end;
+
+var
+(*
+## Equipment variable
+Global {ref}`TEquipment` variable.
+*)
+  Equipment: TEquipment;

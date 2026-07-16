@@ -1,0 +1,177 @@
+(*
+# RSTranslator
+This file is responsible for conversions or internal game values to values
+that can be used by Simba and back.
+*)
+
+{$DEFINE WL_TRANSLATOR_INCLUDED}
+{$INCLUDE_ONCE WaspLib/utils.simba}
+
+type
+(*
+## TTranslator
+Record responsible for conversions or internal game values to values
+that can be used by Simba and back.
+*)
+  TTranslator = record
+    RSMap: record
+      const ChunkSide: Int32 = 64;
+      const Dimensions: TPoint = [100,200];
+      const Scope: TBox = [0, 19, 99, 196];
+    end;
+
+    const TILE_SIZE: Int32 = 4;
+    const MAP_CHUNK_SIZE: Int32 = 256;
+  end;
+
+(*
+## RSTranslator.MapWidth
+```pascal
+property TTranslator.MapWidth: UInt32;
+```
+Returns the full width in pixels of the game map.
+
+Example:
+```pascal
+WriteLn RSTranslator.MapWidth;
+```
+*)
+property TTranslator.MapWidth: Int32;
+begin
+  Result := Self.RSMap.Scope.Width * Self.MAP_CHUNK_SIZE;
+end;
+
+(*
+## RSTranslator.MapHeight
+```pascal
+property TTranslator.MapHeight: Int32;
+```
+Returns the full height in pixels of the game map.
+
+Example:
+```pascal
+WriteLn RSTranslator.MapHeight;
+```
+*)
+property TTranslator.MapHeight: Int32;
+begin
+  Result := Self.RSMap.Scope.Height * Self.MAP_CHUNK_SIZE;
+end;
+
+
+(*
+## RSTranslator.Global2Chunk
+```pascal
+function TTranslator.Global2Chunk(pt: TPoint): TPoint;
+function TTranslator.Global2Chunk(b: TBox): TBox; overload;
+```
+Converts a "Global" coordinate to a chunk number.
+
+Example:
+```pascal
+WriteLn RSTranslator.Global2Chunk(Point(2000, 2000));
+```
+*)
+function TTranslator.Global2Chunk(pt: TPoint): TPoint;
+begin
+  pt.X := pt.X mod Self.MapWidth;
+  Result.X := Self.RSMap.Scope.X1 + Floor(pt.X / Self.MAP_CHUNK_SIZE);
+  Result.Y := Self.RSMap.Scope.Y2 - Floor(pt.Y / Self.MAP_CHUNK_SIZE);
+end;
+
+function TTranslator.Global2Chunk(b: TBox): TBox; overload;
+var
+  lo, hi: TPoint;
+begin
+  lo := Self.Global2Chunk(b.TopLeft);
+  hi := Self.Global2Chunk(b.BottomRight);
+  Result := Box(lo.X, lo.Y, hi.X, hi.Y);
+end;
+
+
+(*
+## RSTranslator.Chunk2Coordinate
+```pascal
+function TTranslator.Chunk2Coordinate(p: TPoint): TPoint;
+function TTranslator.Chunk2Coordinate(b: TBox): TBox; overload;
+```
+Converts a "Chunk" number to the top left "Global" coordinate of that chunk.
+
+Example:
+```pascal
+WriteLn RSTranslator.Chunk2Coordinate(Point(53, 50));
+```
+*)
+function TTranslator.Chunk2Coordinate(pt: TPoint; plane: Int32 = 0): TPoint;
+begin
+  Result.X := pt.X * Self.MAP_CHUNK_SIZE;
+  Result.Y := (Self.RSMap.Scope.Y2 - pt.Y) * Self.MAP_CHUNK_SIZE;
+  if plane > 0 then
+    Result.X += Self.MapWidth * plane;
+end;
+
+function TTranslator.Chunk2Coordinate(b: TBox; plane: Int32 = 0): TBox; overload;
+var
+  lo, hi: TPoint;
+begin
+  lo := Self.Chunk2Coordinate(b.TopLeft, plane);
+  hi := Self.Chunk2Coordinate([b.X2+1, b.Y2-1], plane);
+  Result := Box(lo.X, lo.Y, hi.X-1, hi.Y-1);
+end;
+
+
+function TTranslator.Height2Color(height: Single): Int32;
+const
+  H_VALUE = 6048 / $FFFFFF;
+begin
+  Result := Round((height / H_VALUE) / 4 * 128);
+end;
+
+function TTranslator.Color2Height(color: Int32): Single;
+const
+  H_VALUE = 6048 / $FFFFFF;
+begin
+  Result := color * H_VALUE * 4 / 128;
+end;
+
+
+function TTranslator.Normalize(pt: TPoint): TPoint;
+begin
+  Result := [pt.X - (pt.X mod Self.TILE_SIZE), pt.Y - (pt.Y mod Self.TILE_SIZE) + (Self.TILE_SIZE div 2)];
+end;
+
+
+(*
+## TTranslator.GetChunks
+```pascal
+function TTranslator.GetChunks(lo, hi: TPoint): TPointArray; static;
+```
+Simple methods that will return all chunks in between a `lo` and `hi` chunks.
+This will also fix their order if required, as game chunks are oddly numbered
+from bottom to top on the Y axis.
+
+Example:
+```pascal
+WriteLn RSTranslator.GetChunks([20,20], [22,22]);
+//This will return:
+//[[20, 20], [20, 21], [20, 22], [21, 20], [21, 21], [21, 22], [22, 20], [22, 21], [22, 22]];
+```
+*)
+function TTranslator.GetChunks(lo, hi: TPoint): TPointArray; static;
+var
+  y, x: Int32;
+begin
+  if lo.X > hi.X then Swap(lo.X, hi.X);
+  if lo.Y > hi.Y then Swap(lo.Y, hi.Y);
+
+  for y := lo.Y to hi.Y do
+    for x := lo.X to hi.X do
+      Result += [x,y];
+end;
+
+var
+(*
+## RSTranslator variable
+Global {ref}`TTranslator` variable.
+*)
+  RSTranslator: TTranslator;
