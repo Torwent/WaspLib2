@@ -16,7 +16,7 @@ jobs:
       base_url: ${{ steps.simba-url.outputs.baseUrl }}
       test_files: ${{ steps.list-test-files.outputs.testFiles }}
       plugins_hash: ${{ steps.wasp-plugins-hash.outputs.sha }}
-      assets_hash: ${{ steps.wasp-assets-hash.outputs.sha }}
+      # assets_hash: ${{ steps.wasp-assets-hash.outputs.sha }}
     steps:
       - name: Fetch Simba 2 download URL
         id: simba-url
@@ -151,19 +151,19 @@ jobs:
           path: ./Plugins/wasp-plugins
 
       #Assets
-      - name: Cache wasp-assets
-        uses: actions/cache@v5
-        id: wasp-assets-cache
-        with:
-          path: ./Data/Assets
-          key: wasp-assets-${{ needs.setup.outputs.assets_hash }}
+      # - name: Cache wasp-assets
+      #   uses: actions/cache@v5
+      #   id: wasp-assets-cache
+      #   with:
+      #     path: ./Data/Assets
+      #     key: wasp-assets-${{ needs.setup.outputs.assets_hash }}
 
-      - name: Checkout wasp-assets
-        if: steps.wasp-assets-cache.outputs.cache-hit != 'true'
-        uses: actions/checkout@v5
-        with:
-          repository: WaspScripts/wasp-assets
-          path: ./Data/Assets
+      # - name: Checkout wasp-assets
+      #   if: steps.wasp-assets-cache.outputs.cache-hit != 'true'
+      #   uses: actions/checkout@v5
+      #   with:
+      #     repository: WaspScripts/wasp-assets
+      #     path: ./Data/Assets
 
       - name: Download WaspLib repo artifacts
         uses: actions/download-artifact@v7
