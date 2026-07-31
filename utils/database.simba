@@ -1,140 +1,4 @@
-(*
-# Database
-`TDatabase` is used to create a extremely basic single table database.
 
-Despite being basic it's very effective and fast and you can this when you have
-a large set of data and need to retrieve values very fast.
-
-To make this possible `TDatabase` creates several maps between the data and
-their respective row placement, so to use this you need to have your data
-prepared, split into database columns saved in different files and each
-"row" should be in orderder between the files.
-
-Credits: Torwent
-
-Let's use for example a little bit of what is used for the items database
-as an example:
-
-```
-+-------------------+-------+------------+
-| items             | id    | hash       |
-+-------------------+-------+------------+
-| dwarf remains     | 0     | 069702cc6  |
-| toolkit           | 1     | ff026bd51  |
-| cannonball        | 2     | 0224ca70f  |
-| nulodion's notes  | 3     | 047160bd7  |
-| ammo mould        | 4     | f986eb373  |
-| ...               | ...   | ...        |
-| abyssal whip      | 4151  | 02f197ebf  |
-+-------------------+-------+------------+
-```
-
-The data in this example should be saved to 3 files with the column name
-(items, id, hash).
-
-The data order has to match each row of the table it belongs to.
-
-The order of the data is how the database knows which row the entry belongs to.
-
-When you use `TDatabase` to load this each of those columns, the data of each
-column is saved as 2 array, one with the data and another each row number.
-Imagine it as an extra column added to our table for each column we had,
-something like this:
-
-```
-+-------------------+-------------+-------+----------+------------+------------+
-| items             | item rows   | id    | id rows  | hash       | hash rows  |
-+-------------------+-------------+-------+----------+------------+------------+
-| dwarf remains     | 0           | 0     | 0        | 069702cc6  | 0          |
-| toolkit           | 1           | 1     | 1        | ff026bd51  | 1          |
-| cannonball        | 2           | 2     | 2        | 0224ca70f  | 2          |
-| nulodion's notes  | 3           | 3     | 3        | 047160bd7  | 3          |
-| ammo mould        | 4           | 4     | 4        | f986eb373  | 4          |
-| ...               | ...         | ...   | ...      | ...        | ...        |
-| abyssal whip      | 3551        | 4151  | 3551     | 02f197ebf  | 3551       |
-+-------------------+-------------+-------+----------+------------+------------+
-```
-
-Once the TDatabase has prepared your data like this it will sort each column
-arrays alphabetically by the data alphabetical order, our example above will
-become this internally:
-
-```
-+-------------------+-------------+-------+----------+------------+------------+
-| items             | item rows   | id    | id rows  | hash       | hash rows  |
-+-------------------+-------------+-------+----------+------------+------------+
-| abyssal whip      | 3551        | 0     | 0        | 0224ca70f  | 2          |
-| ammo mould        | 4           | 1     | 1        | 02f197ebf  | 3551       |
-| cannonball        | 2           | 2     | 2        | 047160bd7  | 3          |
-| dwarf remains     | 0           | 3     | 3        | 069702cc6  | 0          |
-| nulodion's notes  | 3           | 4     | 4        | f986eb373  | 4          |
-| ...               | ...         | ...   | ...      | ...        | ...        |
-| toolkit           | 1           | 4151  | 3551     | ff026bd51  | 1          |
-+-------------------+-------------+-------+----------+------------+------------+
-```
-
-And at this point it might be easier to understand this imagining it as
-different tables for each of the columns we had which you know the new (rows)
-and original order:
-
-```
-+---------+-------------------+-------------+
-| order   | items             | item rows   |
-+---------+-------------------+-------------+
-| 0       | abyssal whip      | 3551        |
-| 1       | ammo mould        | 4           |
-| 2       | cannonball        | 2           |
-| 3       | dwarf remains     | 0           |
-| 4       | nulodion's notes  | 3           |
-| ...     | ...               | ...         |
-| 3551    | toolkit           | 1           |
-+---------+-------------------+-------------+
-
-+---------+-------+----------+
-| order   | id    | id rows  |
-+---------+-------+----------+
-| 0       | 0     | 0        |
-| 1       | 1     | 1        |
-| 2       | 2     | 2        |
-| 3       | 3     | 3        |
-| 4       | 4     | 4        |
-| ...     | ...   | ...      |
-| 3551    | 4151  | 3551     |
-+---------+-------+----------+
-
-+---------+------------+------------+
-| order   | hash       | hash rows  |
-+---------+------------+------------+
-| 0       | 0224ca70f  | 2          |
-| 1       | 02f197ebf  | 3551       |
-| 2       | 047160bd7  | 3          |
-| 3       | 069702cc6  | 0          |
-| 4       | f986eb373  | 4          |
-| ...     | ...        | ...        |
-| 3551    | ff026bd51  | 1          |
-+---------+------------+------------+
-```
-
-Now what happens when you want to look for data in your TDatabase is the
-following:
-- Find the data in the column you know
-- get it's row number
-- Go to the "table" of data you want to read and search for the row number on
-it's rows column.
-- Once you find it, check which "order" it is in your "table" and get the data from same "order"
-
-This is quite fast to do because the tables are alphabetically sorted. Finding the value you want is very fast.
-
-So with the examples above, if we want to get `abyssal whip` id:
-- Find `abyssal whip` in the "item" table
-- Get it's "order" which is `0`
-- Get the "item rows" at the "order" `0` which is `3551`
-- On the "id" table, search the "id rows" for `3551`
-- Get it's "order" which is `3551` (in this example the "order" is the same but as "id rows" it could be different)
-- Finally, get the "id" matching for that "order" which is `4151`.
-
-You successfully retrieved the abyssal whip ID.
-*)
 {$DEFINE WL_DATABASE_INCLUDED}
 {$INCLUDE_ONCE WaspLib/utils.simba}
 
@@ -158,13 +22,7 @@ begin
 end;
 {%codetools on}
 
-(*
-## TDatabase.Setup
-```pascal
-procedure TDatabase.Setup(name: String; columns: TStringArray; path, version: String);
-```
-Sets up a new `TDatabase`
-*)
+
 procedure TDatabase.Setup(name: String; columns: TStringArray; path, version: String);
 var
   i: Integer;
@@ -251,64 +109,16 @@ begin
   end;
 end;
 
-(*
-## Querying Data
-A database is only useful if you can query data from it.
-Below in this page you will see several examples of how to use `TDatabase` and
-this examples will be accompanied with a `SQL` equivalent.
 
-One thing to note is that `TDatabase` is a "single table" datase.
-This is also not a thing in real databases so in the following SQL examples we
-will be using `TDatabaseTable` as our imaginary table.
-*)
 
-(*
-## Database.Contains
-```pascal
-function TDatabase.Contains(value, column: String): Boolean;
-```
-Returns the true/dalse if the specified `value` exists on the specified
-`column`.
 
-Example:
-```pascal
-database.Contains('abyssal whip', 'item');
-```
-The SQL equivalent would be something like this:
-```sql
-SELECT EXISTS (
-  SELECT 1
-  FROM "TDatabaseTable"
-  WHERE item = 'abyssal whip'
-);
-```
-*)
 function TDatabase.Contains(value, column: String): Boolean;
 begin
   Result := Self.Data.Value[column].Contains(value);
 end;
 
 
-(*
-## Database.Get
-```pascal
-function TDatabase.Get(value, column_name, result_column: String): String;
-```
-Returns the data at `result_column` that where the `column_name` column has the
-specified `value`.
 
-Example:
-```pascal
-WriteLn database.Get('abyssal whip', 'item', 'id');
-```
-The SQL equivalent would be something like this:
-```sql
-SELECT id
-FROM "TDatabaseTable"
-WHERE item = 'abyssal whip'
-LIMIT 1;
-```
-*)
 function TDatabase.Get(value, column_name, result_column: String): String;
 var
   idx: Integer;
@@ -324,25 +134,7 @@ begin
   Result := data[idx];
 end;
 
-(*
-## Database.GetAll
-```pascal
-function TDatabase.GetAll(value, column_name, result_column: String): TStringArray;
-```
-Same as {ref}`Database.Get` but will return all existing values isntead of just one.
 
-Example:
-```pascal
-WriteLn database.GetAll('abyssal whip', 'item', 'id');
-```
-The SQL equivalent would be something like this:
-```sql
-SELECT id
-FROM "TDatabaseTable"
-WHERE item = 'abyssal whip';
-```
-Basically the same as {ref}`Database.Get` SQL example without the `LIMIT`.
-*)
 function TDatabase.GetAll(value, column_name, result_column: String): TStringArray;
 var
   indices: TIntegerArray;
@@ -362,27 +154,7 @@ begin
   end;
 end;
 
-(*
-## Database.Insert
-```pascal
-procedure TDatabase.Insert(values: TStringArray; saveCache: Boolean = False);
-```
-Inserts a row of data. `values` must has a value for each `TDatabase.Columns` if
-you want to insert data.
 
-By default, this data insertion only stays in memory, if you want to save it to
-disk, you need to set `saveCache` to `True`.
-
-Example:
-```pascal
-database.Insert(['Custom Item', '99999', 'abcdef']);
-```
-The SQL equivalent would be something like this:
-```sql
-INSERT INTO "TDatabaseTable" (item, id, hash)
-VALUES ('abyssal whip', '99999', 'abcdef');
-```
-*)
 procedure TDatabase.Insert(values: TStringArray; saveCache: Boolean = False);
 var
   i, idx: Integer;

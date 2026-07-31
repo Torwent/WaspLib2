@@ -1,7 +1,4 @@
-(*
-# SpellFinder
-Methods to find and compare spell images
-*)
+
 
 {$DEFINE WL_SPELLFINDER_INCLUDED}
 {$INCLUDE_ONCE WaspLib/main.simba}
