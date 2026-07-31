@@ -118,7 +118,7 @@ Record responsible to handle the {ref}`Bank` interface.
       Items: TStringMap<TBankPosition>;
     end;
     _IsOpenHelperBox: TBox;
-    Banks: TGObjectArray;
+    Banks: TObjectArray;
     Bankers: TEntityArray;
   end;
 
@@ -1392,10 +1392,10 @@ end;
 
 procedure TBank._SetupMapObjects();
 begin
-  Self.Banks := TGObjectArray.Create(
+  Self.Banks := TObjectArray.Create(
                   Map.Walker, ObjectsJSON.GetByAction('Bank')
                 ) +
-                TGObjectArray.Create(
+                TObjectArray.Create(
                   Map.Walker, ObjectsJSON.GetByAllActions(['Use', 'Collect'])
                 );
   Self.Bankers := TEntityArray.Create(Map.Walker, NPCsJSON.GetByAction('Bank'));
@@ -1404,7 +1404,7 @@ end;
 (*
 ## Bank.Hover
 ```pascal
-function TBank.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Hover(const obj: TObject; walk: Boolean = True): Boolean;
 function TBank.Hover(const npc: TEntity; walk: Boolean = True): Boolean; overload;
 function TBank.Hover(walk: Boolean = True): Boolean; overload;
 ```
@@ -1414,12 +1414,12 @@ This assumes that {ref}`Map` is being used and setup.
 It's possible to use this with other systems but you need to configure it all
 manually.
 
-It will always hover the closest bank {ref}`TGObject` or {ref}`TEntity` on your
+It will always hover the closest bank {ref}`TObject` or {ref}`TEntity` on your
 loaded map.
 
 If you are too far, it will attempt to walk closer to it.
 *)
-function TBank.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Hover(const obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Exit(obj.WalkHover());
@@ -1454,7 +1454,7 @@ end;
 (*
 ## Bank.Open
 ```pascal
-function TBank.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Open(const obj: TObject; walk: Boolean = True): Boolean;
 function TBank.Open(const npc: TEntity; walk: Boolean = True): Boolean; overload;
 function TBank.Open(walk: Boolean = True): Boolean; overload;
 ```
@@ -1481,7 +1481,7 @@ end.
 ```{figure} ../../images/bankopen.gif
 ```
 *)
-function TBank.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TBank.Open(const obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Result := obj.WalkInteract(['Bank B', 'Bank E', 'Bank G', 'Use B'])

@@ -21,7 +21,7 @@ Main record to interact with the {ref}`Anvil` interface.
     SlotBoxes: TBoxArray;
     QuantityButtons: TButtonArray;
 
-    Anvils: TGObjectArray;
+    Anvils: TObjectArray;
   end;
 
 function TAnvil.GetSlotBoxes(): TBoxArray; forward;
@@ -291,17 +291,17 @@ This assumes that {ref}`Map` is being used and setup.
 It's possible to use this with other systems but you need to configure it all
 manually.
 
-It will always hover the closest anvil {ref}`TGObject` on your loaded map.
+It will always hover the closest anvil {ref}`TObject` on your loaded map.
 
 If you are too far, it will attempt to walk closer to it by default unless you
 set the `walk` parameter to `False`.
 *)
 function TAnvil.Hover(walk: Boolean = True): Boolean;
 var
-  obj: TGObject;
+  obj: TObject;
 begin
   if Self.Anvils = [] then
-    Self.Anvils := TGObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Smith'));
+    Self.Anvils := TObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Smith'));
 
   obj := Self.Anvils[Self.Anvils.ClosestIndex(Map.Position())];
   if walk then
@@ -312,7 +312,7 @@ end;
 (*
 ## Anvil.Open
 ```pascal
-function TAnvil.Open(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TAnvil.Open(constref obj: TObject; walk: Boolean = True): Boolean;
 function TAnvil.Open(walk: Boolean = True): Boolean;
 ```
 Opens the anvil for you.
@@ -338,7 +338,7 @@ end.
 ```{figure} ../../images/anvilopen.gif
 ```
 *)
-function TAnvil.Open(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TAnvil.Open(constref obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Result := obj.WalkInteract(['Smith', 'nvil'])
@@ -354,7 +354,7 @@ end;
 
 function TAnvil.Open(walk: Boolean = True): Boolean; overload;
 var
-  obj: TGObject;
+  obj: TObject;
 begin
   if MSInterface.IsOpen() then
   begin
@@ -364,7 +364,7 @@ begin
   end;
 
   if Self.Anvils = [] then
-    Self.Anvils := TGObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Smith'));
+    Self.Anvils := TObjectArray.Create(Map.Walker, ObjectsJSON.GetByAction('Smith'));
 
   obj := Self.Anvils[Self.Anvils.ClosestIndex(Map.Position())];
   Result := Self.Open(obj, walk);

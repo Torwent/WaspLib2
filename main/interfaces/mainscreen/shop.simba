@@ -35,7 +35,7 @@ Main record to interact with the {ref}`Shop` interface.
     QuantityButtons: array [EShopQuantity] of TButton;
     ValueButton: TButton;
 
-    Shops: TGObjectArray;
+    Shops: TObjectArray;
     Merchants: TEntityArray;
   end;
 
@@ -342,7 +342,7 @@ end;
 
 procedure TShop._SetupMapObjects();
 begin
-  Self.Shops := TGObjectArray.Create(
+  Self.Shops := TObjectArray.Create(
     Map.Walker, ObjectsJSON.GetByAction('Buy-food')
   );
 
@@ -354,7 +354,7 @@ end;
 (*
 ## Shop.Hover
 ```pascal
-function TShop.Hover(obj: TGObject; walk: Boolean = True): Boolean;
+function TShop.Hover(obj: TObject; walk: Boolean = True): Boolean;
 function TShop.Hover(npc: TEntity; walk: Boolean = True): Boolean; overload;
 ```
 This assumes that {ref}`Map` is being used and setup.
@@ -364,7 +364,7 @@ manually.
 If you are too far, it will attempt to walk closer to it.
 *)
 
-function TShop.Hover(obj: TGObject; walk: Boolean = True): Boolean;
+function TShop.Hover(obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Exit(obj.WalkHover());
@@ -381,7 +381,7 @@ end;
 (*
 ## Shop.Open
 ```pascal
-function TShop.Open(obj: TGObject; walk: Boolean = True): Boolean;
+function TShop.Open(obj: TObject; walk: Boolean = True): Boolean;
 function TShop.Open(npc: TEntity; walk: Boolean = True): Boolean; overload;
 ```
 Opens the shop for you.
@@ -396,7 +396,7 @@ begin
 end.
 ```
 *)
-function TShop.Open(obj: TGObject; walk: Boolean = True): Boolean;
+function TShop.Open(obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Result := obj.WalkInteract(['Trade'])

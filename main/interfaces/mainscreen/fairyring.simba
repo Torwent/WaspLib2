@@ -32,7 +32,7 @@ Record responsible with interacting with the {ref}`FairyRing`.
     Dials: array [EFairyRingDial] of String;
     DialBoxes, DialHoles, RotateLeftBoxes, RotateRightBoxes: TBoxArray;
     Item: TItem;
-    FairyRings: TGObjectArray;
+    FairyRings: TObjectArray;
   end;
 
 (*
@@ -685,13 +685,13 @@ end;
 
 procedure TFairyRing._SetupMapObjects();
 begin
-  Self.FairyRings := TGObjectArray.Create(Map.Walker, ObjectsJSON.GetByName('Fairy ring'));
+  Self.FairyRings := TObjectArray.Create(Map.Walker, ObjectsJSON.GetByName('Fairy ring'));
 end;
 
 (*
 ## FairyRing.Teleport
 ```pascal
-function TFairyRing.Teleport(fairyCode: String; obj: TGObject; walk: Boolean = True): Boolean;
+function TFairyRing.Teleport(fairyCode: String; obj: TObject; walk: Boolean = True): Boolean;
 function TFairyRing.Teleport(fairyCode: String; walk: Boolean = True): Boolean; overload;
 ```
 Teleports the user to the specified fairy ring code.
@@ -704,7 +704,7 @@ Example:
 WriteLn FairyRing.Teleport('cip');
 ```
 *)
-function TFairyRing.Teleport(fairyCode: String; obj: TGObject; walk: Boolean = True): Boolean;
+function TFairyRing.Teleport(fairyCode: String; obj: TObject; walk: Boolean = True): Boolean;
 var
   hover: function(action: TStringArray = []; attempts: Integer = 2): Boolean of object;
   contextMenuTeleport: Boolean;

@@ -23,8 +23,8 @@ The core record used to handle navigating a POH.
     Loader: THouseLoader;
     Walker: TWalker;
 
-    Objects: array [EHouseObject] of TGObject;
-    Teleports: array [EHouseTeleport] of TGObject;
+    Objects: array [EHouseObject] of TObject;
+    Teleports: array [EHouseTeleport] of TObject;
 
     Downscale: Integer;
     Similarity: Single;
@@ -35,7 +35,7 @@ The core record used to handle navigating a POH.
     Graph: TWebGraph;
     IsSetup: Boolean;
 
-    Entrance: TGObject;
+    Entrance: TObject;
 
     TeleportMode: EHouseTeleportMode;
     CapeTab: EGameTab;
@@ -54,7 +54,7 @@ begin
     Exit;
   end;
 
-  Self.Teleports[teleport] := TGObject.Create(Self.Walker, obj.GetSize(), [coordinate], teleport.GetUpText());
+  Self.Teleports[teleport] := TObject.Create(Self.Walker, obj.GetSize(), [coordinate], teleport.GetUpText());
   Self.Teleports[teleport].Rotations := [rotation];
   Self.Teleports[teleport].Finder := teleport.GetFinder();
 end;
@@ -68,7 +68,7 @@ begin
     Exit;
   end;
 
-  Self.Objects[obj] := TGObject.Create(Self.Walker, obj.GetSize(), [coordinate], obj.GetUpText());
+  Self.Objects[obj] := TObject.Create(Self.Walker, obj.GetSize(), [coordinate], obj.GetUpText());
   Self.Objects[obj].Rotations := [rotation * 90];
   Self.Objects[obj].Finder := obj.GetFinder();
 end;
@@ -108,7 +108,7 @@ begin
     end;
 end;
 
-function THouse.CreateObject(offset: TPoint; size: TVector3; eRoom: EHouseRoom): TGObject;
+function THouse.CreateObject(offset: TPoint; size: TVector3; eRoom: EHouseRoom): TObject;
 var
   idx, coordinate: TPoint;
   room: THouseRoom;
@@ -129,7 +129,7 @@ begin
         Continue;
       end;
 
-      Result := TGObject.Create(Self.Walker, size, [coordinate]);
+      Result := TObject.Create(Self.Walker, size, [coordinate]);
       Result.Rotations := [room.Rotation * 90];
     end;
 end;
@@ -164,7 +164,7 @@ begin
   //TODO:
   //Self.Graph := Self._BuildGraph(Self.Loader.Collision);
 
-  Self.Entrance := TGObject.Create(Map.Walker, [2,4,7], [Self.Loader.Location.GetEntranceCoordinate()], ['Portal']);
+  Self.Entrance := TObject.Create(Map.Walker, [2,4,7], [Self.Loader.Location.GetEntranceCoordinate()], ['Portal']);
   Self.Entrance.Rotations := [Self.Loader.Location.GetEntranceRotation()];
   //TODO:
   //Self.Entrance.Finder.Colors += CTS2(6316135, 8, 0.28, 0.12);

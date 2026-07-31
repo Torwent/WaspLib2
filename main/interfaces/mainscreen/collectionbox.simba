@@ -354,7 +354,7 @@ end;
 (*
 ## CollectionBox.Hover
 ```pascal
-function TCollectionBox.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Hover(const obj: TObject; walk: Boolean = True): Boolean;
 function TCollectionBox.Hover(
   const npc: TEntity; walk: Boolean = True
 ): Boolean; overload;
@@ -362,7 +362,7 @@ function TCollectionBox.Hover(walk: Boolean = True): Boolean; overload;
 ```
 Same as {ref}`Bank.Hover`.
 *)
-function TCollectionBox.Hover(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Hover(const obj: TObject; walk: Boolean = True): Boolean;
 begin
   Result := Bank.Hover(obj, walk);
 end;
@@ -380,7 +380,7 @@ end;
 (*
 ## CollectionBox.Open
 ```pascal
-function TCollectionBox.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Open(const obj: TObject; walk: Boolean = True): Boolean;
 function TCollectionBox.Open(
   const npc: TEntity; walk: Boolean = True
 ): Boolean; overload;
@@ -397,7 +397,7 @@ begin
 end.
 ```
 *)
-function TCollectionBox.Open(const obj: TGObject; walk: Boolean = True): Boolean;
+function TCollectionBox.Open(const obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Result := obj.WalkInteract(['Collect'])

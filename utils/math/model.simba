@@ -504,14 +504,14 @@ begin
   end;
 
   for i := High(Self.Faces) downto 0 do
-    begin
-      for j := 0 to High(Self.Faces[i].Vertices) do
-        polygon += projection[Self.Faces[i].Vertices[j]];
-      triangle := polygon.Connect();
-      triangles += triangle;
-      edge += triangle.ShapeFill();
-      polygon := [];
-    end;
+  begin
+    for j := 0 to High(Self.Faces[i].Vertices) do
+      polygon += projection[Self.Faces[i].Vertices[j]];
+    triangle := polygon.Connect();
+    triangles += triangle;
+    edge += triangle.ShapeFill();
+    polygon := [];
+  end;
 
   img.DrawColor := $00FFFF;
   img.DrawTPA(triangles);

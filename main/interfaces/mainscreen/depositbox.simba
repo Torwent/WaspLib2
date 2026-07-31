@@ -30,7 +30,7 @@ Main record to interact with the {ref}`DepositBox` interface.
     InvSlotBoxes,EquipSlotBoxes: TBoxArray;
     DepositButtons: array [EDepositButtons] of TButton;
     QuantityButtons: array [EItemQuantity] of TButton;
-    DepositBoxes: TGObjectArray;
+    DepositBoxes: TObjectArray;
   end;
 
 (*
@@ -439,7 +439,7 @@ end;
 
 procedure TDepositBox._SetupMapObjects();
 begin
-  Self.DepositBoxes := TGObjectArray.Create(
+  Self.DepositBoxes := TObjectArray.Create(
     Map.Walker, ObjectsJSON.GetByAction('Bank Deposit Box')
   );
 end;
@@ -448,7 +448,7 @@ end;
 (*
 ## DepositBox.Hover
 ```pascal
-function TDepositBox.Hover(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TDepositBox.Hover(constref obj: TObject; walk: Boolean = True): Boolean;
 function TDepositBox.Hover(walk: Boolean = True): Boolean; overload;
 ```
 Hovers the closest DepositBox that WaspLib is aware of.
@@ -457,11 +457,11 @@ This assumes that {ref}`Map` is being used and setup.
 It's possible to use this with other systems but you need to configure it all
 manually.
 
-It will always hover the closest DepositBox {ref}`TGObject` on your loaded map.
+It will always hover the closest DepositBox {ref}`TObject` on your loaded map.
 
 If you are too far, it will attempt to walk closer to it.
 *)
-function TDepositBox.Hover(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TDepositBox.Hover(constref obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Exit(obj.WalkHover());
@@ -484,7 +484,7 @@ end;
 (*
 ## DepositBox.Open
 ```pascal
-function TDepositBox.Open(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TDepositBox.Open(constref obj: TObject; walk: Boolean = True): Boolean;
 function TDepositBox.Open(walk: Boolean = True): Boolean; overload;
 ```
 Opens the DepositBox for you.
@@ -510,7 +510,7 @@ end.
 ```{figure} ../../images/DepositBoxopen.gif
 ```
 *)
-function TDepositBox.Open(constref obj: TGObject; walk: Boolean = True): Boolean;
+function TDepositBox.Open(constref obj: TObject; walk: Boolean = True): Boolean;
 begin
   if walk then
     Result := obj.WalkInteract(['Deposit Box'])

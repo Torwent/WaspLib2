@@ -614,7 +614,7 @@ begin
       if Self.UpText = [] then Exit(True);
     end;
 
-    if TGObject._HoverHelper(Self.UpText + action, attempt, attempts) then
+    if TObject._HoverHelper(Self.UpText + action, attempt, attempts) then
       Exit(True);
   end;
 end;
@@ -696,7 +696,7 @@ begin
         Sleep(50); //give uptext 1~ frame time to update
       end;
 
-      if TGObject._WalkHoverHelper(Self.UpText + action, Self.Walker, Self.MinDistance, attempt, attempts, Self.Coordinates) then
+      if TObject._WalkHoverHelper(Self.UpText + action, Self.Walker, Self.MinDistance, attempt, attempts, Self.Coordinates) then
         Exit(True);
     end;
   finally

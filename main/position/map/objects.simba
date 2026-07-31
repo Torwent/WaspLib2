@@ -11,7 +11,7 @@ game objects.
 
 {$IFDEF RANGECHECKS}
 begin
-  WriteLn GetDebugLn('TGObject', 'Range checks are enabled for TGObject, these should be disabled in production!', ELogLevel.WARN);
+  WriteLn GetDebugLn('TObject', 'Range checks are enabled for TObject, these should be disabled in production!', ELogLevel.WARN);
 end;
 {$ENDIF}
 
@@ -19,10 +19,10 @@ type
   EObjectData = enum(ID, NAME, TYP, CATEGORY, ACTIONS, COORDINATES, SIZE, ROTATIONS, COLORS);
 
 (*
-## TGObject
+## TObject
 Main type to handle {ref}`Objects`.
 *)
-  TGObject = record
+  TObject = record
     UpText: TStringArray;
     Size, Offset: TVector3;
     Model: TModel;
@@ -34,33 +34,33 @@ Main type to handle {ref}`Objects`.
     MinDistance: Integer;
   end;
 
-  PRSObject = ^TGObject;
+  PRSObject = ^TObject;
 
 (*
-## TGObjectArray
-Array of {ref}`TGObject`.
+## TObjectArray
+Array of {ref}`TObject`.
 *)
-  TGObjectArray = array of TGObject;
+  TObjectArray = array of TObject;
 
 (*
-## TGObject.Create
+## TObject.Create
 ```pascal
-function TGObject.Create(var walker: TWalker; size: TVector3; coordinates: TPointArray; uptext: TStringArray = []): TGObject; static;
-function TGObject.Create(var walker: TWalker; json: TJSONObject): TGObject; static; overload;
+function TObject.Create(var walker: TWalker; size: TVector3; coordinates: TPointArray; uptext: TStringArray = []): TObject; static;
+function TObject.Create(var walker: TWalker; json: TJSONObject): TObject; static; overload;
 ```
-Create function to create your {ref}`TGObject`.
+Create function to create your {ref}`TObject`.
 
 Assuming you create the `RSObject` manually, the create function will provide
-you with a fully built `TGObject` without a finder.
+you with a fully built `TObject` without a finder.
 
 You may optionally assign one later if you want:
 ```pascal
 {$I WaspLib/main.simba}
 var
-  obj: TGObject;
+  obj: TObject;
 begin
   Map.Setup([EChunk.VARROCK]);
-  obj := TGObject.Create(Map.Walker, [1,1,7], [[8648,36686]], ['Bank booth']);
+  obj := TObject.Create(Map.Walker, [1,1,7], [[8648,36686]], ['Bank booth']);
   //obj.Finder.Colors += $FFFFFF;
 end;
 ```
@@ -70,15 +70,15 @@ the one that {ref}`Map JSONs` provide:
 ```pascal
 {$I WaspLib/main.simba}
 var
-  obj: TGObject;
+  obj: TObject;
 begin
   Map.Setup([EChunk.VARROCK]);
   //Item[0] because this returns a JSON array. For more info read Map JSONs documentation.
-  obj := TGObject.Create(Map.Walker, ObjectsJSON.GetByName('bank', 1).Item[0]);
+  obj := TObject.Create(Map.Walker, ObjectsJSON.GetByName('bank', 1).Item[0]);
 end;
 ```
 *)
-function TGObject.Create(var walker: TWalker; size: TVector3; coordinates: TPointArray; uptext: TStringArray = []): TGObject; static;
+function TObject.Create(var walker: TWalker; size: TVector3; coordinates: TPointArray; uptext: TStringArray = []): TObject; static;
 begin
   Result.Coordinates := coordinates;
   SetLength(Result.Rotations, Length(coordinates));
@@ -89,7 +89,7 @@ begin
   Result.MinDistance := 32;
 end;
 
-function TGObject.Create(var walker: TWalker; json: TJSONObject): TGObject; static; overload;
+function TObject.Create(var walker: TWalker; json: TJSONObject): TObject; static; overload;
 var
   i, j, l: Integer;
   unique: array of TColorArray;
@@ -97,10 +97,10 @@ var
   best: TBestColor;
 begin
   if json = nil then
-    raise GetDebugLn('TGObject', 'JSON is nil.');
+    raise GetDebugLn('TObject', 'JSON is nil.');
 
   if json.Typ <> EJSONType.OBJ then
-    raise GetDebugLn('TGObject', 'JSON Object expected, got ' + ToStr(json.Typ) + '.');
+    raise GetDebugLn('TObject', 'JSON Object expected, got ' + ToStr(json.Typ) + '.');
 
   with json.Item[Ord(EObjectData.NAME)] do
     if AsString <> 'null' then
@@ -155,11 +155,11 @@ begin
 end;
 
 (*
-## TGObjectArray.Create
+## TObjectArray.Create
 ```pascal
-function TGObjectArray.Create(var walker: TWalker; json: TJSONArray): TGObjectArray; static; overload;
+function TObjectArray.Create(var walker: TWalker; json: TJSONArray): TObjectArray; static; overload;
 ```
-Create function to build your {ref}`TGObjectArray`.
+Create function to build your {ref}`TObjectArray`.
 
 This only accepts a `json` array and it expects a specific json structure which is
 the one that {ref}`Map JSONs` provide.
@@ -169,31 +169,31 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(Map.Walker, ObjectsJSON.GetByName('Bank booth'));
+  objs := TObjectArray.Create(Map.Walker, ObjectsJSON.GetByName('Bank booth'));
 end;
 ```
 *)
-function TGObjectArray.Create(var walker: TWalker; json: TJSONArray): TGObjectArray; static;
+function TObjectArray.Create(var walker: TWalker; json: TJSONArray): TObjectArray; static;
 var
   i: Integer;
 begin
   if json.Typ <> EJSONType.ARR then
-    raise GetDebugLn('TGObject', 'JSON Array expected, got ' + ToStr(json.Typ) + '.');
+    raise GetDebugLn('TObject', 'JSON Array expected, got ' + ToStr(json.Typ) + '.');
 
   SetLength(Result, json.Count);
   for i := 0 to High(Result) do
-    Result[i] := TGObject.Create(walker, json.Item[i]);
+    Result[i] := TObject.Create(walker, json.Item[i]);
 end;
 
 (*
 ## RSObject.Rotation
 ```pascal
-TGObject.Rotations: TIntegerArray;
+TObject.Rotations: TIntegerArray;
 ```
-`Rotations` allows you to customize the rotation of a `TGObject`.
+`Rotations` allows you to customize the rotation of a `TObject`.
 By default unless you used {ref}`ObjectsJSON` to create your object they will
 no rotation set, AKA `0`.
 
@@ -205,10 +205,10 @@ on it's center:
 ```pascal
 {$I WaspLib/main.simba}
 var
-  furnace: TGObject;
+  furnace: TObject;
 begin
   Map.Setup([EChunk.FALADOR]);
-  furnace := TGObject.Create(@Map.Walker, [2, 3, 6], [[7810, 36954]], ['Furnace']);
+  furnace := TObject.Create(@Map.Walker, [2, 3, 6], [[7810, 36954]], ['Furnace']);
   while True do
   begin
     furnace.Rotations[0] += 1;
@@ -224,11 +224,11 @@ end.
 (*
 ## RSObject._GetBounds
 ```pascal
-function TGObject._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians: Single): TCuboid;
+function TObject._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians: Single): TCuboid;
 ```
-Internal helper function for {ref}`TGObject.GetBoundsArray`.
+Internal helper function for {ref}`TObject.GetBoundsArray`.
 *)
-function TGObject._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians, rotation: Single): TPolygon;
+function TObject._GetBounds(me: TPoint; vector: TVector2; size: TVector3; height, radians, rotation: Single): TPolygon;
 var
   corners: TVector3Array;
   pt: TPoint;
@@ -240,9 +240,9 @@ begin
     Exit(Self.Model.GetArea(Projection.ProjectModel(Self.Model, vector.ToVec3(Self.Walker^.Height(pt, False) - height), rotation, radians)));
 
   if Abs(size.X - 0) < 0.005 then
-    raise GetDebugLn('TGObject', 'Your object has a size.X of 0 or is simply too small! An object can''t be ' + ToStr(size.X) + ' tiles wide.');
+    raise GetDebugLn('TObject', 'Your object has a size.X of 0 or is simply too small! An object can''t be ' + ToStr(size.X) + ' tiles wide.');
   if Abs(size.Y - 0) < 0.005 then
-    raise GetDebugLn('TGObject', 'Your object has a size.Y of 0 or is simply too small! An object can''t be ' + ToStr(size.Y) + ' tiles wide.');
+    raise GetDebugLn('TObject', 'Your object has a size.Y of 0 or is simply too small! An object can''t be ' + ToStr(size.Y) + ' tiles wide.');
 
   size.X := size.X*2;
   size.Y := size.Y*2;
@@ -274,7 +274,7 @@ end;
 (*
 ## RSObject.GetBoundsArray
 ```pascal
-function TGObject.GetBoundsArray(me: TPoint; angle: Single = $FFFF): TCuboidArray;
+function TObject.GetBoundsArray(me: TPoint; angle: Single = $FFFF): TCuboidArray;
 ```
 Internal function that returns an array of cuboids of the object if it's
 coordinates are visible on the {ref}`MainScreen`.
@@ -284,11 +284,11 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   cuboids: TCuboidArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   cuboids := objs[1].GetBoundsArray(Map.Position());
   ShowOnTarget(cuboids);
 end.
@@ -297,7 +297,7 @@ end.
 ```{figure} ../../images/objs_cuboids.png
 ```
 *)
-function TGObject.GetBoundsArray(me: TPoint; out coordinates: TPointArray; radians: Single): TPolygonArray;
+function TObject.GetBoundsArray(me: TPoint; out coordinates: TPointArray; radians: Single): TPolygonArray;
 var
   weights: TDoubleArray;
   meLocal, pt: TPoint;
@@ -337,17 +337,17 @@ end;
 (*
 ## RSObject.FindOnMainScreen
 ```pascal
-function TGObject.FindOnMainScreen(cuboidArray: TCuboidArray): T2DPointArray;
+function TObject.FindOnMainScreen(cuboidArray: TCuboidArray): T2DPointArray;
 ```
-Internal TGObject method responsible for filtering a TCuboidArray by what's
+Internal TObject method responsible for filtering a TCuboidArray by what's
 visible in the mainscren.
 
-This is meant to filter {ref}`TGObject.GetBoundsArray` so targets that are
+This is meant to filter {ref}`TObject.GetBoundsArray` so targets that are
 outside of the mainscreen are filtered out.
 
 You will probably never need to use this directly.
 *)
-function TGObject.FindOnMainScreen(out coordinates: TPointArray; boundsArray: TPolygonArray): T2DPointArray;
+function TObject.FindOnMainScreen(out coordinates: TPointArray; boundsArray: TPolygonArray): T2DPointArray;
 var
   i: Integer;
   found: TBooleanArray;
@@ -374,9 +374,9 @@ end;
 (*
 ## RSObject.FindEx
 ```pascal
-function TGObject.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+function TObject.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
 ```
-Internal {ref}`TGObject` method used to find a {ref}`RSObject`.
+Internal {ref}`TObject` method used to find a {ref}`RSObject`.
 If found returns true, if not returns false.
 
 You also have {ref}`RSObject.Find` to find objects, this version of the method
@@ -388,15 +388,15 @@ assuming the object has a {ref}`TColorFinder` setup.
 If not, the cuboids area are returned as the match.
 
 This extra information is easy to see when you debug your object with
-`ShowOnTarget(TGObject)`:
+`ShowOnTarget(TObject)`:
 ```pascal
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   ShowOnTarget(objs[1]);
 end.
 ```
@@ -418,10 +418,10 @@ it would look like:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].Finder := []; //removing the finder for this example.
   ShowOnTarget(objs[1]);
 end.
@@ -430,7 +430,7 @@ end.
 ```{figure} ../../images/objs_nofinder.png
 ```
 *)
-function TGObject.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+function TObject.FindEx(me: TPoint; out boundsArray: TPolygonArray; out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
 begin
   boundsArray := Self.GetBoundsArray(me, coordinates, Minimap.CompassRadians);
   if boundsArray = [] then Exit;
@@ -442,24 +442,24 @@ end;
 (*
 ## RSObject.Find
 ```pascal
-function TGObject.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
-function TGObject.Find(out atpa: T2DPointArray): Boolean; overload;
+function TObject.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+function TObject.Find(out atpa: T2DPointArray): Boolean; overload;
 ```
-{ref}`TGObject` method used to find a {ref}`RSObject`.
+{ref}`TObject` method used to find a {ref}`RSObject`.
 This returns True/False if the object was found and it's `atpa` which cointains
 the colors of it that were found.
 
 For more information on this refer to {ref}`RSObject.FindEx`, it's an internal
 function but is used within this one and will go into more detail.
 *)
-function TGObject.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
+function TObject.Find(out coordinates: TPointArray; out atpa: T2DPointArray): Boolean;
 var
   boundsArray: TPolygonArray;
 begin
   Result := Self.FindEx(Self.Walker^.Position(), boundsArray, coordinates, atpa);
 end;
 
-function TGObject.Find(out atpa: T2DPointArray): Boolean; overload;
+function TObject.Find(out atpa: T2DPointArray): Boolean; overload;
 var
   coordinates: TPointArray;
   boundsArray: TPolygonArray;
@@ -471,11 +471,11 @@ end;
 (*
 ## RSObject.IsVisible
 ```pascal
-function TGObject.IsVisible(): Boolean;
+function TObject.IsVisible(): Boolean;
 ```
 Returns a boolean whether the object is currently visible or not.
 *)
-function TGObject.IsVisible(): Boolean;
+function TObject.IsVisible(): Boolean;
 var
   coordinates: TPointArray;
   boundsArray: TPolygonArray;
@@ -488,7 +488,7 @@ end;
 (*
 ## RSObject.FindFrom
 ```pascal
-function TGObject.FindFrom(position: TPoint; out atpa: T2DPointArray): Boolean;
+function TObject.FindFrom(position: TPoint; out atpa: T2DPointArray): Boolean;
 ```
 This is similar to {ref}`RSObject.Find` but differs from it in that you can set
 your `position`.
@@ -507,11 +507,11 @@ to where you will be after the current obstacle and hover the next one:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].Finder := [];
 
   while True do
@@ -530,7 +530,7 @@ you are at the right coordinate.
 For this I also recommend to not have a `TColorFinder` setup because it will
 only match when you are at the right position.
 *)
-function TGObject.FindFrom(position: TPoint; out atpa: T2DPointArray): Boolean;
+function TObject.FindFrom(position: TPoint; out atpa: T2DPointArray): Boolean;
 var
   boundsArray: TPolygonArray;
   coordinates: TPointArray;
@@ -541,13 +541,13 @@ end;
 (*
 ## RSObject._UpTextCheck
 ```pascal
-function TGObject._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
+function TObject._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
 ```
-Internal `TGObject` helper method that is used by all hovering methods.
+Internal `TObject` helper method that is used by all hovering methods.
 
 You probably don't need to use this directly.
 *)
-function TGObject._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
+function TObject._UpTextCheck(out shouldExit: Boolean; action: TStringArray): Boolean;
 var
   text: String;
 begin
@@ -577,14 +577,14 @@ end;
 (*
 ## RSObject.PreHover
 ```pascal
-function TGObject.PreHover(me: TPoint; attempts: Integer = 2): Boolean;
+function TObject.PreHover(me: TPoint; attempts: Integer = 2): Boolean;
 ```
 To understand what this does it's recommended to read {ref}`RSObject.FindFrom`.
 
 This method basically uses {ref}`RSObject.FindFrom` and moves the
 mouse to one of the matches.
 *)
-function TGObject.PreHover(me: TPoint; attempts: Integer = 2): Boolean;
+function TObject.PreHover(me: TPoint; attempts: Integer = 2): Boolean;
 var
   attempt: Integer;
   atpa: T2DPointArray;
@@ -601,13 +601,13 @@ end;
 (*
 ## RSObject._HoverHelper
 ```pascal
-function TGObject._HoverHelper(strings: TStringArray; attempt, attempts: Integer): Boolean; static;
+function TObject._HoverHelper(strings: TStringArray; attempt, attempts: Integer): Boolean; static;
 ```
-Internal `TGObject` helper method that is used by both {ref}`TGObject.Hover`
+Internal `TObject` helper method that is used by both {ref}`TObject.Hover`
 and {ref}`TEntity.Hover`.
 You probably don't need to use this directly.
 *)
-function TGObject._HoverHelper(strings: TStringArray; attempt, attempts: Integer): Boolean; static;
+function TObject._HoverHelper(strings: TStringArray; attempt, attempts: Integer): Boolean; static;
 begin
   if MainScreen.Bounds.Contains(Mouse.Position) and MainScreen.IsUpText(strings) then
     Exit(True);
@@ -619,13 +619,13 @@ end;
 (*
 ## RSObject._WalkHoverHelper
 ```pascal
-function TGObject._WalkHoverHelper(strings: TStringArray; walker: PRSWalker; dist, attempt, attempts: Integer; coordinates: TPointArray): Boolean; static;
+function TObject._WalkHoverHelper(strings: TStringArray; walker: PRSWalker; dist, attempt, attempts: Integer; coordinates: TPointArray): Boolean; static;
 ```
-Internal `TGObject` helper method that is used by both {ref}`TGObject.WalkHover`
+Internal `TObject` helper method that is used by both {ref}`TObject.WalkHover`
 and {ref}`TEntity.WalkHover`.
 You probably don't need to use this directly.
 *)
-function TGObject._WalkHoverHelper(strings: TStringArray; walker: PRSWalker; dist, attempt, attempts: Integer; coordinates: TPointArray): Boolean; static;
+function TObject._WalkHoverHelper(strings: TStringArray; walker: PRSWalker; dist, attempt, attempts: Integer; coordinates: TPointArray): Boolean; static;
 var
   me, closest: TPoint;
 begin
@@ -655,15 +655,15 @@ end;
 (*
 ## RSObject._ClickHelper
 ```pascal
-function TGObject._ClickHelper(leftClick: Boolean): Boolean;
+function TObject._ClickHelper(leftClick: Boolean): Boolean;
 ```
-Internal `TGObject` helper method that is used by other clicking methods.
+Internal `TObject` helper method that is used by other clicking methods.
 You probably don't need to use this directly.
 
 This is what's responsible for deciding if we click a target we are hovering or
 not.
 *)
-function TGObject._ClickHelper(leftClick: Boolean): Boolean;
+function TObject._ClickHelper(leftClick: Boolean): Boolean;
 begin
   if Self.Walker^.RedClicked then
   begin
@@ -688,16 +688,16 @@ end;
 (*
 ## RSObject._SelectHelper
 ```pascal
-function TGObject._SelectHelper(action: TStringArray): Boolean;
+function TObject._SelectHelper(action: TStringArray): Boolean;
 ```
-Internal TGObject helper method that is used by other select methods.
+Internal TObject helper method that is used by other select methods.
 
 You probably don't need to use this directly.
 
 This is what is responsible for deciding if we just left click a target we are
 hovering or right click it and choose an option.
 *)
-function TGObject._SelectHelper(action: TStringArray): Boolean;
+function TObject._SelectHelper(action: TStringArray): Boolean;
 begin
   if Self.Walker^.RedClicked then
   begin
@@ -718,20 +718,20 @@ end;
 (*
 ## RSObject.Hover
 ```pascal
-function TGObject.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+function TObject.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
 ```
-Method used to hover a TGObject target if it's found on the mainscreen.
+Method used to hover a TObject target if it's found on the mainscreen.
 
 Example:
 ```pascal
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].Hover();
 end.
 ```
@@ -739,7 +739,7 @@ end.
 ```{figure} ../../images/obj_hover.gif
 ```
 *)
-function TGObject.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+function TObject.Hover(action: TStringArray = []; attempts: Integer = 2): Boolean;
 var
   me: TPoint;
   shouldExit: Boolean;
@@ -757,11 +757,11 @@ begin
   end;
 
   if Self.Walker = nil then
-    raise GetDebugLn('TGObject', 'Walker pointer missing.');
+    raise GetDebugLn('TObject', 'Walker pointer missing.');
   if Self.Coordinates = [] then
-    raise GetDebugLn('TGObject', 'Coordinates missing.');
+    raise GetDebugLn('TObject', 'Coordinates missing.');
   if Length(Self.Coordinates) <> Length(Self.Rotations) then
-    raise GetDebugLn('TGObject', 'Coordinates and Rotations don''t match.');
+    raise GetDebugLn('TObject', 'Coordinates and Rotations don''t match.');
 
   me := Self.Walker^.Position();
   if not TWalker.MakePointVisibleEx(me, Self.Coordinates.NearestPoint(me)) then
@@ -790,7 +790,7 @@ begin
       if Self.UpText = [] then Exit(True);
     end;
 
-    if TGObject._HoverHelper(Self.UpText + action, attempt, attempts) then
+    if TObject._HoverHelper(Self.UpText + action, attempt, attempts) then
       Exit(True);
   end;
 end;
@@ -798,9 +798,9 @@ end;
 (*
 ## RSObject.WalkHover
 ```pascal
-function TGObject.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+function TObject.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
 ```
-Method used to walk towards and hover a `TGObject` target if it's found on the
+Method used to walk towards and hover a `TObject` target if it's found on the
 mainscreen.
 
 Example:
@@ -808,11 +808,11 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].WalkHover();
 end.
 ```
@@ -826,7 +826,7 @@ which is why it's not hovering the bank after we finished walking.
 The way this works is that if we successfully hover the bank while walking
 it returns true.
 *)
-function TGObject.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
+function TObject.WalkHover(action: TStringArray = []; attempts: Integer = 2): Boolean;
 var
   me, closest: TPoint;
   coordinates, tpa: TPointArray;
@@ -884,7 +884,7 @@ begin
         Sleep(50); //give uptext 1~ frame time to update
       end;
 
-      if TGObject._WalkHoverHelper(Self.UpText + action, Self.Walker, Self.MinDistance, attempt, attempts, Self.Coordinates) then
+      if TObject._WalkHoverHelper(Self.UpText + action, Self.Walker, Self.MinDistance, attempt, attempts, Self.Coordinates) then
         Exit(True);
     end;
   finally
@@ -897,20 +897,20 @@ end;
 (*
 ## RSObject.Click
 ```pascal
-function TGObject.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+function TObject.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
 ```
-Method used to click a `TGObject` target if it's found on the mainscreen.
+Method used to click a `TObject` target if it's found on the mainscreen.
 
 Example:
 ```pascal
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].Click();
 end.
 ```
@@ -918,7 +918,7 @@ end.
 ```{figure} ../../images/obj_click.gif
 ```
 *)
-function TGObject.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+function TObject.Click(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
 begin
   Result := Self.Hover([], attempts) and Self._ClickHelper(leftClick);
 end;
@@ -926,9 +926,9 @@ end;
 (*
 ## RSObject.Interact
 ```pascal
-function TGObject.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
+function TObject.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
 ```
-Method used to select an option on a `TGObject` target if it's found on the
+Method used to select an option on a `TObject` target if it's found on the
 mainscreen.
 
 Through `action` you can specify the interaction you are looking for.
@@ -940,11 +940,11 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].Interact(['Collect']);
 end.
 ```
@@ -952,7 +952,7 @@ end.
 ```{figure} ../../images/obj_select.gif
 ```
 *)
-function TGObject.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
+function TObject.Interact(action: TStringArray; attempts: Integer = 2): Boolean;
 begin
   Result := Self.Hover(action, attempts) and Self._SelectHelper(action);
 end;
@@ -961,9 +961,9 @@ end;
 (*
 ## RSObject.WalkClick
 ```pascal
-function TGObject.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+function TObject.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
 ```
-Method used to walk towards and click a `TGObject` target if it's found on the
+Method used to walk towards and click a `TObject` target if it's found on the
 mainscreen.
 
 Example:
@@ -971,11 +971,11 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].WalkClick();
 end.
 ```
@@ -983,14 +983,14 @@ end.
 ```{figure} ../../images/obj_walkclick.gif
 ```
 *)
-function TGObject.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
+function TObject.WalkClick(leftClick: Boolean = True; attempts: Integer = 2): Boolean;
 begin
   if Self.Walker = nil then
-    raise GetDebugLn('TGObject', 'Walker pointer missing.');
+    raise GetDebugLn('TObject', 'Walker pointer missing.');
   if Self.Coordinates = [] then
-    raise GetDebugLn('TGObject', 'Coordinates missing.');
+    raise GetDebugLn('TObject', 'Coordinates missing.');
   if Length(Self.Coordinates) <> Length(Self.Rotations) then
-    raise GetDebugLn('TGObject', 'Coordinates and Rotations don''t match.');
+    raise GetDebugLn('TObject', 'Coordinates and Rotations don''t match.');
 
   Result := Self.WalkHover([], attempts) and Self._ClickHelper(leftClick);
 end;
@@ -998,9 +998,9 @@ end;
 (*
 ## RSObject.WalkInteract
 ```pascal
-function TGObject.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
+function TObject.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
 ```
-Method used to walk towards and select an option on a `TGObject` target if it's
+Method used to walk towards and select an option on a `TObject` target if it's
 found on the mainscreen.
 
 Through `action` you can specify the interaction you are looking for.
@@ -1012,11 +1012,11 @@ Example:
 {$I WaspLib/main.simba}
 
 var
-  objs: TGObjectArray;
+  objs: TObjectArray;
   atpa: T2DPointArray;
 begin
   Map.Setup([EChunk.VARROCK]);
-  objs := TGObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
+  objs := TObjectArray.Create(ObjectsJSON.GetByAction('Bank'));
   objs[1].WalkInteract(['Collect']);
 end.
 ```
@@ -1024,14 +1024,14 @@ end.
 ```{figure} ../../images/obj_walkselect.gif
 ```
 *)
-function TGObject.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
+function TObject.WalkInteract(action: TStringArray; attempts: Integer = 2): Boolean;
 begin
   if Self.Walker = nil then
-    raise GetDebugLn('TGObject', 'Walker pointer missing.');
+    raise GetDebugLn('TObject', 'Walker pointer missing.');
   if Self.Coordinates = [] then
-    raise GetDebugLn('TGObject', 'Coordinates missing.');
+    raise GetDebugLn('TObject', 'Coordinates missing.');
   if Length(Self.Coordinates) <> Length(Self.Rotations) then
-    raise GetDebugLn('TGObject', 'Coordinates and Rotations don''t match.');
+    raise GetDebugLn('TObject', 'Coordinates and Rotations don''t match.');
 
   Result := Self.WalkHover(action, attempts);
   Result := Result and Self._SelectHelper(action);
@@ -1041,7 +1041,7 @@ end;
 (*
 ## RSObject.DistanceTo
 ```pascal
-function TGObject.DistanceTo(pt: TPoint): Double;
+function TObject.DistanceTo(pt: TPoint): Double;
 ```
 Returns the distance of an object to you. Because {ref}`Objects` can have
 multiple coordinates, only the closest one is considered for the calculation.
@@ -1058,7 +1058,7 @@ else
   bankChest.WalkClick();
 ```
 *)
-function TGObject.DistanceTo(pt: TPoint): Double;
+function TObject.DistanceTo(pt: TPoint): Double;
 var
   dist: Double;
   i: Integer;
@@ -1075,14 +1075,14 @@ end;
 (*
 ## RSObjectArray.ClosestIndex
 ```pascal
-function TGObjectArray.ClosestIndex(pt: TPoint): Integer;
+function TObjectArray.ClosestIndex(pt: TPoint): Integer;
 ```
-Returns the index of the `TGObjectArray` which is closest to you.
+Returns the index of the `TObjectArray` which is closest to you.
 
 Uses {ref}`RSObject.DistanceTo` on each of the indices of the current
-`TGObjectArray` and returns the closest index.
+`TObjectArray` and returns the closest index.
 *)
-function TGObjectArray.ClosestIndex(pt: TPoint): Integer;
+function TObjectArray.ClosestIndex(pt: TPoint): Integer;
 var
   closest, dist: Double;
   i, j: Integer;
@@ -1102,12 +1102,12 @@ end;
 (*
 ## DrawObject
 ```pascal
-procedure TImage.DrawObject(const obj: TGObject; alpha: Byte = $C8);
-procedure TExternalCanvas.DrawObject(const obj: TGObject; alpha: Byte = $C8);
+procedure TImage.DrawObject(const obj: TObject; alpha: Byte = $C8);
+procedure TExternalCanvas.DrawObject(const obj: TObject; alpha: Byte = $C8);
 ```
-Helper methods to debug TGObjects.
+Helper methods to debug TObjects.
 *)
-procedure TImage.DrawObject(const obj: TGObject; alpha: Byte = $C8);
+procedure TImage.DrawObject(const obj: TObject; alpha: Byte = $C8);
 var
   atpa: T2DPointArray;
   boundsArray: TPolygonArray;
@@ -1134,7 +1134,7 @@ begin
     Self.DrawTPA(TPointArray(boundsArray[i]).Edges());
 end;
 
-procedure TExternalCanvas.DrawObject(const obj: TGObject; alpha: Byte = $C8);
+procedure TExternalCanvas.DrawObject(const obj: TObject; alpha: Byte = $C8);
 var
   atpa: T2DPointArray;
   boundsArray: TPolygonArray;
@@ -1163,13 +1163,13 @@ end;
 
 
 (*
-## ShowOnTarget TGObject
+## ShowOnTarget TObject
 ```pascal
-procedure ShowOnTarget(obj: TGObject); overload;
+procedure ShowOnTarget(obj: TObject); overload;
 ```
-Shows an image of the target with the `TGObject` drawn on it.
+Shows an image of the target with the `TObject` drawn on it.
 *)
-procedure ShowOnTarget(obj: TGObject); overload;
+procedure ShowOnTarget(obj: TObject); overload;
 var
   img: TImage;
 begin
@@ -1179,13 +1179,13 @@ begin
 end;
 
 (*
-## ShowOnTarget TGObjectArray
+## ShowOnTarget TObjectArray
 ```pascal
-procedure ShowOnTarget(objs: TGObjectArray); overload;
+procedure ShowOnTarget(objs: TObjectArray); overload;
 ```
-Shows an image of the target with the `TGObjectArray` drawn on it.
+Shows an image of the target with the `TObjectArray` drawn on it.
 *)
-procedure ShowOnTarget(objs: TGObjectArray); overload;
+procedure ShowOnTarget(objs: TObjectArray); overload;
 var
   img: TImage;
   i: Integer;
@@ -1196,7 +1196,7 @@ begin
   img.Show();
 end;
 
-function ToString(constref obj: TGObject): String; override;
+function ToString(constref obj: TObject): String; override;
 begin
   Result := '[' + ToString(obj.UpText) + ', ' +
                   ToString(obj.Size) + ', ' +
