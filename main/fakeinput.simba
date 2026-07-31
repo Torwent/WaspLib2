@@ -199,7 +199,7 @@ var
 {$ENDIF}
 begin
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Client.Client of
+  case Client.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL:
       if WaspInput.Target <> nil then
@@ -249,7 +249,7 @@ WriteLm Client.IsInputEnabled();
 function TClient.IsInputEnabled(): Boolean;
 begin
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Client.Client of
+  case Client.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL: if WaspInput.Target <> nil then Exit(GetInputState());
     {$ENDIF}
@@ -278,7 +278,7 @@ Client.DisableRealInput();
 procedure TClient.DisableRealInput();
 begin
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Client.Client of
+  case Client.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL: if WaspInput.Target <> nil then SetInputState(False);
     {$ENDIF}
@@ -309,7 +309,7 @@ Client.EnableRealInput();
 procedure TClient.EnableRealInput();
 begin
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Client.Client of
+  case Client.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL: if WaspInput.Target <> nil then SetInputState(True);
     {$ENDIF}
@@ -342,7 +342,7 @@ Client.InjectInput();
 procedure TClient.InjectInput();
 begin
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Self.Client of
+  case Self.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL: WaspInput.Setup();
     {$ENDIF}

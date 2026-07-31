@@ -8,7 +8,7 @@ var
   t: UInt64;
 {$ENDIF}
 begin
-  if Client.Client = EClient.UNKNOWN then
+  if Client.Typ = EClient.UNKNOWN then
     Exit;
 
   {$IFDEF WL_DEBUG_INTERFACES}
@@ -180,9 +180,9 @@ begin
   WebGraphGenerator.Setup(16, 12);
 
   {$IFDEF WL_TEST}
-  Client.Client := EClient.RUNELITE;
+  Client.Typ := EClient.RUNELITE;
   {$ELSE}
-  Client.Client := Client.GetClient();
+  Client.Typ := Client.GetClient();
   Client.InjectInput();
   {$ENDIF}
 

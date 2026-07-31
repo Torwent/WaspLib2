@@ -1182,8 +1182,8 @@ var
   y,x: Integer;
   color0, color1: TColor;
 begin
-  color0 := COLORS[Client.Client][dot][0];
-  color1 := COLORS[Client.Client][dot][1];
+  color0 := COLORS[Client.Typ][dot][0];
+  color1 := COLORS[Client.Typ][dot][1];
 
   for y := 0 to img.Height-2 do
     for x := 0 to img.Width-2 do

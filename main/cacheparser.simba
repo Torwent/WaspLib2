@@ -51,7 +51,7 @@ var
   paths: TStringArray;
 {$ENDIF}
 begin
-  case Client.Client of
+  case Client.Typ of
     EClient.LEGACY:
     begin
       {$IFDEF WINDOWS}

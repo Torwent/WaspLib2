@@ -55,7 +55,7 @@ begin
   Self.BottomRight := Self.Bounds.BottomRight;
   Self.BottomLeft  := Self.Bounds.BottomLeft;
 
-  if Client.Client = EClient.OFFICIAL then
+  if Client.Typ = EClient.OFFICIAL then
   begin
     Self.UptextBounds.X1 := Self.Bounds.X1;
     Self.UptextBounds.Y1 := Self.Bounds.Y1 + 1;

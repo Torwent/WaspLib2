@@ -45,7 +45,7 @@ Record representing the RuneScape client ({ref}`Client`.
   PClient = ^TClient;
 
   TClient = record
-    Client: EClient;
+    Typ: EClient;
     Mode: EMode;
     Canvas: TExternalCanvas;
     OnLogin: array of procedure (sender: PClient; mode: EMode) of object;
@@ -215,7 +215,7 @@ var
   img: TImage;
   b: TBox;
 begin
-  if Self.Client <> EClient.OFFICIAL then
+  if Self.Typ <> EClient.OFFICIAL then
     Exit(Target.Bounds);
 
   img := Target.GetImage();
@@ -246,7 +246,7 @@ function TClient.GetMode(): EMode;
 var
   bounds: TBox;
 begin
-  if Self.Client = EClient.UNKNOWN then
+  if Self.Typ = EClient.UNKNOWN then
     Exit;
 
   bounds := Self.Bounds;
@@ -395,7 +395,7 @@ var
   bounds: TBox;
   font: ^TPixelFont;
 begin
-  case Self.Client of
+  case Self.Typ of
     EClient.OFFICIAL: font := @Fonts.PLAIN_12;
     EClient.RUNELITE: font := @Fonts.SMALL;
     else Exit;
@@ -408,10 +408,10 @@ begin
   Result := OCR.RecognizeShadow(bounds, font^, 0);
 end;
 
-
 var
 (*
 ## Client variable
 Global {ref}`TClient` variable.
 *)
   Client: TClient;
+

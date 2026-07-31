@@ -287,7 +287,7 @@ begin
   Self.Target := new TTarget();
 
   {$IFNDEF WL_DISABLE_FAKE_INPUT}
-  case Client.Client of
+  case Client.Typ of
     {$IFDEF WINDOWS}
     EClient.OFFICIAL:
       Self.Target.SetPlugin(
